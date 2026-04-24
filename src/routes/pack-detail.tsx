@@ -180,7 +180,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const changelog = useQuery({
     queryKey: ["pack-changelog", packId, lastSyncedCommit],
-    queryFn: () => tauri.packChangelog(packId, 12, lastSyncedCommit),
+    queryFn: () => tauri.packChangelog(packId, 12),
     retry: false,
   });
   const launchProfile = useQuery({
@@ -209,7 +209,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     deletedMods.length === 0 &&
     unpublishedMods.length === 0 &&
     syncedModCount === manifest.data.mods.length;
-  const highlightedCommitCount = launchRiskCount > 0 ? 3 : 1;
+  const highlightedCommitCount = (() => {
+    const entries = changelog.data ?? [];
+    if (entries.length === 0) return 0;
+    if (!lastSyncedCommit) return 1;
+
+    const syncedIndex = entries.findIndex((entry) => entry.commitSha === lastSyncedCommit);
+    if (syncedIndex === 0) return 1;
+    if (syncedIndex > 0) return syncedIndex;
+    return entries.length;
+  })();
 
   useEffect(() => {
     if (!changelog.data?.length) return;
@@ -358,6 +367,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Java install failed", { description: formatError(error) });
     },
   });
+  const showJavaInstallProgress = installJava.isPending;
 
   const publishScan = useMutation({
     mutationFn: () => tauri.scanInstancePublish(packId),
@@ -814,72 +824,79 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <DialogHeader>
             <DialogTitle>INSTALL JAVA</DialogTitle>
             <DialogDescription>
-              NeoForge 1.21.1 + Fabric 1.21.1 run on Java 21. Pick managed Adoptium runtime to download.
+              {showJavaInstallProgress
+                ? "Downloading managed Adoptium runtime now."
+                : "NeoForge 1.21.1 + Fabric 1.21.1 run on Java 21. Pick managed Adoptium runtime to download."}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
-            <div className="grid gap-3">
-              {javaChoices.map((choice) => {
-                const selected = selectedJavaChoiceId === choice.id;
-
-                return (
-                  <button
-                    key={choice.id}
-                    type="button"
-                    onClick={() => setSelectedJavaChoiceId(choice.id)}
-                    className={cn(
-                      "grid gap-2 border px-4 py-4 text-left transition-colors",
-                      selected
-                        ? "border-brand-core bg-brand-core/10"
-                        : "border-line-soft/20 bg-surface-sunken/60 hover:border-brand-core/40 hover:bg-brand-core/5",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-heading text-sm text-text-high">{choice.title}</span>
-                        {choice.recommended ? <Badge variant="default">RECOMMENDED</Badge> : null}
-                      </div>
-                      <span className="font-mono text-xs text-text-low">JAVA {choice.major}</span>
+            {showJavaInstallProgress ? (
+              <div className="flex flex-col gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
+                <div className="flex items-center justify-between gap-3 text-xs text-text-low">
+                  <span className="font-heading uppercase tracking-[0.18em]">INSTALL PROGRESS</span>
+                  <span className="font-mono">{javaInstallProgress?.progress ?? 0}%</span>
+                </div>
+                <div className="h-2 overflow-hidden border border-line-soft/30 bg-surface">
+                  <div
+                    className="h-full bg-brand-core transition-[width] duration-200"
+                    style={{ width: `${Math.max(javaInstallProgress?.progress ?? 0, 4)}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 text-[11px] text-text-low">
+                  <span>{javaInstallProgress?.stage?.toUpperCase() ?? "QUEUED"}</span>
+                  <span>
+                    {javaInstallProgress?.currentBytes != null
+                      ? `${formatByteCount(javaInstallProgress.currentBytes)}${javaInstallProgress.totalBytes != null ? ` / ${formatByteCount(javaInstallProgress.totalBytes)}` : ""}`
+                      : ""}
+                  </span>
+                </div>
+                <div className="max-h-56 overflow-y-auto border border-line-soft/20 bg-black/30 p-3 font-mono text-[11px] text-text-low">
+                  {javaInstallLogs.length > 0 ? (
+                    <div className="flex flex-col gap-1.5">
+                      {javaInstallLogs.map((line, index) => (
+                        <span key={`java-install-log:${index}`}>{line}</span>
+                      ))}
                     </div>
-                    <p className="text-sm text-text-low">{choice.detail}</p>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-4 text-xs text-text-low">
-              This downloads Temurin into modsync app data and points launch profile at installed binary. Prism auto mode stays separate.
-            </p>
-            <div className="mt-4 flex flex-col gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
-              <div className="flex items-center justify-between gap-3 text-xs text-text-low">
-                <span className="font-heading uppercase tracking-[0.18em]">INSTALL PROGRESS</span>
-                <span className="font-mono">{javaInstallProgress?.progress ?? 0}%</span>
+                  ) : (
+                    <span>Waiting for install output...</span>
+                  )}
+                </div>
               </div>
-              <div className="h-2 overflow-hidden border border-line-soft/30 bg-surface">
-                <div
-                  className="h-full bg-brand-core transition-[width] duration-200"
-                  style={{ width: `${Math.max(javaInstallProgress?.progress ?? 0, installJava.isPending ? 4 : 0)}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3 text-[11px] text-text-low">
-                <span>{javaInstallProgress?.stage?.toUpperCase() ?? "IDLE"}</span>
-                <span>
-                  {javaInstallProgress?.currentBytes != null
-                    ? `${formatByteCount(javaInstallProgress.currentBytes)}${javaInstallProgress.totalBytes != null ? ` / ${formatByteCount(javaInstallProgress.totalBytes)}` : ""}`
-                    : ""}
-                </span>
-              </div>
-              <div className="max-h-40 overflow-y-auto border border-line-soft/20 bg-black/30 p-3 font-mono text-[11px] text-text-low">
-                {javaInstallLogs.length > 0 ? (
-                  <div className="flex flex-col gap-1.5">
-                    {javaInstallLogs.map((line, index) => (
-                      <span key={`java-install-log:${index}`}>{line}</span>
-                    ))}
-                  </div>
-                ) : (
-                  <span>No install activity yet.</span>
-                )}
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="grid gap-3">
+                  {javaChoices.map((choice) => {
+                    const selected = selectedJavaChoiceId === choice.id;
+
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        onClick={() => setSelectedJavaChoiceId(choice.id)}
+                        className={cn(
+                          "grid gap-2 border px-4 py-4 text-left transition-colors",
+                          selected
+                            ? "border-brand-core bg-brand-core/10"
+                            : "border-line-soft/20 bg-surface-sunken/60 hover:border-brand-core/40 hover:bg-brand-core/5",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-heading text-sm text-text-high">{choice.title}</span>
+                            {choice.recommended ? <Badge variant="default">RECOMMENDED</Badge> : null}
+                          </div>
+                          <span className="font-mono text-xs text-text-low">JAVA {choice.major}</span>
+                        </div>
+                        <p className="text-sm text-text-low">{choice.detail}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-4 text-xs text-text-low">
+                  This downloads Temurin into modsync app data and points launch profile at installed binary. Prism auto mode stays separate.
+                </p>
+              </>
+            )}
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
             <Button variant="secondary" onClick={() => setJavaInstallOpen(false)} disabled={installJava.isPending}>
