@@ -1,5 +1,6 @@
 {
   "name": "modsync-example",
+  "icon": "https://example.com/icon32x32.png",
   "version": "0.1.0",
   "mcVersion": "1.21.1",
   "loader": "fabric",

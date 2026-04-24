@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PackIcon } from "@/components/pack-icon";
 import { formatError } from "@/lib/format-error";
 import { type PackSummary, tauri } from "@/lib/tauri";
 import { useNav } from "@/stores/nav-store";
@@ -156,24 +157,32 @@ function PackCard({ pack }: { pack: PackSummary }) {
       onClick={() => go({ kind: "pack", id: pack.id })}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="cp-tactical-label truncate text-[--text-high] text-sm">
-            {manifest.data?.pack.name ?? pack.id}
-          </p>
-          <p className="truncate font-mono text-[--text-low] text-xs">
-            {pack.head_sha.slice(0, 10)} · {pack.path}
-          </p>
-          {manifest.data && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Badge variant="outline">v{manifest.data.pack.version}</Badge>
-              <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
-              <Badge variant="outline">{manifest.data.pack.loader.toUpperCase()}</Badge>
-              <Badge variant="outline">{manifest.data.mods.length} MODS</Badge>
-            </div>
-          )}
-          {manifest.isError && (
-            <p className="cp-tactical-label mt-2 text-[--signal-alert] text-xs">NO MANIFEST.JSON</p>
-          )}
+        <div className="flex min-w-0 flex-1 items-start gap-4">
+          <PackIcon
+            iconUrl={manifest.data?.pack.icon}
+            name={manifest.data?.pack.name ?? pack.id}
+            className="mt-0.5 size-14 shrink-0"
+            fallbackClassName="size-6"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="cp-tactical-label truncate text-[--text-high] text-sm">
+              {manifest.data?.pack.name ?? pack.id}
+            </p>
+            <p className="truncate font-mono text-[--text-low] text-xs">
+              {pack.head_sha.slice(0, 10)} · {pack.path}
+            </p>
+            {manifest.data && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="outline">v{manifest.data.pack.version}</Badge>
+                <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
+                <Badge variant="outline">{manifest.data.pack.loader.toUpperCase()}</Badge>
+                <Badge variant="outline">{manifest.data.mods.length} MODS</Badge>
+              </div>
+            )}
+            {manifest.isError && (
+              <p className="cp-tactical-label mt-2 text-[--signal-alert] text-xs">NO MANIFEST.JSON</p>
+            )}
+          </div>
         </div>
         <ChevronRight className="size-5 text-[--text-low]" />
       </div>

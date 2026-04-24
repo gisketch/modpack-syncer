@@ -186,7 +186,7 @@ pub fn save_settings(settings: PrismSettings) -> Result<PrismSettings, PrismErro
 pub fn load_launch_profile(pack_id: &str) -> Result<LaunchProfile, PrismError> {
     let path = paths::launch_profile_path(pack_id)?;
     if !path.exists() {
-        return Ok(LaunchProfile::default());
+        return Ok(default_launch_profile()?);
     }
     let bytes = std::fs::read(path)?;
     let profile = serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
@@ -216,6 +216,36 @@ pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
         }
     }
     Ok(false)
+}
+
+fn default_launch_profile() -> Result<LaunchProfile, PrismError> {
+    if let Some(java_path) = preferred_managed_java_path()? {
+        return Ok(LaunchProfile {
+            java_path: Some(java_path),
+            auto_java: false,
+            ..LaunchProfile::default()
+        });
+    }
+
+    Ok(LaunchProfile::default())
+}
+
+fn preferred_managed_java_path() -> Result<Option<String>, PrismError> {
+    let mut runtimes = std::fs::read_dir(paths::managed_java_runtimes_dir()?)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+
+    runtimes.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+
+    for runtime in runtimes {
+        if let Some(java_path) = find_java_binary(&runtime) {
+            return Ok(Some(java_path.to_string_lossy().to_string()));
+        }
+    }
+
+    Ok(None)
 }
 
 pub fn clear_onboarding_settings(major: u32) -> Result<PrismSettings, PrismError> {

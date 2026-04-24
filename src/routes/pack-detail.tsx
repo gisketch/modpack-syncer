@@ -1,11 +1,12 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { exeExtension } from "@tauri-apps/plugin-os";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   AlertTriangle,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   Check,
@@ -31,6 +32,7 @@ import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PackIcon } from "@/components/pack-icon";
 import {
   Card,
   CardContent,
@@ -132,8 +134,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
-  const [expandedChangelog, setExpandedChangelog] = useState<Record<string, boolean>>({});
-  const [showAllChangelog, setShowAllChangelog] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [activeChangelogIndex, setActiveChangelogIndex] = useState(0);
   const [publishLogs, setPublishLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
@@ -209,29 +211,20 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     deletedMods.length === 0 &&
     unpublishedMods.length === 0 &&
     syncedModCount === manifest.data.mods.length;
-  const highlightedCommitCount = (() => {
+  const newUpdateCount = (() => {
     const entries = changelog.data ?? [];
     if (entries.length === 0) return 0;
     if (!lastSyncedCommit) return 1;
 
     const syncedIndex = entries.findIndex((entry) => entry.commitSha === lastSyncedCommit);
-    if (syncedIndex === 0) return 1;
+    if (syncedIndex === 0) return 0;
     if (syncedIndex > 0) return syncedIndex;
     return entries.length;
   })();
 
   useEffect(() => {
-    if (!changelog.data?.length) return;
-    setExpandedChangelog(
-      Object.fromEntries(
-        changelog.data.map((entry, index) => [entry.commitSha, index < highlightedCommitCount]),
-      ),
-    );
-  }, [changelog.data, highlightedCommitCount]);
-
-  useEffect(() => {
-    setShowAllChangelog(false);
-  }, [packId, highlightedCommitCount]);
+    setActiveChangelogIndex(0);
+  }, [packId, changelog.data?.length, lastSyncedCommit]);
 
   useEffect(() => {
     if (!launchProfile.data) return;
@@ -245,9 +238,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }, [javaChoices, selectedJavaChoiceId]);
 
   const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
-  const visibleChangelogEntries = (changelog.data ?? []).filter(
-    (_, index) => showAllChangelog || index < highlightedCommitCount,
-  );
+  const activeChangelogEntry = changelog.data?.[activeChangelogIndex] ?? null;
   const progressEntry = progress?.filename
     ? (manifest.data?.mods.find((m) => m.filename === progress.filename) ?? null)
     : null;
@@ -498,7 +489,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   async function handleOpenInstanceFolder() {
     if (!instanceDir.data) return;
     try {
-      await openPath(instanceDir.data);
+      await revealItemInDir(instanceDir.data);
     } catch (error) {
       toast.error("Open folder failed", { description: formatError(error) });
     }
@@ -542,26 +533,34 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       </div>
 
       <header className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl text-text-high">{manifest.data?.pack.name ?? packId}</h1>
-          {manifest.data && (
-            <div className="flex flex-wrap gap-2">
-              <Badge>v{manifest.data.pack.version}</Badge>
-              <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
-              <Badge variant="outline">
-                {manifest.data.pack.loader.toUpperCase()} {manifest.data.pack.loaderVersion}
-              </Badge>
-              <Badge variant="outline">
-                <Package className="size-3" />
-                {manifest.data.mods.length} mods
-              </Badge>
-            </div>
-          )}
-          {pack.data && (
-            <p className="font-mono text-[--text-low] text-xs">
-              {pack.data.head_sha.slice(0, 10)} :: {pack.data.url}
-            </p>
-          )}
+        <div className="flex items-start gap-4">
+          <PackIcon
+            iconUrl={manifest.data?.pack.icon}
+            name={manifest.data?.pack.name ?? packId}
+            className="size-20 shrink-0"
+            fallbackClassName="size-8"
+          />
+          <div className="flex flex-col gap-2">
+            <h1 className="text-3xl text-text-high [text-wrap:balance]">{manifest.data?.pack.name ?? packId}</h1>
+            {manifest.data && (
+              <div className="flex flex-wrap gap-2">
+                <Badge>v{manifest.data.pack.version}</Badge>
+                <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
+                <Badge variant="outline">
+                  {manifest.data.pack.loader.toUpperCase()} {manifest.data.pack.loaderVersion}
+                </Badge>
+                <Badge variant="outline">
+                  <Package className="size-3" />
+                  {manifest.data.mods.length} mods
+                </Badge>
+              </div>
+            )}
+            {pack.data && (
+              <p className="font-mono text-[--text-low] text-xs">
+                {pack.data.head_sha.slice(0, 10)} :: {pack.data.url}
+              </p>
+            )}
+          </div>
         </div>
         <div className="flex gap-2">
           <Button
@@ -643,59 +642,42 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </Alert>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>CHANGELOG</CardTitle>
-          <CardDescription>Recent pack commits grouped by change type</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <Button
+        variant="outline"
+        onClick={() => setChangelogOpen(true)}
+        className={cn(
+          "h-auto w-full justify-between gap-4 px-5 py-4 text-left text-text-high",
+          newUpdateCount > 0 &&
+            "border-brand-core/35 bg-brand-core/10 shadow-[0_0_24px_rgba(84,208,150,0.16)] hover:border-brand-core/45 hover:bg-brand-core/14 hover:text-text-high",
+        )}
+      >
+        <div className="flex flex-col items-start gap-1">
+          <span className={cn("cp-tactical-label text-[10px]", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")}>
+            PACK UPDATES
+          </span>
+          <span className="text-sm text-text-low">View what changed since last sync</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {newUpdateCount > 0 && !changelog.isLoading ? (
+            <span className="size-2 shrink-0 rounded-full bg-brand-core shadow-[0_0_12px_rgba(84,208,150,0.65)]" />
+          ) : null}
+          <span
+            className={cn(
+              "text-right text-[10px] uppercase tracking-[0.18em]",
+              newUpdateCount > 0 ? "text-brand-core" : "text-text-low",
+            )}
+          >
+            {changelog.isLoading
+              ? "LOADING"
+              : formatChangelogSummary(newUpdateCount, changelog.data?.length ?? 0)}
+          </span>
           {changelog.isLoading ? (
-            <div className="flex items-center gap-3 py-4 text-text-low">
-              <Loader2 className="size-4 animate-spin text-brand-core" />
-              <span className="text-sm">Loading commit history</span>
-            </div>
-          ) : changelog.data?.length ? (
-            <div className="flex flex-col gap-4">
-              <ScrollArea className={cn(showAllChangelog ? "h-[320px] pr-4" : "pr-4")}>
-                <div className="flex flex-col gap-4">
-                  {visibleChangelogEntries.map((entry) => {
-                    const originalIndex = (changelog.data ?? []).findIndex(
-                      (candidate) => candidate.commitSha === entry.commitSha,
-                    );
-                    const highlighted = originalIndex > -1 && originalIndex < highlightedCommitCount;
-                    const expanded = expandedChangelog[entry.commitSha] ?? highlighted;
-                    return (
-                      <ChangelogCard
-                        key={entry.commitSha}
-                        entry={entry}
-                        expanded={expanded}
-                        highlighted={highlighted}
-                        onToggle={() =>
-                          setExpandedChangelog((current) => ({
-                            ...current,
-                            [entry.commitSha]: !(current[entry.commitSha] ?? highlighted),
-                          }))
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-              {(changelog.data?.length ?? 0) > highlightedCommitCount ? (
-                <Button
-                  variant="outline"
-                  onClick={() => setShowAllChangelog((value) => !value)}
-                  className="w-full"
-                >
-                  {showAllChangelog ? "HIDE OLD CHANGELOGS" : "SHOW MORE..."}
-                </Button>
-              ) : null}
-            </div>
+            <Loader2 className="size-4 animate-spin text-brand-core" />
           ) : (
-            <p className="text-sm text-text-low">No recent commits found.</p>
+            <ChevronRight className={cn("size-4", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")} />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Button>
 
       {manifest.data && (
         <Card>
@@ -778,6 +760,74 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       />
 
       <AddModDialog open={addModsOpen} onClose={() => setAddModsOpen(false)} packId={packId} />
+
+      <Dialog open={changelogOpen} onOpenChange={setChangelogOpen}>
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
+          <DialogHeader>
+            <DialogTitle>PACK UPDATES</DialogTitle>
+            <DialogDescription>Recent changes for this pack</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="flex min-h-0 flex-col gap-4 overflow-hidden p-5 xl:p-6">
+            {changelog.isLoading ? (
+              <div className="flex items-center gap-3 py-4 text-text-low">
+                <Loader2 className="size-4 animate-spin text-brand-core" />
+                <span className="text-sm">Loading commit history</span>
+              </div>
+            ) : activeChangelogEntry ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => setActiveChangelogIndex((current) => Math.max(current - 1, 0))}
+                    disabled={activeChangelogIndex === 0}
+                  >
+                    <ChevronLeft /> NEWER
+                  </Button>
+                  <div className="flex flex-col items-center gap-1 text-center">
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                      {activeChangelogIndex + 1} / {changelog.data?.length ?? 0}
+                    </span>
+                    <span className="text-xs text-text-low">
+                      {activeChangelogIndex < newUpdateCount ? "NEW UPDATE" : "HISTORY"}
+                    </span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      setActiveChangelogIndex((current) =>
+                        Math.min(current + 1, (changelog.data?.length ?? 1) - 1),
+                      )
+                    }
+                    disabled={activeChangelogIndex >= (changelog.data?.length ?? 1) - 1}
+                  >
+                    OLDER <ChevronRight />
+                  </Button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <ScrollArea className="h-full pr-4">
+                    <div className="min-h-[28rem] pb-1">
+                      <ChangelogCard
+                        entry={activeChangelogEntry}
+                        expanded
+                        highlighted={activeChangelogIndex < newUpdateCount}
+                        collapsible={false}
+                        className="min-h-[28rem]"
+                      />
+                    </div>
+                  </ScrollArea>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-text-low">No recent commits found.</p>
+            )}
+          </DialogBody>
+          <DialogFooter className="px-6 py-4">
+            <Button variant="secondary" onClick={() => setChangelogOpen(false)}>
+              CLOSE
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
         <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
@@ -1953,31 +2003,37 @@ function ChangelogCard({
   expanded,
   highlighted,
   onToggle,
+  collapsible = true,
+  className,
 }: {
   entry: PackChangelogEntry;
   expanded: boolean;
   highlighted: boolean;
-  onToggle: () => void;
+  onToggle?: () => void;
+  collapsible?: boolean;
+  className?: string;
 }) {
   return (
     <Card
       variant="window"
       highlighted={highlighted}
       size="sm"
-      className={cn(highlighted && "bg-surface-panel-strong/80")}
+      className={cn("h-full", highlighted && "bg-surface-panel-strong/80", className)}
     >
       <CardWindowBar className="px-0 py-0">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left"
-        >
+        <div className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left">
           <div className="flex items-center gap-3">
             <CardWindowTab>UPDATE {entry.packVersion}</CardWindowTab>
             <p className="truncate text-[10px] text-text-low">{formatGmt8(entry.committedAt)}</p>
           </div>
-          {expanded ? <ChevronDown className="size-4 text-text-low" /> : <ChevronRight className="size-4 text-text-low" />}
-        </button>
+          {collapsible ? (
+            <button type="button" onClick={onToggle} className="text-text-low">
+              {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            </button>
+          ) : highlighted ? (
+            <Badge>NEW</Badge>
+          ) : null}
+        </div>
       </CardWindowBar>
 
       {expanded ? (
@@ -2069,6 +2125,16 @@ function formatChangelogHeading(item: PackChangelogItem) {
                 ? "Root File"
                 : "Root Files";
   return `${action} ${item.count} ${category}`;
+}
+
+function formatChangelogSummary(newUpdateCount: number, totalEntries: number) {
+  if (newUpdateCount > 0) {
+    return `${newUpdateCount} NEW ${newUpdateCount === 1 ? "UPDATE" : "UPDATES"}!`;
+  }
+  if (totalEntries > 0) {
+    return "UP TO DATE";
+  }
+  return "NO HISTORY";
 }
 
 function changelogActionMeta(action: PackChangelogItem["action"]) {

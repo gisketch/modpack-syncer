@@ -22,6 +22,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackMeta {
     pub name: String,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub version: String,
     #[serde(rename = "mcVersion")]
     pub mc_version: String,
@@ -122,6 +124,7 @@ mod tests {
             "schemaVersion": 1,
             "pack": {
                 "name": "demo",
+                "icon": "https://example.com/icon.png",
                 "version": "0.1.0",
                 "mcVersion": "1.21.1",
                 "loader": "neoforge",
@@ -140,6 +143,7 @@ mod tests {
         }"#;
         let m: Manifest = serde_json::from_str(json).unwrap();
         assert_eq!(m.schema_version, 1);
+        assert_eq!(m.pack.icon.as_deref(), Some("https://example.com/icon.png"));
         assert_eq!(m.pack.loader, Loader::NeoForge);
         assert_eq!(m.mods.len(), 1);
         assert_eq!(m.mods[0].source, Source::Modrinth);

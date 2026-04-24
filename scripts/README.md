@@ -18,6 +18,7 @@ bun run scripts/pack-gen.ts scripts/pack-gen.input.json ./manifest.json
 ```jsonc
 {
   "name": "modsync",
+  "icon": "https://example.com/icon32x32.png", // optional: pack artwork shown in app
   "version": "0.1.0",
   "mcVersion": "1.21.1",
   "loader": "fabric",                 // "neoforge" | "fabric" | "forge" | "quilt"

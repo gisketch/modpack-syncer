@@ -23,6 +23,7 @@ export type Manifest = {
   schemaVersion: number;
   pack: {
     name: string;
+    icon?: string | null;
     version: string;
     mcVersion: string;
     loader: Loader;

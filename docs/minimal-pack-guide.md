@@ -26,6 +26,7 @@ This example targets **Minecraft 1.21.1 + Fabric** with three client-optimizatio
   "schemaVersion": 1,
   "pack": {
     "name": "modsync-minimal",
+    "icon": "https://example.com/icon32x32.png",
     "version": "0.1.0",
     "mcVersion": "1.21.1",
     "loader": "fabric",
@@ -127,6 +128,7 @@ Writing SHA1/SHA512 by hand is painful. Use the generator in the modsync source 
 cat > pack-gen.json <<'EOF'
 {
   "name": "modsync-minimal",
+  "icon": "https://example.com/icon32x32.png",
   "version": "0.2.0",
   "mcVersion": "1.21.1",
   "loader": "fabric",

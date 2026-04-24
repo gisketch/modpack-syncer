@@ -24,6 +24,7 @@ type ModEntry = {
 
 type Input = {
   name: string;
+  icon?: string;
   version: string;
   mcVersion: string;
   loader: Loader;
@@ -71,6 +72,7 @@ type Manifest = {
   schemaVersion: 1;
   pack: {
     name: string;
+    icon?: string;
     version: string;
     mcVersion: string;
     loader: Loader;
@@ -204,6 +206,7 @@ async function main() {
     schemaVersion: 1,
     pack: {
       name: input.name,
+      icon: input.icon,
       version: input.version,
       mcVersion: input.mcVersion,
       loader: input.loader,

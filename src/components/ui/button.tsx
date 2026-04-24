@@ -9,7 +9,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "cp-tactical-cut cp-tactical-frame cp-tactical-glow cp-tactical-primary-fill cp-tactical-scanlines cp-flicker-hover border-brand-accent/50 bg-brand text-text-on-brand hover:border-brand",
+          "cp-tactical-cut cp-tactical-glow cp-tactical-primary-fill cp-tactical-scanlines cp-flicker-hover border-brand-accent/35 bg-brand text-text-on-brand hover:border-brand-accent/55",
         outline:
           "cp-tactical-cut border-line-soft/30 bg-surface-panel text-text-high hover:border-brand/40 hover:text-brand",
         secondary:

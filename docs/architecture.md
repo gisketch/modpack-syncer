@@ -44,7 +44,7 @@ gisketch/modsync-pack/
 ```jsonc
 {
   "schemaVersion": 1,
-  "pack": { "name": "modsync", "version": "0.3.0", "mcVersion": "1.21.1", "loader": "neoforge", "loaderVersion": "21.1.77" },
+  "pack": { "name": "modsync", "icon": "https://example.com/icon32x32.png", "version": "0.3.0", "mcVersion": "1.21.1", "loader": "neoforge", "loaderVersion": "21.1.77" },
   "mods": [
     {
       "id": "sodium",
