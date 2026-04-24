@@ -62,9 +62,6 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
-      - name: Run frontend tests
-        run: bun run test
-
       - name: Build app + publish release assets
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:

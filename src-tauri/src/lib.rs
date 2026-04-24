@@ -38,6 +38,8 @@ pub fn run() {
             commands::save_publish_pat,
             commands::clear_publish_pat,
             commands::verify_publish_ssh,
+            commands::get_app_storage_settings,
+            commands::set_app_storage_settings,
             commands::get_prism_settings,
             commands::set_prism_settings,
             commands::fetch_mods,

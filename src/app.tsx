@@ -43,15 +43,36 @@ function RootGate() {
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
   });
+  const appStorage = useQuery({
+    queryKey: ["app-storage"],
+    queryFn: () => tauri.getAppStorageSettings(),
+  });
+  const managedJava = useQuery({
+    queryKey: ["managed-java", 21],
+    queryFn: () => tauri.hasManagedJava(21),
+    retry: false,
+  });
+  const prismSettings = useQuery({
+    queryKey: ["prism-settings"],
+    queryFn: () => tauri.getPrismSettings(),
+    retry: false,
+  });
 
-  if (packs.isLoading) {
+  const setupReady =
+    !!appStorage.data?.confirmed &&
+    !!managedJava.data &&
+    !!prismSettings.data?.binaryPath &&
+    !!prismSettings.data?.dataDir &&
+    !!prismSettings.data?.offlineUsername?.trim();
+
+  if (packs.isLoading || appStorage.isLoading || managedJava.isLoading || prismSettings.isLoading) {
     return (
       <div className="flex flex-1 items-center justify-center text-[--text-low]">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     );
   }
-  if (!packs.data || packs.data.length === 0) {
+  if ((!packs.data || packs.data.length === 0) && !setupReady) {
     return (
       <main className="flex-1 overflow-auto">
         <OnboardingRoute />

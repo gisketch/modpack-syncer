@@ -320,6 +320,25 @@ pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> 
 }
 
 #[tauri::command]
+pub async fn get_app_storage_settings() -> Result<paths::AppStorageSettings, CommandError> {
+    tokio::task::spawn_blocking(paths::get_app_storage_settings)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_app_storage_settings(
+    override_data_dir: Option<String>,
+) -> Result<paths::AppStorageSettings, CommandError> {
+    let override_data_dir = override_data_dir.and_then(normalize_optional_path);
+    tokio::task::spawn_blocking(move || paths::set_app_storage_settings(override_data_dir, true))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn set_prism_settings(
     binary_path: Option<String>,
     data_dir: Option<String>,

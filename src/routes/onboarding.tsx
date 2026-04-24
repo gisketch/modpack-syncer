@@ -1,32 +1,33 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, Download, FolderGit2, Loader2, Package, RotateCcw, User } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Download, FolderOpen, Loader2, Package, RotateCcw, User } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatError } from "@/lib/format-error";
-import { type JavaInstallProgressEvent, type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
+import { type AppStorageSettings, type JavaInstallProgressEvent, type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
 import { useNav } from "@/stores/nav-store";
 
 export function OnboardingRoute({ openedFromSettings = false }: { openedFromSettings?: boolean }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
-  const stepRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const hasMountedStepScroll = useRef(false);
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [useDefaultPath, setUseDefaultPath] = useState(true);
+  const [customRootPath, setCustomRootPath] = useState("");
   const [offlineUsername, setOfflineUsername] = useState("");
   const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(null);
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [prismInstallProgress, setPrismInstallProgress] = useState<PrismInstallProgressEvent | null>(null);
   const [prismInstallLogs, setPrismInstallLogs] = useState<string[]>([]);
+  const [displayedStep, setDisplayedStep] = useState(0);
 
-  const packs = useQuery({
-    queryKey: ["packs"],
-    queryFn: () => tauri.listPacks(),
+  const appStorage = useQuery({
+    queryKey: ["app-storage"],
+    queryFn: () => tauri.getAppStorageSettings(),
   });
   const managedJava = useQuery({
     queryKey: ["managed-java", 21],
@@ -49,14 +50,29 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
     setOfflineUsername(prismSettings.data?.offlineUsername ?? "");
   }, [prismSettings.data?.offlineUsername]);
 
-  const addPack = useMutation({
-    mutationFn: (u: string) => tauri.addPack(u),
-    onSuccess: () => {
-      setError(null);
-      qc.invalidateQueries({ queryKey: ["packs"] });
-      toast.success("Pack cloned");
+  useEffect(() => {
+    if (!appStorage.data) {
+      return;
+    }
+    setUseDefaultPath(appStorage.data.isDefault);
+    setCustomRootPath(appStorage.data.overrideDataDir ?? appStorage.data.dataDir);
+  }, [appStorage.data]);
+
+  const saveAppStorage = useMutation({
+    mutationFn: (overrideDataDir: string | null) => tauri.setAppStorageSettings(overrideDataDir),
+    onSuccess: async (settings) => {
+      setUseDefaultPath(settings.isDefault);
+      setCustomRootPath(settings.overrideDataDir ?? settings.dataDir);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["app-storage"] }),
+        qc.invalidateQueries({ queryKey: ["packs"] }),
+        qc.invalidateQueries({ queryKey: ["managed-java", 21] }),
+        qc.invalidateQueries({ queryKey: ["prism"] }),
+        qc.invalidateQueries({ queryKey: ["prism-settings"] }),
+      ]);
+      toast.success("Install path saved");
     },
-    onError: (e: unknown) => setError(formatError(e)),
+    onError: (e) => toast.error("Install path save failed", { description: formatError(e) }),
   });
   const saveUsername = useMutation({
     mutationFn: (username: string) =>
@@ -79,7 +95,6 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
       setJavaInstallLogs([]);
       setPrismInstallProgress(null);
       setPrismInstallLogs([]);
-      setError(null);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["managed-java", 21] }),
         qc.invalidateQueries({ queryKey: ["prism"] }),
@@ -166,28 +181,48 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
     };
   }, []);
 
+  const pathReady = !!appStorage.data?.confirmed;
   const javaReady = !!managedJava.data;
   const launcherReady = !!prismSettings.data?.binaryPath && !!prismSettings.data?.dataDir && !!prism.data;
   const usernameReady = !!prismSettings.data?.offlineUsername?.trim();
-  const packsReady = (packs.data?.length ?? 0) > 0;
-  const stepStates = useMemo(
-    () => [javaReady, launcherReady, usernameReady, packsReady],
-    [javaReady, launcherReady, usernameReady, packsReady],
-  );
-  const firstIncompleteStep = stepStates.findIndex((step) => !step);
-  const currentStep = firstIncompleteStep === -1 ? stepStates.length - 1 : firstIncompleteStep;
-  const setupReadyForPack = javaReady && launcherReady && usernameReady;
+  const firstIncompleteStep = [pathReady, javaReady, launcherReady, usernameReady].findIndex((step) => !step);
+  const currentStep = firstIncompleteStep === -1 ? 4 : firstIncompleteStep;
 
   useEffect(() => {
-    if (!hasMountedStepScroll.current) {
-      hasMountedStepScroll.current = true;
-      return;
-    }
-    stepRefs.current[currentStep]?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+    setDisplayedStep((value) => (value < currentStep ? currentStep : value));
   }, [currentStep]);
+
+  async function handleBrowseInstallRoot() {
+    try {
+      const selected = await open({
+        title: "Select modsync data directory",
+        defaultPath: customRootPath || appStorage.data?.dataDir || undefined,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        setCustomRootPath(selected);
+      }
+    } catch (error) {
+      toast.error("Browse install path failed", { description: formatError(error) });
+    }
+  }
+
+  const steps = [
+    { label: "PATH", done: pathReady },
+    { label: "JAVA", done: javaReady },
+    { label: "PRISM", done: launcherReady },
+    { label: "NAME", done: usernameReady },
+    { label: "PACKS", done: false },
+  ];
+
+  const pageTitle = ["Choose install path", "Install Java", "Install Prism", "Set username", "Go to packs"][displayedStep];
+  const pageDescription = [
+    "Pick default location or custom drive for modsync data, managed Java, launcher, cache, and packs.",
+    "Install managed Temurin runtime into chosen modsync location.",
+    "Install PrismLauncher-Cracked into chosen modsync location and auto-save launcher paths.",
+    "Save offline username modsync should force into cracked launcher.",
+    "Setup complete. Jump to packs page and clone modpack there.",
+  ][displayedStep];
 
   return (
     <div className="relative flex min-h-full w-full items-start justify-center overflow-visible px-4 py-6 sm:p-8">
@@ -219,7 +254,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
             <Button
               variant="outline"
               onClick={() => clearOnboardingSettings.mutate()}
-              disabled={clearOnboardingSettings.isPending || installJava.isPending || installManagedPrism.isPending || saveUsername.isPending}
+              disabled={clearOnboardingSettings.isPending || saveAppStorage.isPending || installJava.isPending || installManagedPrism.isPending || saveUsername.isPending}
               className="min-h-10 shrink-0"
             >
               {clearOnboardingSettings.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
@@ -228,245 +263,220 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
           ) : null}
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
-          <Card className="xl:sticky xl:top-6 xl:self-start">
+        <div className="flex flex-col gap-4">
+          <StepSegments
+            steps={steps}
+            activeIndex={displayedStep}
+            onSelect={(index) => {
+              if (index <= currentStep) {
+                setDisplayedStep(index);
+              }
+            }}
+          />
+
+          <Card className="shadow-[0_24px_80px_rgba(0,0,0,0.22)]">
             <CardHeader>
-              <CardTitle>SETUP FLOW</CardTitle>
-              <CardDescription>Status checks update live</CardDescription>
+              <CardTitle className="text-balance">{pageTitle}</CardTitle>
+              <CardDescription className="text-pretty">{pageDescription}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-3">
-                {[
-                  { label: "Java", done: javaReady },
-                  { label: "Launcher", done: launcherReady },
-                  { label: "Username", done: usernameReady },
-                  { label: "Packs", done: packsReady },
-                ].map((step, index) => {
-                  const active = currentStep === index;
-                  return (
-                    <div
-                      key={step.label}
-                      className={cn(
-                        "flex items-center gap-3 border px-3 py-3 text-sm",
-                        step.done
-                          ? "border-[--brand-core] bg-[--surface-sunken]"
-                          : active
-                            ? "border-[--line-strong] bg-[--surface-sunken]"
-                            : "border-[--line-soft] bg-[--surface]",
-                      )}
-                    >
-                      <StepBox done={step.done}>{step.done ? <Check className="h-4 w-4" /> : index + 1}</StepBox>
-                      <div className="flex flex-1 items-center justify-between gap-2">
-                        <span className="text-[--text-high]">{step.label}</span>
-                        <span className="cp-tactical-label text-[10px] text-[--text-low]">
-                          {step.done ? "READY" : active ? "CURRENT" : "PENDING"}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
+            <CardContent className="flex flex-col gap-6">
+              {displayedStep === 0 ? (
+                <PathStepPanel
+                  appStorage={appStorage.data}
+                  useDefaultPath={useDefaultPath}
+                  customRootPath={customRootPath}
+                  isPending={saveAppStorage.isPending}
+                  onToggleDefault={setUseDefaultPath}
+                  onChangeCustomPath={setCustomRootPath}
+                  onBrowse={handleBrowseInstallRoot}
+                  onSave={() => saveAppStorage.mutate(useDefaultPath ? null : customRootPath.trim() || null)}
+                />
+              ) : null}
 
-          <div className="flex flex-col gap-4">
-            <div ref={(node) => { stepRefs.current[0] = node; }} className="scroll-mt-6">
-              <OnboardingStepCard
-                step={1}
-                title="INSTALL JAVA"
-                description="Download managed Temurin 21 runtime for launcher use."
-                done={javaReady}
-                active={currentStep === 0}
-              >
-                <div className="flex flex-col gap-3">
-                  <StatusLine label="STATUS" value={javaReady ? "READY" : managedJava.isLoading ? "CHECKING" : "MISSING"} />
-                  {installJava.isPending ? (
-                    <ProgressPanel
-                      progress={javaInstallProgress?.progress ?? 0}
-                      stage={javaInstallProgress?.stage ?? "queued"}
-                      currentBytes={javaInstallProgress?.currentBytes ?? null}
-                      totalBytes={javaInstallProgress?.totalBytes ?? null}
-                      logs={javaInstallLogs}
-                    />
-                  ) : (
-                    <p className="text-sm text-[--text-low] text-pretty">
-                      Uses same managed Adoptium installer as launch dialog. Installs into modsync data dir.
-                    </p>
-                  )}
-                  <Button onClick={() => installJava.mutate()} disabled={installJava.isPending || javaReady}>
-                    {installJava.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {javaReady ? "JAVA READY" : "INSTALL JAVA"}
-                  </Button>
-                </div>
-              </OnboardingStepCard>
-            </div>
+              {displayedStep === 1 ? (
+                <InstallStepPanel
+                  eyebrow="2 / 5"
+                  statusLabel={javaReady ? "READY" : managedJava.isLoading ? "CHECKING" : "MISSING"}
+                  detail="Managed Temurin 21 runtime installs into chosen modsync path."
+                  isPending={installJava.isPending}
+                  actionLabel={javaReady ? "JAVA READY" : "INSTALL JAVA"}
+                  actionIcon={<Download className="h-4 w-4" />}
+                  actionDisabled={!pathReady || installJava.isPending || javaReady}
+                  onAction={() => installJava.mutate()}
+                  progress={javaInstallProgress?.progress ?? 0}
+                  stage={javaInstallProgress?.stage ?? "queued"}
+                  currentBytes={javaInstallProgress?.currentBytes ?? null}
+                  totalBytes={javaInstallProgress?.totalBytes ?? null}
+                  logs={javaInstallLogs}
+                />
+              ) : null}
 
-            <div ref={(node) => { stepRefs.current[1] = node; }} className="scroll-mt-6">
-              <OnboardingStepCard
-                step={2}
-                title="INSTALL PRISM LAUNCHER CRACKED"
-                description="Install managed portable launcher and auto-fill launcher paths."
-                done={launcherReady}
-                active={currentStep === 1}
-              >
-                <div className="flex flex-col gap-3">
+              {displayedStep === 2 ? (
+                <InstallStepPanel
+                  eyebrow="3 / 5"
+                  statusLabel={launcherReady ? "READY" : prism.isLoading ? "CHECKING" : "MISSING"}
+                  detail="Managed PrismLauncher-Cracked installs into chosen modsync path and auto-saves binary + data paths."
+                  isPending={installManagedPrism.isPending}
+                  actionLabel={launcherReady ? "PRISM READY" : "INSTALL PRISM"}
+                  actionIcon={<Package className="h-4 w-4" />}
+                  actionDisabled={!pathReady || !javaReady || installManagedPrism.isPending || launcherReady}
+                  onAction={() => installManagedPrism.mutate()}
+                  progress={prismInstallProgress?.progress ?? 0}
+                  stage={prismInstallProgress?.stage ?? "queued"}
+                  currentBytes={prismInstallProgress?.currentBytes ?? null}
+                  totalBytes={prismInstallProgress?.totalBytes ?? null}
+                  logs={prismInstallLogs}
+                >
                   <StatusLine label="BINARY" value={prismSettings.data?.binaryPath || "NOT SET"} mono />
                   <StatusLine label="DATA" value={prismSettings.data?.dataDir || "NOT SET"} mono />
-                  {installManagedPrism.isPending ? (
-                    <ProgressPanel
-                      progress={prismInstallProgress?.progress ?? 0}
-                      stage={prismInstallProgress?.stage ?? "queued"}
-                      currentBytes={prismInstallProgress?.currentBytes ?? null}
-                      totalBytes={prismInstallProgress?.totalBytes ?? null}
-                      logs={prismInstallLogs}
-                    />
-                  ) : (
-                    <p className="text-sm text-[--text-low] text-pretty">
-                      Installs PrismLauncher-Cracked portable build, verifies GitHub SHA-256 digest, saves binary + data path automatically.
-                    </p>
-                  )}
-                  <Button onClick={() => installManagedPrism.mutate()} disabled={installManagedPrism.isPending || launcherReady}>
-                    {installManagedPrism.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
-                    {launcherReady ? "LAUNCHER READY" : "INSTALL LAUNCHER"}
-                  </Button>
-                </div>
-              </OnboardingStepCard>
-            </div>
+                </InstallStepPanel>
+              ) : null}
 
-            <div ref={(node) => { stepRefs.current[2] = node; }} className="scroll-mt-6">
-              <OnboardingStepCard
-                step={3}
-                title="SET USERNAME"
-                description="Save offline username modsync should force into cracked launcher."
-                done={usernameReady}
-                active={currentStep === 2}
-              >
-                <div className="flex flex-col gap-3">
+              {displayedStep === 3 ? (
+                <div className="flex flex-col gap-4">
+                  <StatusLine label="STEP" value="4 / 5" />
                   <Input
                     value={offlineUsername}
                     onChange={(event) => setOfflineUsername(event.target.value)}
                     placeholder="Offline username"
-                    autoFocus={currentStep === 2}
+                    autoFocus
                   />
                   <p className="text-sm text-[--text-low] text-pretty">
-                    Launch now rewrites Prism offline account selection before spawn, so stale launcher username no longer wins.
+                    Launch flow rewrites Prism offline account selection before spawn, so stale launcher-stored name no longer wins.
                   </p>
-                  <Button onClick={() => saveUsername.mutate(offlineUsername)} disabled={saveUsername.isPending || !offlineUsername.trim()}>
+                  <Button
+                    onClick={() => saveUsername.mutate(offlineUsername)}
+                    disabled={!pathReady || !javaReady || !launcherReady || saveUsername.isPending || !offlineUsername.trim()}
+                  >
                     {saveUsername.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <User className="h-4 w-4" />}
                     SAVE USERNAME
                   </Button>
                 </div>
-              </OnboardingStepCard>
-            </div>
+              ) : null}
 
-            <div ref={(node) => { stepRefs.current[3] = node; }} className="scroll-mt-6">
-              <OnboardingStepCard
-                step={4}
-                title="GO TO PACKS"
-                description="Clone first pack if none tracked. Otherwise jump back to packs screen."
-                done={packsReady}
-                active={currentStep === 3}
-              >
-                {(packs.data?.length ?? 0) === 0 ? (
-                  <form
-                    className="flex flex-col gap-3"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (url.trim() && setupReadyForPack) addPack.mutate(url.trim());
-                    }}
-                  >
-                    <div className="flex flex-col gap-1.5 text-sm">
-                      <label htmlFor="pack-url" className="cp-tactical-label text-[--text-low] text-[10px]">
-                        :: MODPACK URL
-                      </label>
-                      <Input
-                        id="pack-url"
-                        value={url}
-                        onChange={(event) => setUrl(event.target.value)}
-                        placeholder="https://github.com/gisketch/modsync-pack.git"
-                        disabled={addPack.isPending || !setupReadyForPack}
-                      />
-                    </div>
-                    <p className="text-sm text-[--text-low] text-pretty">
-                      Welcome to modsync. Paste your modpack&apos;s GitHub URL to clone it. Your pack author shares this link with you.
-                    </p>
-                    <div className="flex items-center justify-between gap-3 border border-[--line-soft] bg-[--surface-sunken] px-3 py-2 text-xs">
-                      <span className="flex items-center gap-2 text-[--text-low]">
-                        <Package className="h-3.5 w-3.5" />
-                        <span className="cp-tactical-label">PRISM LAUNCHER</span>
-                      </span>
-                      <span className={cn("cp-tactical-label", launcherReady ? "text-[--signal-live]" : "text-[--signal-alert]")}>{launcherReady ? "READY" : "NOT READY"}</span>
-                    </div>
-                    <Button type="submit" size="lg" disabled={addPack.isPending || !url.trim() || !setupReadyForPack} className="w-full">
-                      {addPack.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderGit2 className="h-4 w-4" />}
-                      CLONE PACK
-                    </Button>
-                    {!setupReadyForPack ? (
-                      <p className="cp-tactical-label text-[--text-low] text-xs">FINISH STEPS 1-3 BEFORE PACK INGEST</p>
-                    ) : null}
-                    {error ? <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p> : null}
-                  </form>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    <p className="text-sm text-[--text-low] text-pretty">Setup complete. Packs already tracked: {packs.data?.length ?? 0}.</p>
-                    <Button onClick={() => go({ kind: "packs" })}>
-                      <ChevronRight className="h-4 w-4" /> GO TO PACKS
-                    </Button>
+              {displayedStep === 4 ? (
+                <div className="flex flex-col gap-4">
+                  <StatusLine label="STEP" value="5 / 5" />
+                  <div className="border border-line-soft/20 bg-surface-sunken/60 p-4 text-sm text-text-low text-pretty">
+                    Setup complete. Next screen = packs page. Clone modpack there with existing Git URL box.
                   </div>
-                )}
-              </OnboardingStepCard>
-            </div>
-          </div>
+                  <Button onClick={() => go({ kind: "packs" })} disabled={!usernameReady}>
+                    <ChevronRight className="h-4 w-4" /> OPEN PACKS PAGE
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="flex items-center justify-between gap-3 border-t border-line-soft/20 pt-4">
+                <Button
+                  variant="secondary"
+                  onClick={() => setDisplayedStep((value) => Math.max(0, value - 1))}
+                  disabled={displayedStep === 0}
+                >
+                  <ChevronLeft className="h-4 w-4" /> BACK
+                </Button>
+                <span className="cp-tactical-label text-[10px] text-text-low">STEP {displayedStep + 1} / 5</span>
+                <Button
+                  variant="outline"
+                  onClick={() => setDisplayedStep((value) => Math.min(currentStep, value + 1))}
+                  disabled={displayedStep >= currentStep}
+                >
+                  NEXT <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
   );
 }
 
-function OnboardingStepCard({
-  step,
-  title,
-  description,
-  done,
-  active,
-  children,
+function StepSegments({
+  steps,
+  activeIndex,
+  onSelect,
 }: {
-  step: number;
-  title: string;
-  description: string;
-  done: boolean;
-  active: boolean;
-  children: React.ReactNode;
+  steps: Array<{ label: string; done: boolean }>;
+  activeIndex: number;
+  onSelect: (index: number) => void;
 }) {
   return (
-    <Card className={cn(done ? "border-[--brand-core]" : active ? "border-[--line-strong]" : "border-[--line-soft]")}>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <StepBox done={done}>{done ? <Check className="h-4 w-4" /> : step}</StepBox>
-            <div>
-              <CardTitle>{title}</CardTitle>
-              <CardDescription>{description}</CardDescription>
-            </div>
-          </div>
-          <span className="cp-tactical-label text-[10px] text-[--text-low]">{done ? "READY" : active ? "CURRENT" : "WAITING"}</span>
-        </div>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <div className="grid grid-cols-5 gap-2 border border-line-soft/20 bg-surface-sunken/50 p-2">
+      {steps.map((step, index) => {
+        const active = activeIndex === index;
+        return (
+          <button
+            key={step.label}
+            type="button"
+            onClick={() => onSelect(index)}
+            className={cn(
+              "flex min-h-11 flex-col items-center justify-center gap-1 border px-2 py-2 text-center transition-colors",
+              step.done
+                ? "border-brand-core bg-brand-core text-text-on-brand"
+                : active
+                  ? "border-brand-core/50 bg-brand-core/10 text-text-high"
+                  : "border-line-soft/20 bg-surface text-text-low",
+            )}
+          >
+            <span className="h-1 w-full max-w-10 rounded-full bg-current/70" />
+            <span className="cp-tactical-label text-[10px]">{step.label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-function StepBox({ done, children }: { done: boolean; children: React.ReactNode }) {
+function PathStepPanel({
+  appStorage,
+  useDefaultPath,
+  customRootPath,
+  isPending,
+  onToggleDefault,
+  onChangeCustomPath,
+  onBrowse,
+  onSave,
+}: {
+  appStorage?: AppStorageSettings;
+  useDefaultPath: boolean;
+  customRootPath: string;
+  isPending: boolean;
+  onToggleDefault: (checked: boolean) => void;
+  onChangeCustomPath: (value: string) => void;
+  onBrowse: () => void;
+  onSave: () => void;
+}) {
   return (
-    <span
-      className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center border text-xs font-semibold",
-        done ? "border-brand-core bg-brand-core text-text-on-brand" : "border-line-soft/30 text-text-low",
-      )}
-    >
-      {children}
-    </span>
+    <div className="flex flex-col gap-4">
+      <StatusLine label="STEP" value="1 / 5" />
+      <StatusLine label="DEFAULT" value={appStorage?.defaultDataDir || "Loading..."} mono />
+      <div className="flex items-start gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
+        <Checkbox checked={useDefaultPath} onCheckedChange={(checked) => onToggleDefault(checked === true)} className="mt-0.5 size-5" />
+        <div className="flex flex-col gap-1.5">
+          <p className="text-sm text-text-high">Use default modsync location</p>
+          <p className="text-sm text-text-low text-pretty">
+            Leave checked for normal install. Uncheck to place all modsync-managed data on another drive or folder.
+          </p>
+        </div>
+      </div>
+      {!useDefaultPath ? (
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+          <Input
+            value={customRootPath}
+            onChange={(event) => onChangeCustomPath(event.target.value)}
+            placeholder="D:\\modsync or /mnt/games/modsync"
+          />
+          <Button variant="secondary" onClick={onBrowse}>
+            <FolderOpen className="h-4 w-4" /> BROWSE
+          </Button>
+        </div>
+      ) : null}
+      <StatusLine label="ACTIVE" value={useDefaultPath ? appStorage?.defaultDataDir || "Loading..." : customRootPath || "NOT SET"} mono />
+      <Button onClick={onSave} disabled={isPending || (!useDefaultPath && !customRootPath.trim())}>
+        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        SAVE INSTALL PATH
+      </Button>
+    </div>
   );
 }
 
@@ -475,6 +485,60 @@ function StatusLine({ label, value, mono = false }: { label: string; value: stri
     <div className="flex items-center justify-between gap-3 border border-[--line-soft] bg-[--surface-sunken] px-3 py-2 text-xs">
       <span className="cp-tactical-label text-[--text-low]">{label}</span>
       <span className={cn("max-w-[70%] truncate text-[--text-high]", mono && "font-mono")}>{value}</span>
+    </div>
+  );
+}
+
+function InstallStepPanel({
+  eyebrow,
+  statusLabel,
+  detail,
+  isPending,
+  actionLabel,
+  actionIcon,
+  actionDisabled,
+  onAction,
+  progress,
+  stage,
+  currentBytes,
+  totalBytes,
+  logs,
+  children,
+}: {
+  eyebrow: string;
+  statusLabel: string;
+  detail: string;
+  isPending: boolean;
+  actionLabel: string;
+  actionIcon: React.ReactNode;
+  actionDisabled: boolean;
+  onAction: () => void;
+  progress: number;
+  stage: string;
+  currentBytes: number | null;
+  totalBytes: number | null;
+  logs: string[];
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <StatusLine label="STEP" value={eyebrow} />
+      <StatusLine label="STATUS" value={statusLabel} />
+      {children}
+      <p className="text-sm text-[--text-low] text-pretty">{detail}</p>
+      {isPending ? (
+        <ProgressPanel
+          progress={progress}
+          stage={stage}
+          currentBytes={currentBytes}
+          totalBytes={totalBytes}
+          logs={logs}
+        />
+      ) : null}
+      <Button onClick={onAction} disabled={actionDisabled}>
+        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : actionIcon}
+        {actionLabel}
+      </Button>
     </div>
   );
 }

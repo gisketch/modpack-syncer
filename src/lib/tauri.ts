@@ -127,6 +127,14 @@ export type PrismLocation = {
   binary: string;
 };
 
+export type AppStorageSettings = {
+  defaultDataDir: string;
+  dataDir: string;
+  overrideDataDir?: string | null;
+  isDefault: boolean;
+  confirmed: boolean;
+};
+
 export type PrismSettings = {
   binaryPath?: string | null;
   dataDir?: string | null;
@@ -231,6 +239,9 @@ export const tauri = {
     invoke<PublishAuthSettings>("save_publish_pat", { token }),
   clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
   verifyPublishSsh: () => invoke<PublishSshStatus>("verify_publish_ssh"),
+  getAppStorageSettings: () => invoke<AppStorageSettings>("get_app_storage_settings"),
+  setAppStorageSettings: (overrideDataDir?: string | null) =>
+    invoke<AppStorageSettings>("set_app_storage_settings", { overrideDataDir }),
   getPrismSettings: () => invoke<PrismSettings>("get_prism_settings"),
   setPrismSettings: (binaryPath?: string | null, dataDir?: string | null, offlineUsername?: string | null) =>
     invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
