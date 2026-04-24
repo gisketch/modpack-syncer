@@ -32,18 +32,22 @@ export function HomeRoute() {
   });
 
   return (
-    <div className="flex h-full flex-col gap-6 p-8">
-      <header className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Your packs</h1>
-          <p className="text-sm opacity-70">Sync + launch your installed modpacks</p>
+    <div className="relative flex h-full flex-col gap-6 overflow-auto p-8 scrollbar-tactical">
+      <div aria-hidden className="pointer-events-none fixed inset-0 bg-tactical-grid opacity-40" />
+      <header className="relative flex items-end justify-between">
+        <div className="flex flex-col gap-1">
+          <span className="cp-tactical-label text-[--brand-core] text-[10px]">
+            :: PACK REGISTRY
+          </span>
+          <h1 className="text-2xl text-[--text-high]">Your packs</h1>
+          <p className="text-sm text-[--text-low]">Sync + launch your installed modpacks</p>
         </div>
         <PrismStatus loading={prism.isLoading} location={prism.data ?? null} />
       </header>
 
-      <section className="flex flex-col gap-3 rounded-lg border border-[--color-muted] p-6">
-        <h2 className="flex items-center gap-2 text-lg font-medium">
-          <Plus className="h-4 w-4" /> Add pack
+      <section className="relative flex flex-col gap-3 border border-[--line-soft] bg-[--surface-elevated] p-6 corner-brackets">
+        <h2 className="cp-tactical-label flex items-center gap-2 text-sm text-[--brand-core]">
+          <Plus className="h-4 w-4" /> ADD PACK
         </h2>
         <form
           className="flex gap-2"
@@ -64,21 +68,21 @@ export function HomeRoute() {
             ) : (
               <FolderGit2 className="h-4 w-4" />
             )}
-            Clone
+            CLONE
           </Button>
         </form>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p>}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="flex items-center gap-2 text-lg font-medium">
-          <Package className="h-4 w-4" /> Packs
+      <section className="relative flex flex-col gap-3">
+        <h2 className="cp-tactical-label flex items-center gap-2 text-sm text-[--brand-core]">
+          <Package className="h-4 w-4" /> PACKS
         </h2>
-        {packs.isLoading && <p className="text-sm opacity-60">Loading…</p>}
+        {packs.isLoading && <p className="cp-tactical-label text-[--text-low] text-xs">LOADING</p>}
         {packs.data && packs.data.length === 0 && (
-          <p className="text-sm opacity-60">No packs yet. Clone one above.</p>
+          <p className="text-sm text-[--text-low]">No packs yet. Clone one above.</p>
         )}
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-3">
           {packs.data?.map((p) => (
             <PackCard key={p.id} pack={p} prismAvailable={!!prism.data} />
           ))}
@@ -97,21 +101,23 @@ function PrismStatus({
 }) {
   if (loading) {
     return (
-      <span className="flex items-center gap-2 text-xs opacity-60">
-        <Loader2 className="h-3 w-3 animate-spin" /> detecting Prism…
+      <span className="cp-tactical-label flex items-center gap-2 text-[--text-low] text-xs">
+        <Loader2 className="h-3 w-3 animate-spin" /> DETECTING PRISM
       </span>
     );
   }
   if (!location) {
     return (
-      <span className="rounded-md bg-amber-950/40 px-2 py-1 text-xs text-amber-300">
-        Prism not detected
+      <span className="cp-tactical-label flex items-center gap-2 border border-[--signal-alert] bg-[--surface-sunken] px-3 py-1.5 text-[--signal-alert] text-xs clip-diagonal-sm">
+        <span className="h-1.5 w-1.5 bg-[--signal-alert]" />
+        PRISM NOT DETECTED
       </span>
     );
   }
   return (
-    <span className="flex items-center gap-2 rounded-md bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-      <Boxes className="h-3 w-3" /> Prism ready
+    <span className="cp-tactical-label flex items-center gap-2 border border-[--brand-core] bg-[--surface-sunken] px-3 py-1.5 text-[--brand-core] text-xs clip-diagonal-sm">
+      <span className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]" />
+      <Boxes className="h-3 w-3" /> PRISM READY
     </span>
   );
 }
@@ -142,11 +148,13 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
   });
 
   return (
-    <li className="rounded-lg border border-[--color-muted] p-4">
+    <li className="relative border border-[--line-soft] bg-[--surface-elevated] p-4 corner-brackets transition-colors hover:border-[--brand-core]/60">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-medium truncate">{manifest.data?.pack.name ?? pack.id}</p>
-          <p className="text-xs opacity-60 font-mono truncate">
+          <p className="cp-tactical-label truncate text-[--text-high] text-sm">
+            {manifest.data?.pack.name ?? pack.id}
+          </p>
+          <p className="text-[--text-low] font-mono text-xs truncate">
             {pack.head_sha.slice(0, 10)} · {pack.path}
           </p>
         </div>
@@ -163,7 +171,7 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Sync
+            SYNC
           </Button>
           <Button
             size="sm"
@@ -175,37 +183,48 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
             ) : (
               <Play className="h-4 w-4" />
             )}
-            Launch
+            LAUNCH
           </Button>
         </div>
       </div>
       {manifest.data && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs opacity-80">
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <Tag>v{manifest.data.pack.version}</Tag>
           <Tag>MC {manifest.data.pack.mcVersion}</Tag>
-          <Tag>{manifest.data.pack.loader}</Tag>
+          <Tag>{manifest.data.pack.loader.toUpperCase()}</Tag>
           <Tag>
-            <Download className="inline h-3 w-3" /> {manifest.data.mods.length} mods
+            <Download className="inline h-3 w-3" /> {manifest.data.mods.length} MODS
           </Tag>
         </div>
       )}
       {report && (
-        <div className="mt-3 text-xs opacity-80">
-          <p>
-            Sync OK: {report.instance.mods_written} mods · {report.instance.overrides_copied}{" "}
-            override files · cached {report.fetch.cached} / total {report.fetch.total}
+        <div className="mt-3 flex flex-col gap-1 border-t border-[--line-soft] pt-3 text-xs">
+          <p className="cp-tactical-label text-[--signal-live]">:: SYNC OK</p>
+          <p className="text-[--text-low]">
+            {report.instance.mods_written} mods · {report.instance.overrides_copied} override files
+            · cached {report.fetch.cached}/{report.fetch.total}
           </p>
-          <p className="font-mono opacity-60 truncate">{report.instance.instance_dir}</p>
+          <p className="font-mono text-[--text-low] text-[10px] truncate opacity-60">
+            {report.instance.instance_dir}
+          </p>
         </div>
       )}
-      {syncError && <p className="mt-3 text-xs text-red-400">{syncError}</p>}
+      {syncError && (
+        <p className="mt-3 cp-tactical-label text-[--signal-alert] text-xs">ERR :: {syncError}</p>
+      )}
       {manifest.isError && (
-        <p className="mt-3 text-xs text-amber-400">No manifest.json in this repo yet.</p>
+        <p className="mt-3 cp-tactical-label text-[--signal-alert] text-xs">
+          NO MANIFEST.JSON IN THIS REPO YET
+        </p>
       )}
     </li>
   );
 }
 
 function Tag({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-md bg-[--color-muted]/60 px-2 py-0.5">{children}</span>;
+  return (
+    <span className="cp-tactical-label border border-[--line-soft] bg-[--surface-sunken] px-2 py-0.5 text-[--brand-core] text-[10px]">
+      {children}
+    </span>
+  );
 }

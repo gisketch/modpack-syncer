@@ -22,11 +22,16 @@ export function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-8 shrink-0 select-none items-center justify-between border-[--color-muted] border-b bg-[--color-bg] pl-3"
+      className="flex h-9 shrink-0 select-none items-center justify-between border-[--line-soft] border-b bg-[--surface-sunken] pl-4"
     >
-      <div data-tauri-drag-region className="flex items-center gap-2 text-xs opacity-70">
-        <span data-tauri-drag-region className="font-semibold tracking-tight">
-          modsync
+      <div data-tauri-drag-region className="flex items-center gap-3 text-xs">
+        <span
+          data-tauri-drag-region
+          aria-hidden
+          className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]"
+        />
+        <span data-tauri-drag-region className="cp-tactical-label text-[--brand-core] text-xs">
+          MODSYNC :: v0.1.0
         </span>
       </div>
       <div className="flex h-full">
@@ -63,8 +68,10 @@ function WindowButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-full w-11 items-center justify-center text-white/70 transition-colors",
-        variant === "close" ? "hover:bg-red-600 hover:text-white" : "hover:bg-white/10",
+        "flex h-full w-11 items-center justify-center text-[--text-low] transition-colors",
+        variant === "close"
+          ? "hover:bg-[--signal-alert] hover:text-white"
+          : "hover:bg-[--surface-elevated] hover:text-[--brand-core]",
       )}
       {...rest}
     >

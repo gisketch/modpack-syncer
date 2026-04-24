@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderGit2, Loader2, Package, Sparkles } from "lucide-react";
+import { FolderGit2, Loader2, Package } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,16 +27,30 @@ export function OnboardingRoute() {
   });
 
   return (
-    <div className="flex h-full w-full items-center justify-center p-8">
-      <div className="flex w-full max-w-xl flex-col gap-6 rounded-xl border border-[--color-muted] bg-[--color-bg]/50 p-8">
-        <div className="flex flex-col gap-2 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-950/40 text-emerald-300">
-            <Sparkles className="h-6 w-6" />
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden p-8">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-tactical-grid opacity-60"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 60% 40% at 50% 30%, color-mix(in srgb, var(--brand-core) 8%, transparent), transparent 70%)",
+        }}
+      />
+      <div className="relative flex w-full max-w-xl flex-col gap-6 border border-[--line-strong] bg-[--surface-elevated] p-8 corner-brackets scanlines-overlay">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]" />
+            <span className="cp-tactical-label text-[--brand-core]">
+              :: INITIALIZE :: PACK INGEST
+            </span>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Welcome to modsync</h1>
-          <p className="text-sm opacity-70">
-            Paste your modpack's GitHub URL to clone it. Your friend (the pack author) shares this
-            link with you.
+          <h1 className="text-3xl text-[--text-high]">Welcome to modsync</h1>
+          <p className="text-sm text-[--text-low]">
+            Paste your modpack's GitHub URL to clone it. Your pack author shares this link with you.
           </p>
         </div>
 
@@ -47,9 +61,9 @@ export function OnboardingRoute() {
             if (url.trim()) addPack.mutate(url.trim());
           }}
         >
-          <div className="flex flex-col gap-1 text-sm">
-            <label htmlFor="pack-url" className="opacity-80">
-              Modpack URL
+          <div className="flex flex-col gap-1.5 text-sm">
+            <label htmlFor="pack-url" className="cp-tactical-label text-[--text-low] text-[10px]">
+              :: MODPACK URL
             </label>
             <Input
               id="pack-url"
@@ -71,25 +85,29 @@ export function OnboardingRoute() {
             ) : (
               <FolderGit2 className="h-4 w-4" />
             )}
-            Clone pack
+            CLONE PACK
           </Button>
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && (
+            <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p>
+          )}
         </form>
 
-        <div className="flex items-center justify-between border-[--color-muted] border-t pt-4 text-xs opacity-70">
-          <span className="flex items-center gap-2">
+        <div className="flex items-center justify-between border-[--line-soft] border-t pt-4 text-xs">
+          <span className="flex items-center gap-2 text-[--text-low]">
             <Package className="h-3.5 w-3.5" />
-            Prism Launcher:{" "}
+            <span className="cp-tactical-label">PRISM LAUNCHER:</span>{" "}
             {prism.isLoading ? (
-              <span className="opacity-60">detecting…</span>
+              <span className="cp-tactical-label text-[--text-low]">DETECTING</span>
             ) : prism.data ? (
-              <span className="text-emerald-400">ready</span>
+              <span className="cp-tactical-label text-[--signal-live]">READY</span>
             ) : (
-              <span className="text-amber-400">not detected</span>
+              <span className="cp-tactical-label text-[--signal-alert]">NOT DETECTED</span>
             )}
           </span>
           {!prism.data && !prism.isLoading && (
-            <span className="opacity-60">Install Prism before launching</span>
+            <span className="cp-tactical-label text-[--text-low] text-[10px]">
+              INSTALL PRISM BEFORE LAUNCH
+            </span>
           )}
         </div>
       </div>

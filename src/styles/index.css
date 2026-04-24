@@ -1,30 +1,269 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@theme {
-  --color-bg: oklch(0.145 0 0);
-  --color-fg: oklch(0.985 0 0);
-  --color-muted: oklch(0.269 0 0);
-  --color-accent: oklch(0.82 0.17 180);
-}
-
+/* ---------------------------------------------------------------------------
+ * cyberpunk-ui foundation tokens (adapted from gisketch/cyberpunk-shadcn)
+ * ------------------------------------------------------------------------- */
 :root {
   color-scheme: dark;
+
+  /* cyberpunk palette */
+  --surface-base: #0e0e0e;
+  --surface-elevated: #131313;
+  --surface-sunken: #191919;
+  --surface-panel: #131313;
+  --surface-panel-strong: #1f1f1f;
+
+  --brand-core: #eaffb8;
+  --brand-muted: #e2e2e8;
+  --brand-accent: #b1ed00;
+
+  --text-high: #ffffff;
+  --text-low: #ababab;
+  --text-on-brand: #4b6600;
+
+  --line-soft: #484848;
+  --line-strong: #757575;
+  --signal-live: #bfff00;
+  --signal-alert: #ff7351;
+
+  --tactical-glow: 0 0 24px rgba(191, 255, 0, 0.05);
+  --tactical-cut: 0.7rem;
+
+  /* legacy aliases so existing components still work */
+  --color-bg: var(--surface-base);
+  --color-fg: var(--text-high);
+  --color-muted: var(--line-soft);
+  --color-accent: var(--brand-core);
+}
+
+@theme {
+  --color-bg: var(--surface-base);
+  --color-fg: var(--text-high);
+  --color-muted: var(--line-soft);
+  --color-accent: var(--brand-core);
+
+  --color-surface: var(--surface-base);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-panel-strong: var(--surface-panel-strong);
+
+  --color-brand: var(--brand-core);
+  --color-brand-core: var(--brand-core);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-muted: var(--brand-muted);
+
+  --color-text-high: var(--text-high);
+  --color-text-low: var(--text-low);
+  --color-text-on-brand: var(--text-on-brand);
+
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-signal-live: var(--signal-live);
+  --color-signal-alert: var(--signal-alert);
 }
 
 html,
 body,
 #root {
   height: 100%;
-  background: var(--color-bg);
-  color: var(--color-fg);
+  background: var(--surface-base);
+  color: var(--text-high);
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    sans-serif;
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
   font-feature-settings: "cv11";
   -webkit-font-smoothing: antialiased;
 }
 
 body {
   margin: 0;
+  background-image:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-panel-strong) 28%, transparent),
+      transparent 22%
+    );
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family:
+    "Rajdhani", "JetBrains Mono", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------------------
+ * Tactical utilities (subset of cyberpunk-shadcn)
+ * ------------------------------------------------------------------------- */
+@layer utilities {
+  .cp-tactical-label {
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  .cp-tactical-frame {
+    border: 1px solid var(--line-strong);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .cp-tactical-glow {
+    box-shadow: var(--tactical-glow);
+  }
+
+  .clip-diagonal-sm {
+    clip-path: polygon(
+      0 0,
+      calc(100% - 8px) 0,
+      100% 8px,
+      100% 100%,
+      8px 100%,
+      0 calc(100% - 8px)
+    );
+  }
+
+  .clip-diagonal-btn {
+    clip-path: polygon(
+      0 0,
+      calc(100% - 10px) 0,
+      100% 10px,
+      100% 100%,
+      0 100%
+    );
+  }
+
+  .clip-diagonal-btn-secondary {
+    clip-path: polygon(
+      10px 0,
+      100% 0,
+      100% calc(100% - 10px),
+      calc(100% - 10px) 100%,
+      0 100%,
+      0 10px
+    );
+  }
+
+  .corner-brackets {
+    position: relative;
+  }
+
+  .corner-brackets::before,
+  .corner-brackets::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--brand-core);
+    pointer-events: none;
+  }
+
+  .corner-brackets::before {
+    top: -1px;
+    left: -1px;
+    border-right: none;
+    border-bottom: none;
+  }
+
+  .corner-brackets::after {
+    bottom: -1px;
+    right: -1px;
+    border-left: none;
+    border-top: none;
+  }
+
+  .bg-tactical-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in srgb, var(--line-soft) 18%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--line-soft) 18%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 24px 24px;
+    background-color: transparent;
+  }
+
+  .scanlines-overlay {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .scanlines-overlay::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.04) 1px,
+      rgba(255, 255, 255, 0.04) 2px
+    );
+    opacity: 0.5;
+    z-index: -1;
+  }
+
+  .glow-brand {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--brand-core) 40%, transparent),
+      0 0 12px color-mix(in srgb, var(--brand-core) 35%, transparent),
+      0 0 24px color-mix(in srgb, var(--brand-core) 18%, transparent);
+  }
+
+  .glow-alert {
+    box-shadow:
+      0 0 12px color-mix(in srgb, var(--signal-alert) 30%, transparent),
+      0 0 24px color-mix(in srgb, var(--signal-alert) 15%, transparent);
+  }
+
+  .scrollbar-tactical {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-soft) transparent;
+  }
+
+  .scrollbar-tactical::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-tactical::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-tactical::-webkit-scrollbar-thumb {
+    background: var(--line-soft);
+  }
+
+  .scrollbar-tactical::-webkit-scrollbar-thumb:hover {
+    background: var(--brand-core);
+  }
+
+  .flicker-hover:hover {
+    animation: cp-flicker 0.1s infinite alternate;
+  }
+}
+
+@keyframes cp-flicker {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.82;
+  }
+  100% {
+    opacity: 1;
+  }
 }
