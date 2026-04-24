@@ -110,7 +110,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 - [x] `docs/planned_features.md`
 - [ ] `README.md` (user-facing quickstart)
 - [ ] `docs/author-guide.md` (publishing flow)
-- [ ] `docs/vps-setup.md` (Gitea on your VPS)
+- [x] `docs/vps-setup.md` (Gitea on your VPS)
 - [ ] `docs/manifest-schema.md` (JSON schema reference)
 
 ### Build / Release
