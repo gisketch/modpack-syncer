@@ -73,7 +73,7 @@ fn platform_data_candidates() -> Vec<PathBuf> {
     out
 }
 
-/// Find the Prism binary on PATH or via env override.
+/// Find the Prism binary on PATH, flatpak exports, or via env override.
 pub fn binary() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("PRISM_BIN") {
         let pb = PathBuf::from(p);
@@ -81,14 +81,31 @@ pub fn binary() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // which-style lookup
+    let names = ["prismlauncher", "PrismLauncher", "prismlauncher.exe"];
+    // which-style PATH lookup
     if let Some(paths) = std::env::var_os("PATH") {
         for candidate in std::env::split_paths(&paths) {
-            for name in &["prismlauncher", "PrismLauncher", "prismlauncher.exe"] {
+            for name in &names {
                 let p = candidate.join(name);
                 if p.is_file() {
                     return Some(p);
                 }
+            }
+        }
+    }
+    // Flatpak (Linux) — export wrappers named by app id.
+    #[cfg(target_os = "linux")]
+    {
+        let flatpak_name = "org.prismlauncher.PrismLauncher";
+        let mut flatpak_dirs: Vec<PathBuf> = Vec::new();
+        if let Some(home) = std::env::var_os("HOME") {
+            flatpak_dirs.push(PathBuf::from(&home).join(".local/share/flatpak/exports/bin"));
+        }
+        flatpak_dirs.push(PathBuf::from("/var/lib/flatpak/exports/bin"));
+        for dir in flatpak_dirs {
+            let p = dir.join(flatpak_name);
+            if p.is_file() {
+                return Some(p);
             }
         }
     }
