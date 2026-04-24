@@ -1,0 +1,47 @@
+version: 1
+project:
+  name: modsync
+  description: Minecraft modpack syncer + Prism launcher wrapper
+  owner: gisketch
+  identifier: dev.gisketch.modsync
+stack:
+  app: tauri-2
+  frontend:
+    framework: react-19
+    language: typescript
+    bundler: vite
+    styling: tailwindcss-v4
+    state: zustand
+    server_state: tanstack-query
+    ui_kit: shadcn-ui
+  backend:
+    language: rust
+    runtime: tokio
+    http: reqwest
+    git: git2
+    object_storage: aws-sdk-s3
+    db: rusqlite
+  package_manager: bun
+  node_version: ">=20"
+  rust_edition: "2021"
+target_platforms:
+  - linux
+  - windows
+  - macos
+domains:
+  minecraft:
+    java_version: 21
+    mc_versions: ["1.21.1"]
+    loaders: ["neoforge", "fabric"]
+launcher:
+  strategy: wrap
+  target: prism-launcher
+source_of_truth:
+  git_host: gitea
+  git_embedded: libgit2
+  object_storage: minio
+  cdns: ["modrinth", "curseforge"]
+paths:
+  specs: openspec/specs
+  changes: openspec/changes
+  archive: openspec/archive
