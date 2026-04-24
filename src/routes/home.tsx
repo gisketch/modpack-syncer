@@ -3,6 +3,7 @@ import { Boxes, Download, FolderGit2, Loader2, Package, Play, Plus, RefreshCw } 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { formatError } from "@/lib/format-error";
 import { type PackSummary, type SyncInstanceReport, tauri } from "@/lib/tauri";
 
 export function HomeRoute() {
@@ -34,8 +35,8 @@ export function HomeRoute() {
     <div className="flex h-full flex-col gap-6 p-8">
       <header className="flex items-end justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">modsync</h1>
-          <p className="text-sm opacity-70">Minecraft modpack syncer + Prism launcher wrapper</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Your packs</h1>
+          <p className="text-sm opacity-70">Sync + launch your installed modpacks</p>
         </div>
         <PrismStatus loading={prism.isLoading} location={prism.data ?? null} />
       </header>
@@ -207,18 +208,4 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
 
 function Tag({ children }: { children: React.ReactNode }) {
   return <span className="rounded-md bg-[--color-muted]/60 px-2 py-0.5">{children}</span>;
-}
-
-function formatError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e && typeof e === "object") {
-    const anyE = e as { kind?: string; message?: string };
-    if (anyE.kind && anyE.message) return `${anyE.kind}: ${anyE.message}`;
-    try {
-      return JSON.stringify(e);
-    } catch {
-      return String(e);
-    }
-  }
-  return String(e);
 }
