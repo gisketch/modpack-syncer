@@ -5,7 +5,7 @@
   --color-bg: oklch(0.145 0 0);
   --color-fg: oklch(0.985 0 0);
   --color-muted: oklch(0.269 0 0);
-  --color-accent: oklch(0.7 0.15 200);
+  --color-accent: oklch(0.82 0.17 180);
 }
 
 :root {
