@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "gisketch_s_modpack_syncer",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "identifier": "dev.gisketch.s-modpack-syncer",
   "build": {
     "beforeDevCommand": "bun run dev",
@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "RWTeUQCsF+o/TYTzb96NQM0Tj5+i+3gwe05SaMdqycEWIvohZ+mjFyAY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczODQwN0FENDBEREQzNTMKUldSVDA5MUFyUWVFY3hCeEM2bEtZZ3g4R1UyZjRKcXBjYWlpQ281Zi84OVZwNlpYN0tKUW52ZW4K",
       "endpoints": [
         "https://github.com/gisketch/modsync/releases/latest/download/latest.json"
       ],
