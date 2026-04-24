@@ -80,6 +80,9 @@ pub struct PublishPushReport {
     pub method: String,
 }
 
+pub type LaunchProfile = prism::LaunchProfile;
+pub type PrismAccountStatus = prism::PrismAccountStatus;
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishAuthSettings {
@@ -284,6 +287,29 @@ pub async fn verify_publish_ssh() -> Result<PublishSshStatus, CommandError> {
 }
 
 #[tauri::command]
+pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> {
+    tokio::task::spawn_blocking(prism::get_settings)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_prism_settings(
+    binary_path: Option<String>,
+    data_dir: Option<String>,
+) -> Result<prism::PrismSettings, CommandError> {
+    let settings = prism::PrismSettings {
+        binary_path: binary_path.and_then(normalize_optional_path),
+        data_dir: data_dir.and_then(normalize_optional_path),
+    };
+    tokio::task::spawn_blocking(move || prism::save_settings(settings))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn add_pack(url: String) -> Result<PackSummary, CommandError> {
     let id = paths::pack_id_from_url(&url);
     let dest = paths::packs_dir()?.join(&id);
@@ -367,6 +393,30 @@ pub async fn fetch_mods(pack_id: String) -> Result<download::FetchReport, Comman
 #[tauri::command]
 pub async fn detect_prism() -> Result<Option<prism::PrismLocation>, CommandError> {
     Ok(prism::location())
+}
+
+#[tauri::command]
+pub async fn get_prism_account_status() -> Result<PrismAccountStatus, CommandError> {
+    tokio::task::spawn_blocking(prism::read_account_status)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_launch_profile(pack_id: String) -> Result<LaunchProfile, CommandError> {
+    tokio::task::spawn_blocking(move || prism::load_launch_profile(&pack_id))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_launch_profile(pack_id: String, profile: LaunchProfile) -> Result<LaunchProfile, CommandError> {
+    tokio::task::spawn_blocking(move || prism::save_launch_profile(&pack_id, &profile))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
 }
 
 #[derive(Debug, Serialize)]
@@ -454,6 +504,7 @@ pub async fn sync_instance(
     let resolved_mods = resolve_entries(&pack_dir, &m.mods)?;
     let resolved_resourcepacks = resolve_entries(&pack_dir, &m.resourcepacks)?;
     let resolved_shaderpacks = resolve_entries(&pack_dir, &m.shaderpacks)?;
+    let launch_profile = prism::load_launch_profile(&pack_id)?;
 
     let inst_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let _ = app.emit(
@@ -480,6 +531,7 @@ pub async fn sync_instance(
             &resolved_resourcepacks,
             &resolved_shaderpacks,
             &pack_dir_clone,
+            Some(&launch_profile),
         )
     })
     .await
@@ -542,6 +594,20 @@ pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> 
     tokio::task::spawn_blocking(move || prism::launch(&instance_name))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn launch_pack(pack_id: String, instance_name: Option<String>) -> Result<(), CommandError> {
+    let launch_profile = prism::load_launch_profile(&pack_id)?;
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        prism::apply_launch_profile(&instance_name, &launch_profile)?;
+        prism::launch(&instance_name)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(())
 }
 
@@ -1262,6 +1328,15 @@ fn read_publish_auth_settings() -> Result<PublishAuthSettings, CommandError> {
         method,
         has_pat: crate::keychain::load_github_pat()?.is_some(),
     })
+}
+
+fn normalize_optional_path(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn apply_artifact_dir(

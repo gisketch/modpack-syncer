@@ -127,6 +127,24 @@ export type PrismLocation = {
   binary: string;
 };
 
+export type PrismSettings = {
+  binaryPath?: string | null;
+  dataDir?: string | null;
+};
+
+export type PrismAccountStatus = {
+  state: string;
+  displayName?: string | null;
+};
+
+export type LaunchProfile = {
+  minMemoryMb: number;
+  maxMemoryMb: number;
+  javaPath?: string | null;
+  extraJvmArgs: string;
+  autoJava: boolean;
+};
+
 export type InstanceWriteReport = {
   instance_dir: string;
   mods_written: number;
@@ -176,11 +194,19 @@ export const tauri = {
     invoke<PublishAuthSettings>("save_publish_pat", { token }),
   clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
   verifyPublishSsh: () => invoke<PublishSshStatus>("verify_publish_ssh"),
+  getPrismSettings: () => invoke<PrismSettings>("get_prism_settings"),
+  setPrismSettings: (binaryPath?: string | null, dataDir?: string | null) =>
+    invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
+  getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),
+  getLaunchProfile: (packId: string) => invoke<LaunchProfile>("get_launch_profile", { packId }),
+  setLaunchProfile: (packId: string, profile: LaunchProfile) =>
+    invoke<LaunchProfile>("set_launch_profile", { packId, profile }),
   syncInstance: (packId: string, instanceName?: string) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
+  launchPack: (packId: string, instanceName?: string) => invoke<void>("launch_pack", { packId, instanceName }),
   getInstanceMinecraftDir: (instanceName: string) =>
     invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
   packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>

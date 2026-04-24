@@ -139,6 +139,7 @@ function Shell() {
         {view.kind === "packs" && <HomeRoute />}
         {view.kind === "pack" && <PackDetailRoute packId={view.id} />}
         {view.kind === "settings" && <SettingsRoute />}
+        {view.kind === "onboarding" && <OnboardingRoute />}
       </main>
     </div>
   );

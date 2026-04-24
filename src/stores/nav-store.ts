@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
-export type View = { kind: "packs" } | { kind: "pack"; id: string } | { kind: "settings" };
+export type View =
+  | { kind: "packs" }
+  | { kind: "pack"; id: string }
+  | { kind: "settings" }
+  | { kind: "onboarding" };
 
 type NavState = {
   view: View;

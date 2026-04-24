@@ -35,6 +35,20 @@ pub fn publish_auth_path() -> anyhow::Result<PathBuf> {
     Ok(data_dir()?.join("publish-auth.json"))
 }
 
+pub fn prism_settings_path() -> anyhow::Result<PathBuf> {
+    Ok(data_dir()?.join("prism-settings.json"))
+}
+
+pub fn launch_profiles_dir() -> anyhow::Result<PathBuf> {
+    let path = data_dir()?.join("launch-profiles");
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
+pub fn launch_profile_path(pack_id: &str) -> anyhow::Result<PathBuf> {
+    Ok(launch_profiles_dir()?.join(format!("{pack_id}.json")))
+}
+
 /// Derive a filesystem-safe pack id from a clone URL.
 pub fn pack_id_from_url(url: &str) -> String {
     let stripped = url

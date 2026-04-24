@@ -1,6 +1,10 @@
+import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { exeExtension } from "@tauri-apps/plugin-os";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderGit2, Loader2, Package } from "lucide-react";
+import { Download, FolderGit2, Loader2, Package, Search } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatError } from "@/lib/format-error";
@@ -16,6 +20,11 @@ export function OnboardingRoute() {
     queryFn: () => tauri.detectPrism(),
     retry: false,
   });
+  const prismSettings = useQuery({
+    queryKey: ["prism-settings"],
+    queryFn: () => tauri.getPrismSettings(),
+    retry: false,
+  });
 
   const addPack = useMutation({
     mutationFn: (u: string) => tauri.addPack(u),
@@ -25,6 +34,47 @@ export function OnboardingRoute() {
     },
     onError: (e: unknown) => setError(formatError(e)),
   });
+  const savePrismSettings = useMutation({
+    mutationFn: ({ binaryPath, dataDir }: { binaryPath?: string | null; dataDir?: string | null }) =>
+      tauri.setPrismSettings(binaryPath, dataDir),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["prism"] }),
+        qc.invalidateQueries({ queryKey: ["prism-settings"] }),
+      ]);
+      toast.success("Prism path saved");
+    },
+    onError: (e) => toast.error("Prism path save failed", { description: formatError(e) }),
+  });
+
+  async function handleDownloadPrism() {
+    try {
+      await openUrl("https://prismlauncher.org/download/");
+    } catch (error) {
+      toast.error("Open download page failed", { description: formatError(error) });
+    }
+  }
+
+  async function handleBrowseBinary() {
+    try {
+      const extension = exeExtension();
+      const selected = await open({
+        title: "Select Prism Launcher binary",
+        filters: extension
+          ? [{ name: "Prism Launcher", extensions: [extension] }]
+          : undefined,
+      });
+      if (typeof selected !== "string") {
+        return;
+      }
+      savePrismSettings.mutate({
+        binaryPath: selected,
+        dataDir: prismSettings.data?.dataDir ?? null,
+      });
+    } catch (error) {
+      toast.error("Browse Prism binary failed", { description: formatError(error) });
+    }
+  }
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden p-8">
@@ -92,23 +142,41 @@ export function OnboardingRoute() {
           )}
         </form>
 
-        <div className="flex items-center justify-between border-[--line-soft] border-t pt-4 text-xs">
-          <span className="flex items-center gap-2 text-[--text-low]">
-            <Package className="h-3.5 w-3.5" />
-            <span className="cp-tactical-label">PRISM LAUNCHER:</span>{" "}
-            {prism.isLoading ? (
-              <span className="cp-tactical-label text-[--text-low]">DETECTING</span>
-            ) : prism.data ? (
-              <span className="cp-tactical-label text-[--signal-live]">READY</span>
-            ) : (
-              <span className="cp-tactical-label text-[--signal-alert]">NOT DETECTED</span>
-            )}
-          </span>
-          {!prism.data && !prism.isLoading && (
-            <span className="cp-tactical-label text-[--text-low] text-[10px]">
-              INSTALL PRISM BEFORE LAUNCH
+        <div className="flex flex-col gap-3 border-[--line-soft] border-t pt-4 text-xs">
+          <div className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-2 text-[--text-low]">
+              <Package className="h-3.5 w-3.5" />
+              <span className="cp-tactical-label">PRISM LAUNCHER:</span>{" "}
+              {prism.isLoading ? (
+                <span className="cp-tactical-label text-[--text-low]">DETECTING</span>
+              ) : prism.data ? (
+                <span className="cp-tactical-label text-[--signal-live]">READY</span>
+              ) : (
+                <span className="cp-tactical-label text-[--signal-alert]">NOT DETECTED</span>
+              )}
             </span>
-          )}
+            {!prism.data && !prism.isLoading ? (
+              <span className="cp-tactical-label text-[--text-low] text-[10px]">
+                INSTALL OR SET PRISM BEFORE LAUNCH
+              </span>
+            ) : null}
+          </div>
+          {!prism.data && !prism.isLoading ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={handleDownloadPrism}>
+                <Download className="h-4 w-4" /> DOWNLOAD PAGE
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleBrowseBinary}
+                disabled={savePrismSettings.isPending || prismSettings.isLoading}
+              >
+                {savePrismSettings.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                BROWSE BINARY
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
