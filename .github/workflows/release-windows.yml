@@ -1,0 +1,84 @@
+name: release-windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to build and publish"
+        required: true
+        type: string
+
+jobs:
+  release:
+    name: Build Windows release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v.+ ]]; then
+            echo "Tag must start with v, got: $tag" >&2
+            exit 1
+          fi
+
+          git rev-parse "$tag" >/dev/null 2>&1
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: bun run typecheck
+
+      - name: Run frontend tests
+        run: bun run test
+
+      - name: Build app + publish release assets
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tauriScript: bun tauri
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: modsync ${{ env.RELEASE_TAG }}
+          releaseBody: |
+            Automated Windows build for ${{ env.RELEASE_TAG }}.
+
+            Download installer assets from this release.
+          generateReleaseNotes: true
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false

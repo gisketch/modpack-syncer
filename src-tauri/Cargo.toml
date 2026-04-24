@@ -69,6 +69,7 @@ url = "2"
 # Concurrency helpers
 parking_lot = "0.12"
 once_cell = "1"
+uuid = { version = "1", features = ["v3"] }
 
 [profile.release]
 opt-level = 3

@@ -46,6 +46,17 @@ bun run tauri dev
 | `bun run format` | Biome format |
 | `bun run typecheck` | TypeScript no-emit check |
 
+## Releases
+
+Windows app releases publish through GitHub Actions.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing a `v*` tag runs [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml), builds Tauri on `windows-latest`, and uploads Windows bundle assets to that tag's GitHub Release page. The same workflow also supports manual dispatch from Actions when you provide an existing tag.
+
 ## Layout
 
 ```

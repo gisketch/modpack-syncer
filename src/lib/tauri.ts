@@ -130,6 +130,7 @@ export type PrismLocation = {
 export type PrismSettings = {
   binaryPath?: string | null;
   dataDir?: string | null;
+  offlineUsername?: string | null;
 };
 
 export type PrismAccountStatus = {
@@ -144,6 +145,16 @@ export type InstalledJavaRuntime = {
   major: number;
   imageType: string;
   releaseName: string;
+};
+
+export type ManagedPrismInstall = {
+  binaryPath: string;
+  dataDir: string;
+  installDir: string;
+  version: string;
+  assetName: string;
+  releaseUrl: string;
+  offlineSupported: boolean;
 };
 
 export type LaunchProfile = {
@@ -195,6 +206,14 @@ export type JavaInstallProgressEvent = {
   logLine?: string | null;
 };
 
+export type PrismInstallProgressEvent = {
+  stage: string;
+  progress: number;
+  currentBytes?: number | null;
+  totalBytes?: number | null;
+  logLine?: string | null;
+};
+
 /**
  * Typed wrappers around Tauri commands exposed by the Rust backend.
  * Keep this file in sync with `src-tauri/src/lib.rs#invoke_handler`.
@@ -213,16 +232,19 @@ export const tauri = {
   clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
   verifyPublishSsh: () => invoke<PublishSshStatus>("verify_publish_ssh"),
   getPrismSettings: () => invoke<PrismSettings>("get_prism_settings"),
-  setPrismSettings: (binaryPath?: string | null, dataDir?: string | null) =>
-    invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir }),
+  setPrismSettings: (binaryPath?: string | null, dataDir?: string | null, offlineUsername?: string | null) =>
+    invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),
   getLaunchProfile: (packId: string) => invoke<LaunchProfile>("get_launch_profile", { packId }),
+  hasManagedJava: (major: number) => invoke<boolean>("has_managed_java", { major }),
+  clearOnboardingSettings: (major: number) => invoke<PrismSettings>("clear_onboarding_settings", { major }),
   setLaunchProfile: (packId: string, profile: LaunchProfile) =>
     invoke<LaunchProfile>("set_launch_profile", { packId, profile }),
   installAdoptiumJava: (packId: string, major: number, imageType: string) =>
     invoke<InstalledJavaRuntime>("install_adoptium_java", { packId, major, imageType }),
+  installManagedPrism: () => invoke<ManagedPrismInstall>("install_managed_prism"),
   syncInstance: (packId: string, instanceName?: string) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),

@@ -55,6 +55,18 @@ pub fn managed_java_runtimes_dir() -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+pub fn managed_launchers_dir() -> anyhow::Result<PathBuf> {
+    let path = data_dir()?.join("launchers");
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
+pub fn managed_prism_dir() -> anyhow::Result<PathBuf> {
+    let path = managed_launchers_dir()?.join("prismlauncher-cracked");
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
 /// Derive a filesystem-safe pack id from a clone URL.
 pub fn pack_id_from_url(url: &str) -> String {
     let stripped = url

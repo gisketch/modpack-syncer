@@ -8,11 +8,16 @@ use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use flate2::read::GzDecoder;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest as _, Sha256};
+use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::manifest::{Loader, Manifest};
@@ -22,6 +27,12 @@ use crate::paths;
 pub enum PrismError {
     #[error("Prism Launcher not detected. Install it or set PRISM_DATA_DIR / PRISM_BIN.")]
     NotDetected,
+    #[error("managed launcher install not supported on this platform yet: {0}")]
+    UnsupportedPlatform(String),
+    #[error("no compatible managed launcher asset found for {0}")]
+    AssetNotFound(String),
+    #[error("release asset missing SHA-256 digest: {0}")]
+    MissingDigest(String),
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -41,6 +52,7 @@ pub struct PrismLocation {
 pub struct PrismSettings {
     pub binary_path: Option<String>,
     pub data_dir: Option<String>,
+    pub offline_username: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +105,28 @@ pub struct JavaInstallProgress {
     pub log_line: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedPrismInstall {
+    pub binary_path: String,
+    pub data_dir: String,
+    pub install_dir: String,
+    pub version: String,
+    pub asset_name: String,
+    pub release_url: String,
+    pub offline_supported: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismInstallProgress {
+    pub stage: String,
+    pub progress: u8,
+    pub current_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub log_line: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct AdoptiumAsset {
     binary: AdoptiumBinary,
@@ -116,6 +150,20 @@ struct AdoptiumPackage {
 struct AdoptiumVersion {
     major: u32,
     openjdk_version: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    digest: Option<String>,
 }
 
 pub fn get_settings() -> Result<PrismSettings, PrismError> {
@@ -150,6 +198,39 @@ pub fn save_launch_profile(pack_id: &str, profile: &LaunchProfile) -> Result<Lau
     let bytes = serde_json::to_vec_pretty(profile).map_err(anyhow::Error::from)?;
     std::fs::write(path, bytes)?;
     Ok(profile.clone())
+}
+
+pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
+    let prefix = format!("temurin-{major}-");
+    for entry in std::fs::read_dir(paths::managed_java_runtimes_dir()?)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !path.is_dir() || !name.starts_with(&prefix) {
+            continue;
+        }
+        if find_java_binary(&path).is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn clear_onboarding_settings(major: u32) -> Result<PrismSettings, PrismError> {
+    let prefix = format!("temurin-{major}-");
+    for entry in std::fs::read_dir(paths::managed_java_runtimes_dir()?)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if path.is_dir() && name.starts_with(&prefix) {
+            std::fs::remove_dir_all(path)?;
+        }
+    }
+    save_settings(PrismSettings::default())
 }
 
 pub fn read_account_status() -> Result<PrismAccountStatus, PrismError> {
@@ -223,6 +304,68 @@ where
     on_progress(progress_event("finalizing", 97, None, None, Some("> locate Java binary".to_string())));
     on_progress(progress_event("done", 100, None, None, Some(format!("> installed :: {}", runtime.display_name))));
     Ok(runtime)
+}
+
+pub async fn install_managed_prism<F>(mut on_progress: F) -> Result<ManagedPrismInstall, PrismError>
+where
+    F: FnMut(PrismInstallProgress) + Send,
+{
+    on_progress(prism_progress_event(
+        "resolving",
+        3,
+        None,
+        None,
+        Some("> resolve latest PrismLauncher-Cracked release".to_string()),
+    ));
+    let release = fetch_latest_prism_release().await?;
+    let asset = select_managed_prism_asset(&release)?.clone();
+    let expected_sha256 = release_asset_sha256(&asset)?.to_string();
+
+    on_progress(prism_progress_event(
+        "downloading",
+        8,
+        Some(0),
+        None,
+        Some(format!("> download {}", asset.name)),
+    ));
+    let bytes = download_prism_asset(&asset.browser_download_url, &expected_sha256, &mut on_progress).await?;
+    on_progress(prism_progress_event(
+        "extracting",
+        90,
+        None,
+        None,
+        Some(format!("> extract {}", asset.name)),
+    ));
+
+    let release_tag = release.tag_name.clone();
+    let release_url = release.html_url.clone();
+    let asset_name = asset.name.clone();
+    let install = tokio::task::spawn_blocking(move || install_prism_release(&release_tag, &release_url, &asset_name, bytes))
+        .await
+        .map_err(|error| PrismError::Other(anyhow::Error::from(error)))??;
+
+    on_progress(prism_progress_event(
+        "finalizing",
+        97,
+        None,
+        None,
+        Some("> save launcher settings".to_string()),
+    ));
+    let existing_settings = get_settings().unwrap_or_default();
+    save_settings(PrismSettings {
+        binary_path: Some(install.binary_path.clone()),
+        data_dir: Some(install.data_dir.clone()),
+        offline_username: existing_settings.offline_username,
+    })?;
+
+    on_progress(prism_progress_event(
+        "done",
+        100,
+        None,
+        None,
+        Some(format!("> installed :: {}", install.asset_name)),
+    ));
+    Ok(install)
 }
 
 /// Find Prism's data directory (where `instances/` lives).
@@ -715,14 +858,145 @@ fn copy_dir_merge(src: &Path, dst: &Path) -> std::io::Result<usize> {
 
 pub fn launch(instance_name: &str) -> Result<(), PrismError> {
     let bin = binary().ok_or(PrismError::NotDetected)?;
-    let status = Command::new(&bin)
-        .arg("--launch")
-        .arg(instance_name)
+    let settings = get_settings().unwrap_or_default();
+    let mut command = Command::new(&bin);
+
+    if let Some(data_dir) = settings
+        .data_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        command.arg("--dir").arg(data_dir);
+    }
+
+    command.arg("--launch").arg(instance_name);
+
+    if let Some(offline_username) = settings
+        .offline_username
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        ensure_offline_account(offline_username)?;
+        command.arg("--offline").arg(offline_username);
+    }
+
+    let status = command
         .spawn()
         .map_err(|e| PrismError::LaunchFailed(e.to_string()))?;
     // We don't wait — Prism spawns its own UI/process.
     drop(status);
     Ok(())
+}
+
+fn ensure_offline_account(username: &str) -> Result<(), PrismError> {
+    let Some(data_dir) = data_dir() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&data_dir)?;
+    let accounts_path = data_dir.join("accounts.json");
+    let desired_profile_id = offline_profile_id(username);
+    let mut root = if accounts_path.exists() {
+        let bytes = std::fs::read(&accounts_path)?;
+        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_else(|_| json!({}))
+    } else {
+        json!({})
+    };
+
+    if !root.is_object() {
+        root = json!({});
+    }
+
+    let root_object = root
+        .as_object_mut()
+        .ok_or_else(|| PrismError::Other(anyhow::anyhow!("accounts root must be an object")))?;
+    root_object.insert("formatVersion".to_string(), json!(3));
+
+    let accounts_value = root_object
+        .entry("accounts".to_string())
+        .or_insert_with(|| json!([]));
+    if !accounts_value.is_array() {
+        *accounts_value = json!([]);
+    }
+
+    let accounts = accounts_value
+        .as_array_mut()
+        .ok_or_else(|| PrismError::Other(anyhow::anyhow!("accounts must be an array")))?;
+    let mut next_accounts = Vec::with_capacity(accounts.len() + 1);
+    for account in accounts.iter() {
+        if offline_account_matches(account, username, &desired_profile_id) {
+            continue;
+        }
+
+        let mut cloned = account.clone();
+        if let Some(object) = cloned.as_object_mut() {
+            object.insert("active".to_string(), json!(false));
+        }
+        next_accounts.push(cloned);
+    }
+    next_accounts.push(build_offline_account(username, &desired_profile_id));
+    *accounts = next_accounts;
+
+    let bytes = serde_json::to_vec_pretty(&root).map_err(anyhow::Error::from)?;
+    std::fs::write(accounts_path, bytes)?;
+    Ok(())
+}
+
+fn offline_profile_id(username: &str) -> String {
+    Uuid::new_v3(&Uuid::NAMESPACE_OID, format!("OfflinePlayer:{username}").as_bytes())
+        .simple()
+        .to_string()
+}
+
+fn offline_account_matches(account: &serde_json::Value, username: &str, desired_profile_id: &str) -> bool {
+    account
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        == Some("Offline")
+        && (
+            account
+                .get("profile")
+                .and_then(|profile| profile.get("name"))
+                .and_then(serde_json::Value::as_str)
+                == Some(username)
+                || account
+                    .get("profile")
+                    .and_then(|profile| profile.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some(desired_profile_id)
+                || account
+                    .get("ygg")
+                    .and_then(|token| token.get("extra"))
+                    .and_then(|extra| extra.get("userName"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some(username)
+        )
+}
+
+fn build_offline_account(username: &str, profile_id: &str) -> serde_json::Value {
+    json!({
+        "active": true,
+        "type": "Offline",
+        "ygg": {
+            "token": "0",
+            "iat": chrono::Utc::now().timestamp(),
+            "extra": {
+                "userName": username,
+                "clientToken": Uuid::new_v4().simple().to_string(),
+            }
+        },
+        "profile": {
+            "id": profile_id,
+            "name": username,
+            "skin": {
+                "id": "",
+                "url": "",
+                "variant": ""
+            },
+            "capes": []
+        }
+    })
 }
 
 async fn fetch_adoptium_asset(major: u32, image_type: &str) -> Result<AdoptiumAsset, PrismError> {
@@ -746,6 +1020,211 @@ async fn fetch_adoptium_asset(major: u32, image_type: &str) -> Result<AdoptiumAs
         .into_iter()
         .next()
         .ok_or_else(|| PrismError::Other(anyhow::anyhow!("no Adoptium runtime found for Java {major} {image_type}")))
+}
+
+async fn fetch_latest_prism_release() -> Result<GitHubRelease, PrismError> {
+    Client::new()
+        .get("https://api.github.com/repos/Diegiwg/PrismLauncher-Cracked/releases/latest")
+        .header(reqwest::header::USER_AGENT, "modsync")
+        .send()
+        .await
+        .map_err(anyhow::Error::from)?
+        .error_for_status()
+        .map_err(anyhow::Error::from)?
+        .json::<GitHubRelease>()
+        .await
+        .map_err(anyhow::Error::from)
+        .map_err(PrismError::from)
+}
+
+fn select_managed_prism_asset(release: &GitHubRelease) -> Result<&GitHubReleaseAsset, PrismError> {
+    let Some(expected_name) = managed_prism_asset_name(&release.tag_name) else {
+        return Err(PrismError::UnsupportedPlatform(managed_prism_target_label()));
+    };
+
+    release
+        .assets
+        .iter()
+        .find(|asset| asset.name == expected_name)
+        .ok_or_else(|| PrismError::AssetNotFound(format!("{} ({})", expected_name, managed_prism_target_label())))
+}
+
+fn release_asset_sha256<'a>(asset: &'a GitHubReleaseAsset) -> Result<&'a str, PrismError> {
+    asset
+        .digest
+        .as_deref()
+        .and_then(|digest| digest.strip_prefix("sha256:"))
+        .ok_or_else(|| PrismError::MissingDigest(asset.name.clone()))
+}
+
+async fn download_prism_asset<F>(url: &str, expected_sha256: &str, on_progress: &mut F) -> Result<Vec<u8>, PrismError>
+where
+    F: FnMut(PrismInstallProgress) + Send,
+{
+    let response = Client::new()
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "modsync")
+        .send()
+        .await
+        .map_err(anyhow::Error::from)?
+        .error_for_status()
+        .map_err(anyhow::Error::from)?;
+    let total_bytes = response.content_length();
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::new();
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(anyhow::Error::from)?;
+        downloaded += chunk.len() as u64;
+        hasher.update(&chunk);
+        bytes.extend_from_slice(&chunk);
+
+        let progress = total_bytes
+            .filter(|total| *total > 0)
+            .map(|total| {
+                let scaled = 8u64 + downloaded.saturating_mul(72) / total;
+                u8::try_from(scaled.min(80)).unwrap_or(80)
+            })
+            .unwrap_or(8);
+        on_progress(prism_progress_event(
+            "downloading",
+            progress,
+            Some(downloaded),
+            total_bytes,
+            None,
+        ));
+    }
+
+    on_progress(prism_progress_event(
+        "verifying",
+        84,
+        None,
+        None,
+        Some("> verify GitHub asset SHA-256".to_string()),
+    ));
+    let actual_sha256 = hex::encode(hasher.finalize());
+    if actual_sha256 != expected_sha256 {
+        return Err(PrismError::Other(anyhow::anyhow!(
+            "launcher SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}"
+        )));
+    }
+
+    Ok(bytes)
+}
+
+fn install_prism_release(
+    release_tag: &str,
+    release_url: &str,
+    asset_name: &str,
+    bytes: Vec<u8>,
+) -> Result<ManagedPrismInstall, PrismError> {
+    let install_dir = paths::managed_prism_dir()?.join(sanitize_release_segment(release_tag));
+    if install_dir.exists() {
+        std::fs::remove_dir_all(&install_dir)?;
+    }
+    std::fs::create_dir_all(&install_dir)?;
+
+    if asset_name.ends_with(".zip") {
+        extract_zip_archive(&bytes, &install_dir)?;
+    } else if asset_name.ends_with(".tar.gz") {
+        extract_tar_gz_archive(&bytes, &install_dir)?;
+    } else {
+        return Err(PrismError::UnsupportedPlatform(format!(
+            "{} asset {}",
+            managed_prism_target_label(),
+            asset_name
+        )));
+    }
+
+    let binary_path = managed_prism_binary_path(&install_dir)?;
+    Ok(ManagedPrismInstall {
+        binary_path: binary_path.display().to_string(),
+        data_dir: install_dir.display().to_string(),
+        install_dir: install_dir.display().to_string(),
+        version: release_tag.to_string(),
+        asset_name: asset_name.to_string(),
+        release_url: release_url.to_string(),
+        offline_supported: true,
+    })
+}
+
+fn managed_prism_target_label() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn managed_prism_asset_name(tag: &str) -> Option<String> {
+    managed_prism_asset_name_for(std::env::consts::OS, std::env::consts::ARCH, tag)
+}
+
+fn managed_prism_asset_name_for(os: &str, arch: &str, tag: &str) -> Option<String> {
+    match os {
+        "linux" => match arch {
+            "x86_64" => Some(format!("PrismLauncher-Linux-Qt6-Portable-{tag}.tar.gz")),
+            "aarch64" => Some(format!("PrismLauncher-Linux-aarch64-Qt6-Portable-{tag}.tar.gz")),
+            _ => None,
+        },
+        "macos" => Some(format!("PrismLauncher-macOS-{tag}.zip")),
+        "windows" => match arch {
+            "x86_64" => Some(format!("PrismLauncher-Windows-MSVC-Portable-{tag}.zip")),
+            "aarch64" => Some(format!("PrismLauncher-Windows-MSVC-arm64-Portable-{tag}.zip")),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn managed_prism_binary_path(install_dir: &Path) -> Result<PathBuf, PrismError> {
+    let Some(relative_path) = managed_prism_binary_relative_path_for(std::env::consts::OS) else {
+        return Err(PrismError::UnsupportedPlatform(managed_prism_target_label()));
+    };
+    let binary_path = install_dir.join(relative_path);
+    if !binary_path.is_file() {
+        return Err(PrismError::Other(anyhow::anyhow!(
+            "managed launcher missing executable at {}",
+            binary_path.display()
+        )));
+    }
+    Ok(binary_path)
+}
+
+fn managed_prism_binary_relative_path_for(os: &str) -> Option<&'static str> {
+    match os {
+        "linux" => Some("PrismLauncher"),
+        "macos" => Some("Prism Launcher.app/Contents/MacOS/prismlauncher"),
+        "windows" => Some("prismlauncher.exe"),
+        _ => None,
+    }
+}
+
+fn sanitize_release_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn prism_progress_event(
+    stage: &str,
+    progress: u8,
+    current_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+    log_line: Option<String>,
+) -> PrismInstallProgress {
+    PrismInstallProgress {
+        stage: stage.to_string(),
+        progress,
+        current_bytes,
+        total_bytes,
+        log_line,
+    }
 }
 
 async fn download_verified_package<F>(url: &str, expected_sha256: &str, on_progress: &mut F) -> Result<Vec<u8>, PrismError>
@@ -905,6 +1384,17 @@ fn extract_zip_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismErro
         let Some(relative_path) = entry.enclosed_name().map(|value| value.to_path_buf()) else {
             continue;
         };
+        if relative_path
+            .components()
+            .next()
+            .and_then(|component| match component {
+                Component::Normal(value) => value.to_str(),
+                _ => None,
+            })
+            == Some("__MACOSX")
+        {
+            continue;
+        }
         let output_path = install_dir.join(relative_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&output_path)?;
@@ -915,8 +1405,58 @@ fn extract_zip_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismErro
         }
         let mut output = std::fs::File::create(&output_path)?;
         std::io::copy(&mut entry, &mut output)?;
+        #[cfg(unix)]
+        if let Some(mode) = entry.unix_mode() {
+            std::fs::set_permissions(&output_path, PermissionsExt::from_mode(mode))?;
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{managed_prism_asset_name_for, managed_prism_binary_relative_path_for};
+
+    #[test]
+    fn managed_prism_asset_names_cover_supported_platforms() {
+        assert_eq!(
+            managed_prism_asset_name_for("linux", "x86_64", "11.0.2-1").as_deref(),
+            Some("PrismLauncher-Linux-Qt6-Portable-11.0.2-1.tar.gz")
+        );
+        assert_eq!(
+            managed_prism_asset_name_for("linux", "aarch64", "11.0.2-1").as_deref(),
+            Some("PrismLauncher-Linux-aarch64-Qt6-Portable-11.0.2-1.tar.gz")
+        );
+        assert_eq!(
+            managed_prism_asset_name_for("macos", "x86_64", "11.0.2-1").as_deref(),
+            Some("PrismLauncher-macOS-11.0.2-1.zip")
+        );
+        assert_eq!(
+            managed_prism_asset_name_for("windows", "x86_64", "11.0.2-1").as_deref(),
+            Some("PrismLauncher-Windows-MSVC-Portable-11.0.2-1.zip")
+        );
+        assert_eq!(
+            managed_prism_asset_name_for("windows", "aarch64", "11.0.2-1").as_deref(),
+            Some("PrismLauncher-Windows-MSVC-arm64-Portable-11.0.2-1.zip")
+        );
+    }
+
+    #[test]
+    fn managed_prism_asset_names_reject_unsupported_targets() {
+        assert_eq!(managed_prism_asset_name_for("windows", "x86", "11.0.2-1"), None);
+        assert_eq!(managed_prism_asset_name_for("freebsd", "x86_64", "11.0.2-1"), None);
+    }
+
+    #[test]
+    fn managed_prism_binary_paths_cover_supported_platforms() {
+        assert_eq!(managed_prism_binary_relative_path_for("linux"), Some("PrismLauncher"));
+        assert_eq!(
+            managed_prism_binary_relative_path_for("macos"),
+            Some("Prism Launcher.app/Contents/MacOS/prismlauncher")
+        );
+        assert_eq!(managed_prism_binary_relative_path_for("windows"), Some("prismlauncher.exe"));
+        assert_eq!(managed_prism_binary_relative_path_for("freebsd"), None);
+    }
 }
 
 fn extract_tar_gz_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismError> {

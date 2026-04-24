@@ -83,12 +83,24 @@ pub struct PublishPushReport {
 pub type LaunchProfile = prism::LaunchProfile;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
 pub type JavaInstallProgress = prism::JavaInstallProgress;
+pub type ManagedPrismInstall = prism::ManagedPrismInstall;
 pub type PrismAccountStatus = prism::PrismAccountStatus;
+pub type PrismInstallProgress = prism::PrismInstallProgress;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JavaInstallProgressEvent {
     pub pack_id: String,
+    pub stage: String,
+    pub progress: u8,
+    pub current_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub log_line: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismInstallProgressEvent {
     pub stage: String,
     pub progress: u8,
     pub current_bytes: Option<u64>,
@@ -311,10 +323,12 @@ pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> 
 pub async fn set_prism_settings(
     binary_path: Option<String>,
     data_dir: Option<String>,
+    offline_username: Option<String>,
 ) -> Result<prism::PrismSettings, CommandError> {
     let settings = prism::PrismSettings {
         binary_path: binary_path.and_then(normalize_optional_path),
         data_dir: data_dir.and_then(normalize_optional_path),
+        offline_username: offline_username.and_then(normalize_optional_text),
     };
     tokio::task::spawn_blocking(move || prism::save_settings(settings))
         .await
@@ -425,6 +439,22 @@ pub async fn get_launch_profile(pack_id: String) -> Result<LaunchProfile, Comman
 }
 
 #[tauri::command]
+pub async fn has_managed_java(major: u32) -> Result<bool, CommandError> {
+    tokio::task::spawn_blocking(move || prism::has_managed_java(major))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn clear_onboarding_settings(major: u32) -> Result<prism::PrismSettings, CommandError> {
+    tokio::task::spawn_blocking(move || prism::clear_onboarding_settings(major))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn set_launch_profile(pack_id: String, profile: LaunchProfile) -> Result<LaunchProfile, CommandError> {
     tokio::task::spawn_blocking(move || prism::save_launch_profile(&pack_id, &profile))
         .await
@@ -444,6 +474,24 @@ pub async fn install_adoptium_java(
             "java-install-progress",
             JavaInstallProgressEvent {
                 pack_id: pack_id.clone(),
+                stage: progress.stage,
+                progress: progress.progress,
+                current_bytes: progress.current_bytes,
+                total_bytes: progress.total_bytes,
+                log_line: progress.log_line,
+            },
+        );
+    })
+    .await
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn install_managed_prism(app: tauri::AppHandle) -> Result<ManagedPrismInstall, CommandError> {
+    prism::install_managed_prism(|progress: PrismInstallProgress| {
+        let _ = app.emit(
+            "prism-install-progress",
+            PrismInstallProgressEvent {
                 stage: progress.stage,
                 progress: progress.progress,
                 current_bytes: progress.current_bytes,
@@ -1368,6 +1416,15 @@ fn read_publish_auth_settings() -> Result<PublishAuthSettings, CommandError> {
 }
 
 fn normalize_optional_path(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_optional_text(value: String) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         None
