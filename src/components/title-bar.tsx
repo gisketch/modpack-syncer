@@ -1,7 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { cn } from "@/lib/cn";
+import { cn } from "@/lib/utils";
 
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
