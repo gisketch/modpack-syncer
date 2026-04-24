@@ -183,8 +183,8 @@ export const tauri = {
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   getInstanceMinecraftDir: (instanceName: string) =>
     invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
-  packChangelog: (packId: string, limit?: number) =>
-    invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit }),
+  packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>
+    invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
   suggestPublishVersion: (packId: string) =>
     invoke<string>("suggest_publish_version", { packId }),
   previewModrinthMod: (packId: string, identifier: string) =>

@@ -20,8 +20,10 @@ type AppState = {
   profiles: Profile[];
   activeProfile: string | null;
   adminModeByPack: Record<string, boolean>;
+  lastSyncedCommitByPack: Record<string, string>;
   setActiveProfile: (name: string | null) => void;
   setPackAdminMode: (packId: string, adminMode: boolean) => void;
+  setLastSyncedCommit: (packId: string, commitSha: string) => void;
   isPackAdminMode: (packId: string) => boolean;
   addPack: (pack: Pack) => void;
 };
@@ -33,12 +35,20 @@ export const useAppStore = create<AppState>()(
       profiles: [],
       activeProfile: null,
       adminModeByPack: {},
+      lastSyncedCommitByPack: {},
       setActiveProfile: (name) => set({ activeProfile: name }),
       setPackAdminMode: (packId, adminMode) =>
         set((state) => ({
           adminModeByPack: {
             ...state.adminModeByPack,
             [packId]: adminMode,
+          },
+        })),
+      setLastSyncedCommit: (packId, commitSha) =>
+        set((state) => ({
+          lastSyncedCommitByPack: {
+            ...state.lastSyncedCommitByPack,
+            [packId]: commitSha,
           },
         })),
       isPackAdminMode: (packId) => get().adminModeByPack[packId] ?? false,
@@ -49,6 +59,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         activeProfile: state.activeProfile,
         adminModeByPack: state.adminModeByPack,
+        lastSyncedCommitByPack: state.lastSyncedCommitByPack,
       }),
     },
   ),

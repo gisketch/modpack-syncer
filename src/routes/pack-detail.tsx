@@ -84,6 +84,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
   const adminMode = useAppStore((s) => s.adminModeByPack[packId] ?? false);
+  const lastSyncedCommit = useAppStore((s) => s.lastSyncedCommitByPack[packId] ?? null);
+  const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -145,8 +147,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     retry: false,
   });
   const changelog = useQuery({
-    queryKey: ["pack-changelog", packId],
-    queryFn: () => tauri.packChangelog(packId, 12),
+    queryKey: ["pack-changelog", packId, lastSyncedCommit],
+    queryFn: () => tauri.packChangelog(packId, 12, lastSyncedCommit),
     retry: false,
   });
   const statusMap = new Map<string, ModStatusValue>(
@@ -239,9 +241,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       });
       setReport(null);
     },
-    onSuccess: (r) => {
+    onSuccess: async (r) => {
       setReport(r);
-      statuses.refetch();
+      const syncHeadSha = pack.data?.head_sha;
+      if (syncHeadSha) {
+        setLastSyncedCommit(packId, syncHeadSha);
+      }
+      await Promise.all([
+        statuses.refetch(),
+        qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
+      ]);
       toast.success("Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
       });

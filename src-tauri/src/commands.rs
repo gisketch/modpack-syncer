@@ -554,10 +554,11 @@ pub async fn get_instance_minecraft_dir(instance_name: String) -> Result<Option<
 pub async fn pack_changelog(
     pack_id: String,
     limit: Option<usize>,
+    since_commit: Option<String>,
 ) -> Result<Vec<PackChangelogEntry>, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let limit = limit.unwrap_or(12);
-    tokio::task::spawn_blocking(move || load_pack_changelog(&pack_dir, limit))
+    tokio::task::spawn_blocking(move || load_pack_changelog(&pack_dir, limit, since_commit.as_deref()))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))?
 }
@@ -1477,6 +1478,7 @@ fn unique_local_id(prefix: &str, filename: &str, used_ids: &mut std::collections
 fn load_pack_changelog(
     repo_dir: &std::path::Path,
     limit: usize,
+    since_commit: Option<&str>,
 ) -> Result<Vec<PackChangelogEntry>, CommandError> {
     use git2::{Delta, Repository};
 
@@ -1485,8 +1487,11 @@ fn load_pack_changelog(
     walk.push_head()?;
 
     let mut entries = Vec::new();
-    for oid in walk.take(limit) {
+    for oid in walk {
         let oid = oid?;
+        if since_commit.is_some_and(|base| oid.to_string() == base) {
+            break;
+        }
         let commit = repo.find_commit(oid)?;
         let tree = commit.tree()?;
         let parent = commit.parents().next();
@@ -1578,6 +1583,10 @@ fn load_pack_changelog(
             committed_at: commit.time().seconds(),
             items,
         });
+
+        if entries.len() >= limit {
+            break;
+        }
     }
 
     Ok(entries)
