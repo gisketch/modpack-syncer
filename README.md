@@ -53,6 +53,8 @@ bun run tauri dev
 
 Windows app releases publish through GitHub Actions.
 
+See [docs/update_syncer.md](docs/update_syncer.md) for the full step-by-step release runbook.
+
 ```bash
 bun run release:sync 0.1.0
 # review + commit version changes
