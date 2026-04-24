@@ -36,6 +36,7 @@ pub fn run() {
             commands::detect_prism,
             commands::sync_instance,
             commands::launch_instance,
+            commands::mod_statuses,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

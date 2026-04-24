@@ -24,7 +24,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatError } from "@/lib/format-error";
-import { type SyncInstanceReport, tauri } from "@/lib/tauri";
+import { useModrinthProjects } from "@/lib/modrinth";
+import {
+  type ManifestEntry,
+  type ModStatusValue,
+  type SyncInstanceReport,
+  tauri,
+} from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { useNav } from "@/stores/nav-store";
 
 export function PackDetailRoute({ packId }: { packId: string }) {
@@ -52,6 +59,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
 
+  const statuses = useQuery({
+    queryKey: ["mod-statuses", packId],
+    queryFn: () => tauri.modStatuses(packId),
+    enabled: !!manifest.data,
+    retry: false,
+  });
+  const statusMap = new Map<string, ModStatusValue>(
+    (statuses.data ?? []).map((s) => [s.id, s.status]),
+  );
+
+  const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
+
   const sync = useMutation({
     mutationFn: () => tauri.syncInstance(packId),
     onMutate: () => {
@@ -60,6 +79,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
     onSuccess: (r) => {
       setReport(r);
+      statuses.refetch();
       toast.success("Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.overrides_copied} overrides`,
       });
@@ -189,29 +209,31 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-10" />
                     <TableHead>NAME</TableHead>
                     <TableHead>SOURCE</TableHead>
                     <TableHead>SIDE</TableHead>
+                    <TableHead>STATUS</TableHead>
                     <TableHead className="text-right">SIZE</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {manifest.data.mods.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell className="font-mono text-xs">{m.filename}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {m.source === "url" ? <Globe className="size-3" /> : null}
-                          {m.source.toUpperCase()}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-[--text-low] text-xs uppercase">
-                        {m.side}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-[--text-low] text-xs">
-                        {formatBytes(m.size)}
-                      </TableCell>
-                    </TableRow>
+                    <ModRow
+                      key={m.id}
+                      entry={m}
+                      icon={
+                        m.source === "modrinth" && m.projectId
+                          ? (modrinthMap.get(m.projectId)?.icon_url ?? null)
+                          : null
+                      }
+                      title={
+                        m.source === "modrinth" && m.projectId
+                          ? (modrinthMap.get(m.projectId)?.title ?? null)
+                          : null
+                      }
+                      status={statusMap.get(m.id) ?? "missing"}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -304,4 +326,78 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ModRow({
+  entry,
+  icon,
+  title,
+  status,
+}: {
+  entry: ManifestEntry;
+  icon: string | null;
+  title: string | null;
+  status: ModStatusValue;
+}) {
+  const displayName = title ?? entry.filename.replace(/\.jar$/i, "");
+  return (
+    <TableRow>
+      <TableCell>
+        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
+          {icon ? (
+            <img src={icon} alt="" className="size-full object-cover" loading="lazy" />
+          ) : (
+            <Package className="size-4 text-text-low" />
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-high text-xs">{displayName}</span>
+          <span className="font-mono text-[10px] text-text-low">{entry.filename}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">
+          {entry.source === "url" ? <Globe className="size-3" /> : null}
+          {entry.source.toUpperCase()}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-text-low text-xs uppercase">{entry.side}</TableCell>
+      <TableCell>
+        <StatusChip status={status} />
+      </TableCell>
+      <TableCell className="text-right font-mono text-text-low text-xs">
+        {formatBytes(entry.size)}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: string }> = {
+  synced: {
+    label: "SYNCED",
+    dot: "bg-signal-live shadow-[0_0_6px_var(--color-signal-live)]",
+    text: "text-signal-live",
+  },
+  outdated: {
+    label: "OUTDATED",
+    dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
+    text: "text-signal-warn",
+  },
+  missing: {
+    label: "MISSING",
+    dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
+    text: "text-signal-alert",
+  },
+};
+
+function StatusChip({ status }: { status: ModStatusValue }) {
+  const meta = STATUS_META[status];
+  return (
+    <span className={cn("inline-flex items-center gap-2 text-[10px] tracking-[0.18em]", meta.text)}>
+      <span className={cn("size-2 rounded-full", meta.dot)} />
+      {meta.label}
+    </span>
+  );
 }

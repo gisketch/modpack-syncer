@@ -76,4 +76,9 @@ export const tauri = {
   syncInstance: (packId: string, instanceName?: string) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
+  modStatuses: (packId: string, instanceName?: string) =>
+    invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
 };
+
+export type ModStatusValue = "synced" | "outdated" | "missing";
+export type ModStatus = { id: string; status: ModStatusValue };

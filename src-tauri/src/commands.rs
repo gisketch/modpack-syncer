@@ -177,3 +177,62 @@ pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> 
         .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(())
 }
+
+#[derive(Debug, Serialize)]
+pub struct ModStatus {
+    pub id: String,
+    pub status: &'static str, // "synced" | "outdated" | "missing"
+}
+
+#[tauri::command]
+pub async fn mod_statuses(
+    pack_id: String,
+    instance_name: Option<String>,
+) -> Result<Vec<ModStatus>, CommandError> {
+    use sha1::{Digest as _, Sha1};
+
+    let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+    let m = tokio::task::spawn_blocking({
+        let p = manifest_path.clone();
+        move || manifest::load_from_path(&p)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    let inst_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let mods_dir_opt = prism::instance_mods_dir(&inst_name);
+
+    tokio::task::spawn_blocking(move || {
+        let mut out = Vec::with_capacity(m.mods.len());
+        for e in &m.mods {
+            let status = match &mods_dir_opt {
+                None => "missing",
+                Some(dir) => {
+                    let p = dir.join(&e.filename);
+                    if !p.exists() {
+                        "missing"
+                    } else {
+                        match std::fs::read(&p) {
+                            Ok(bytes) => {
+                                let got = hex::encode(Sha1::digest(&bytes));
+                                if got.eq_ignore_ascii_case(&e.sha1) {
+                                    "synced"
+                                } else {
+                                    "outdated"
+                                }
+                            }
+                            Err(_) => "missing",
+                        }
+                    }
+                }
+            };
+            out.push(ModStatus {
+                id: e.id.clone(),
+                status,
+            });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}

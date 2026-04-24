@@ -134,6 +134,13 @@ fn dot_minecraft(instance_dir: &Path) -> PathBuf {
     }
 }
 
+/// Resolve the `mods/` folder for a given Prism instance (best-effort; returns
+/// `None` if Prism data dir cannot be located).
+pub fn instance_mods_dir(instance_name: &str) -> Option<PathBuf> {
+    let data = data_dir()?;
+    Some(dot_minecraft(&data.join("instances").join(instance_name)).join("mods"))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct InstanceWriteReport {
     pub instance_dir: String,

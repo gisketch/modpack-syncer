@@ -144,6 +144,7 @@
   --line-soft: #484848;
   --line-strong: #757575;
   --signal-live: #bfff00;
+  --signal-warn: #ffc857;
   --signal-alert: #ff7351;
   --tactical-glow: 0 0 24px rgba(191, 255, 0, 0.05);
   --tactical-cut: 0.7rem;
@@ -168,6 +169,7 @@
   --line-soft: #484848;
   --line-strong: #757575;
   --signal-live: #bfff00;
+  --signal-warn: #ffc857;
   --signal-alert: #ff7351;
   --tactical-glow: 0 0 24px rgba(191, 255, 0, 0.05);
 }
@@ -188,6 +190,7 @@
   --color-line-soft: var(--line-soft);
   --color-line-strong: var(--line-strong);
   --color-signal-live: var(--signal-live);
+  --color-signal-warn: var(--signal-warn);
   --color-signal-alert: var(--signal-alert);
   --radius-sharp: var(--radius-sharp);
   --radius-smooth: var(--radius-smooth);
