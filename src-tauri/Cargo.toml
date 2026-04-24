@@ -28,7 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures = "0.3"
 
 # Git (libgit2 bindings, vendored so no system git needed)
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2", "vendored-openssl", "https"] }
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2", "https"] }
 
 # S3 / MinIO
 aws-config = { version = "1", features = ["behavior-version-latest"] }
@@ -63,6 +63,9 @@ keyring = "3"
 
 # Paths
 directories = "5"
+
+# URL parsing (allowlist checks)
+url = "2"
 
 # Concurrency helpers
 parking_lot = "0.12"

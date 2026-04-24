@@ -71,7 +71,8 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 - [ ] Per-profile Java selector
 - [ ] RAM/JVM args tuner UI
 - [ ] Update check on app open (fetch + notify)
-- [ ] Onboarding wizard (first run)
+- [ ] Onboarding wizard (first run: detect Prism, download Java, paste pack URL)
+- [ ] Prism Launcher auto-install prompt if not detected (opens official download page / silent installer where possible)
 
 ## M6 — Partial-file sync & edge cases
 

@@ -3,11 +3,13 @@
 // See docs/architecture.md.
 
 mod cache;
+mod commands;
 mod db;
 mod download;
 mod git;
 mod keychain;
 mod manifest;
+mod paths;
 mod prism;
 mod profile;
 
@@ -25,7 +27,16 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_log::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::add_pack,
+            commands::list_packs,
+            commands::load_manifest,
+            commands::fetch_mods,
+            commands::detect_prism,
+            commands::sync_instance,
+            commands::launch_instance,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
