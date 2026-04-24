@@ -31,6 +31,7 @@ pub fn run() {
             greet,
             commands::add_pack,
             commands::list_packs,
+            commands::update_pack,
             commands::load_manifest,
             commands::fetch_mods,
             commands::detect_prism,

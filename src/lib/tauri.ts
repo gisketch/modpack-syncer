@@ -62,6 +62,25 @@ export type SyncInstanceReport = {
   instance: InstanceWriteReport;
 };
 
+export type SyncProgressStatus =
+  | "downloading"
+  | "cached"
+  | "downloaded"
+  | "failed"
+  | "writing-instance"
+  | "done";
+
+export type SyncProgressEvent = {
+  packId: string;
+  filename?: string | null;
+  status: SyncProgressStatus;
+  completed: number;
+  total: number;
+  cached: number;
+  downloaded: number;
+  failures: number;
+};
+
 /**
  * Typed wrappers around Tauri commands exposed by the Rust backend.
  * Keep this file in sync with `src-tauri/src/lib.rs#invoke_handler`.
@@ -70,6 +89,7 @@ export const tauri = {
   greet: (name: string) => invoke<string>("greet", { name }),
   addPack: (url: string) => invoke<PackSummary>("add_pack", { url }),
   listPacks: () => invoke<PackSummary[]>("list_packs"),
+  updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
@@ -80,5 +100,10 @@ export const tauri = {
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
 };
 
-export type ModStatusValue = "synced" | "outdated" | "missing";
-export type ModStatus = { id: string; status: ModStatusValue };
+export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted";
+export type ModStatus = {
+  id?: string | null;
+  filename: string;
+  size?: number | null;
+  status: ModStatusValue;
+};

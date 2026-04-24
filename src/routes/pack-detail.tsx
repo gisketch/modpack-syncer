@@ -1,20 +1,34 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, Globe, Loader2, Package, Play, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  Check,
+  Download,
+  FolderGit2,
+  Globe,
+  Loader2,
+  Package,
+  Play,
+  RefreshCw,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
+  DialogBody,
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
 import {
   Table,
   TableBody,
@@ -27,7 +41,9 @@ import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
   type ManifestEntry,
+  type ModStatus,
   type ModStatusValue,
+  type SyncProgressEvent,
   type SyncInstanceReport,
   tauri,
 } from "@/lib/tauri";
@@ -36,6 +52,7 @@ import { useNav } from "@/stores/nav-store";
 
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
+  const qc = useQueryClient();
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -56,8 +73,25 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const instanceName = `modsync-${packId}`;
+  const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    void listen<SyncProgressEvent>("sync-progress", (event) => {
+      if (event.payload.packId !== packId) return;
+      setProgress(event.payload);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [packId]);
 
   const statuses = useQuery({
     queryKey: ["mod-statuses", packId],
@@ -66,15 +100,64 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     retry: false,
   });
   const statusMap = new Map<string, ModStatusValue>(
-    (statuses.data ?? []).map((s) => [s.id, s.status]),
+    (statuses.data ?? [])
+      .filter((s) => s.status !== "deleted")
+      .map((s) => [s.filename, s.status]),
   );
+  const deletedMods = (statuses.data ?? []).filter((s) => s.status === "deleted");
+  const launchRiskCount = (statuses.data ?? []).filter(
+    (s) => s.status === "missing" || s.status === "outdated",
+  ).length;
 
   const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
+  const progressEntry = progress?.filename
+    ? (manifest.data?.mods.find((m) => m.filename === progress.filename) ?? null)
+    : null;
+  const progressView = progress
+    ? {
+        icon:
+          progressEntry?.source === "modrinth" && progressEntry.projectId
+            ? (modrinthMap.get(progressEntry.projectId)?.icon_url ?? null)
+            : null,
+        title:
+          progressEntry?.source === "modrinth" && progressEntry.projectId
+            ? (modrinthMap.get(progressEntry.projectId)?.title ?? null)
+            : null,
+        filename: progress.filename ?? null,
+      }
+    : null;
+
+  const fetchPack = useMutation({
+    mutationFn: () => tauri.updatePack(packId),
+    onSuccess: async (updatedPack) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["packs"] }),
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+      ]);
+      toast.success("Pack updated", {
+        description: updatedPack.head_sha.slice(0, 10),
+      });
+    },
+    onError: (e) => {
+      toast.error("Fetch failed", { description: formatError(e) });
+    },
+  });
 
   const sync = useMutation({
     mutationFn: () => tauri.syncInstance(packId),
     onMutate: () => {
       setSyncOpen(true);
+      setProgress({
+        packId,
+        status: "downloading",
+        filename: null,
+        completed: 0,
+        total: manifest.data?.mods.length ?? 0,
+        cached: 0,
+        downloaded: 0,
+        failures: 0,
+      });
       setReport(null);
     },
     onSuccess: (r) => {
@@ -95,6 +178,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     onSuccess: () => toast.success("Prism launched"),
     onError: (e) => toast.error("Launch failed", { description: formatError(e) }),
   });
+
+  function handleLaunchClick() {
+    if (launchRiskCount > 0) {
+      setLaunchConfirmOpen(true);
+      return;
+    }
+    launch.mutate();
+  }
 
   if (pack.data === null && !pack.isLoading) {
     return (
@@ -143,16 +234,24 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </div>
         <div className="flex gap-2">
           <Button
+            variant="outline"
+            onClick={() => fetchPack.mutate()}
+            disabled={fetchPack.isPending || sync.isPending || launch.isPending}
+          >
+            {fetchPack.isPending ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+            FETCH
+          </Button>
+          <Button
             variant="secondary"
             onClick={() => sync.mutate()}
-            disabled={sync.isPending || !manifest.data || !prism.data}
+            disabled={fetchPack.isPending || sync.isPending || !manifest.data || !prism.data}
           >
             {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             SYNC
           </Button>
           <Button
-            onClick={() => launch.mutate()}
-            disabled={launch.isPending || !prism.data || sync.isPending}
+            onClick={handleLaunchClick}
+            disabled={fetchPack.isPending || launch.isPending || !prism.data || sync.isPending}
           >
             {launch.isPending ? <Loader2 className="animate-spin" /> : <Play />}
             LAUNCH
@@ -202,6 +301,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             </CardTitle>
             <CardDescription>
               {manifest.data.mods.length} entries tracked by manifest
+              {deletedMods.length > 0 ? ` · ${deletedMods.length} deleted in instance` : ""}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -232,8 +332,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                           ? (modrinthMap.get(m.projectId)?.title ?? null)
                           : null
                       }
-                      status={statusMap.get(m.id) ?? "missing"}
+                      status={statusMap.get(m.filename) ?? "missing"}
                     />
+                  ))}
+                  {deletedMods.map((m) => (
+                    <DeletedModRow key={`deleted:${m.filename}`} mod={m} />
                   ))}
                 </TableBody>
               </Table>
@@ -246,8 +349,44 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         open={syncOpen}
         onClose={() => setSyncOpen(false)}
         pending={sync.isPending}
+        progress={progress}
+        progressView={progressView}
         report={report}
       />
+
+      <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
+        <DialogContent variant="destructive" className="overflow-hidden max-w-md">
+          <DialogHeader>
+            <DialogTitle>PLEASE UPDATE FIRST BEFORE LAUNCHING</DialogTitle>
+            <DialogDescription>
+              {launchRiskCount} mod{launchRiskCount === 1 ? " is" : "s are"} missing or outdated.
+              Launching now may break pack.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="flex flex-col gap-3 text-sm text-text-low">
+              <p>Sync pack first for clean instance.</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-signal-alert">
+                Proceed only if you know instance mismatch is safe.
+              </p>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setLaunchConfirmOpen(false)}>
+              OKAY
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setLaunchConfirmOpen(false);
+                launch.mutate();
+              }}
+            >
+              LAUNCH ANYWAY
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -256,56 +395,113 @@ function SyncDialog({
   open,
   onClose,
   pending,
+  progress,
+  progressView,
   report,
 }: {
   open: boolean;
   onClose: () => void;
   pending: boolean;
+  progress: SyncProgressEvent | null;
+  progressView: { icon: string | null; title: string | null; filename: string | null } | null;
   report: SyncInstanceReport | null;
 }) {
+  const total = Math.max(progress?.total ?? 0, 1);
+  const completed = Math.min(progress?.completed ?? 0, total);
+  const currentLabel = progressView?.title ?? progressView?.filename ?? "Preparing sync";
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+      <DialogContent className="overflow-hidden">
         <DialogHeader>
           <DialogTitle>{pending ? "SYNCING" : report ? "SYNC OK" : "SYNC"}</DialogTitle>
           <DialogDescription>
             {pending
-              ? "Downloading + writing Prism instance…"
+              ? syncProgressDescription(progress)
               : report
                 ? `${report.instance.mods_written} mods · ${report.instance.overrides_copied} overrides`
                 : ""}
           </DialogDescription>
         </DialogHeader>
 
-        {pending && (
-          <div className="flex items-center justify-center gap-3 py-6">
-            <Loader2 className="size-5 animate-spin text-brand-core" />
-            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-              :: WORKING
-            </span>
-          </div>
-        )}
+            <DialogBody className="p-6">
+              {pending && (
+                <div className="flex flex-col gap-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                      :: {syncProgressLabel(progress)}
+                    </span>
+                    <span className="font-heading text-xs tracking-[0.18em] text-brand-core">
+                      {progress?.completed ?? 0}/{progress?.total ?? 0}
+                    </span>
+                  </div>
 
-        {report && !pending && (
-          <div className="flex flex-col gap-2 py-4 text-xs">
-            <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
-            <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
-            <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
-            <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
-            {report.fetch.failures.length > 0 && (
-              <Row k="FAILURES" v={String(report.fetch.failures.length)} alert />
-            )}
-            <p className="mt-2 truncate font-mono text-[10px] text-[--text-low]">
-              {report.instance.instance_dir}
-            </p>
-          </div>
-        )}
+                  <Slider value={[completed]} max={total} disabled>
+                    <SliderControl>
+                      <SliderTrack>
+                        <SliderIndicator />
+                      </SliderTrack>
+                      <SliderThumb className="opacity-0" />
+                    </SliderControl>
+                  </Slider>
 
-        <div className="flex justify-end pt-2">
-          <Button variant="secondary" onClick={onClose} disabled={pending}>
-            CLOSE
-          </Button>
-        </div>
+                  <div className="flex items-center gap-3 border border-line-soft/30 bg-surface-sunken px-4 py-4">
+                    <div className="flex size-10 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
+                      {progressView?.icon ? (
+                        <img
+                          src={progressView.icon}
+                          alt=""
+                          className="size-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : progress?.status === "downloaded" || progress?.status === "cached" ? (
+                        <Check className="size-4 text-brand-core" />
+                      ) : progress?.status === "downloading" || progress?.status === "writing-instance" ? (
+                        <Loader2 className="size-4 animate-spin text-brand-core" />
+                      ) : (
+                        <Package className="size-4 text-text-low" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-text-high">{currentLabel}</p>
+                      <p className="truncate font-mono text-[10px] text-text-low">
+                        {progress?.status === "writing-instance"
+                          ? "Writing Prism instance"
+                          : progressView?.filename ?? "Waiting for next mod"}
+                      </p>
+                    </div>
+                    <StatusChip status={syncProgressToStatus(progress)} />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <Row k="CACHED" v={String(progress?.cached ?? 0)} />
+                    <Row k="DOWNLOADED" v={String(progress?.downloaded ?? 0)} />
+                    <Row k="FAILURES" v={String(progress?.failures ?? 0)} alert={(progress?.failures ?? 0) > 0} />
+                  </div>
+                </div>
+              )}
+
+              {report && !pending && (
+                <div className="flex flex-col gap-2 text-xs">
+                  <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
+                  <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
+                  <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
+                  <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
+                  {report.fetch.failures.length > 0 && (
+                    <Row k="FAILURES" v={String(report.fetch.failures.length)} alert />
+                  )}
+                  <p className="mt-2 truncate font-mono text-[10px] text-[--text-low]">
+                    {report.instance.instance_dir}
+                  </p>
+                </div>
+              )}
+            </DialogBody>
+
+            <DialogFooter className="px-6 py-4">
+              <Button variant="secondary" onClick={onClose} disabled={pending}>
+                CLOSE
+              </Button>
+            </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -374,6 +570,35 @@ function ModRow({
   );
 }
 
+
+function DeletedModRow({ mod }: { mod: ModStatus }) {
+  const displayName = mod.filename.replace(/\.jar$/i, "");
+  return (
+    <TableRow className="opacity-45">
+      <TableCell>
+        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
+          <Package className="size-4 text-text-low" />
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-text-low text-xs line-through">{displayName}</span>
+          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">REMOVED</Badge>
+      </TableCell>
+      <TableCell className="text-text-low text-xs uppercase">--</TableCell>
+      <TableCell>
+        <StatusChip status="deleted" />
+      </TableCell>
+      <TableCell className="text-right font-mono text-text-low text-xs">
+        {typeof mod.size === "number" ? formatBytes(mod.size) : "--"}
+      </TableCell>
+    </TableRow>
+  );
+}
 const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: string }> = {
   synced: {
     label: "SYNCED",
@@ -390,6 +615,11 @@ const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: st
     dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
     text: "text-signal-alert",
   },
+  deleted: {
+    label: "DELETED",
+    dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
+    text: "text-signal-alert",
+  },
 };
 
 function StatusChip({ status }: { status: ModStatusValue }) {
@@ -400,4 +630,31 @@ function StatusChip({ status }: { status: ModStatusValue }) {
       {meta.label}
     </span>
   );
+}
+
+function syncProgressLabel(progress: SyncProgressEvent | null) {
+  if (!progress) return "WORKING";
+  if (progress.status === "writing-instance") return "WRITING";
+  if (progress.status === "cached") return "CACHED";
+  if (progress.status === "downloaded") return "DOWNLOADED";
+  if (progress.status === "failed") return "FAILED";
+  if (progress.status === "done") return "DONE";
+  return "DOWNLOADING";
+}
+
+function syncProgressDescription(progress: SyncProgressEvent | null) {
+  if (!progress) return "Downloading + writing Prism instance…";
+  if (progress.status === "writing-instance") {
+    return `Writing instance files · ${progress.completed}/${progress.total}`;
+  }
+  return `${progress.completed}/${progress.total} mods processed`;
+}
+
+function syncProgressToStatus(progress: SyncProgressEvent | null): ModStatusValue {
+  if (!progress) return "missing";
+  if (progress.status === "cached" || progress.status === "downloaded" || progress.status === "done") {
+    return "synced";
+  }
+  if (progress.status === "failed") return "deleted";
+  return "outdated";
 }

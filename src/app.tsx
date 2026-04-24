@@ -5,9 +5,12 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
   SidebarHeader,
   SidebarItem,
   SidebarItemIcon,
+  SidebarSubItem,
+  SidebarSubmenu,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { tauri } from "@/lib/tauri";
@@ -61,6 +64,10 @@ function RootGate() {
 function Shell() {
   const view = useNav((s) => s.view);
   const go = useNav((s) => s.go);
+  const packs = useQuery({
+    queryKey: ["packs"],
+    queryFn: () => tauri.listPacks(),
+  });
 
   const onPacks = view.kind === "packs" || view.kind === "pack";
 
@@ -78,19 +85,38 @@ function Shell() {
           </div>
         </SidebarHeader>
         <SidebarContent>
-          <SidebarItem
-            href="#"
-            active={onPacks}
-            onClick={(e) => {
-              e.preventDefault();
-              go({ kind: "packs" });
-            }}
-          >
-            <SidebarItemIcon>
-              <Package className="size-4" />
-            </SidebarItemIcon>
-            PACKS
-          </SidebarItem>
+          <SidebarGroup>
+            <SidebarItem
+              href="#"
+              active={onPacks}
+              onClick={(e) => {
+                e.preventDefault();
+                go({ kind: "packs" });
+              }}
+            >
+              <SidebarItemIcon>
+                <Package className="size-4" />
+              </SidebarItemIcon>
+              PACKS
+            </SidebarItem>
+            {packs.data && packs.data.length > 0 && (
+              <SidebarSubmenu>
+                {packs.data.map((pack) => (
+                  <SidebarSubItem
+                    key={pack.id}
+                    href="#"
+                    active={view.kind === "pack" && view.id === pack.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      go({ kind: "pack", id: pack.id });
+                    }}
+                  >
+                    {pack.id}
+                  </SidebarSubItem>
+                ))}
+              </SidebarSubmenu>
+            )}
+          </SidebarGroup>
           <SidebarItem
             href="#"
             active={view.kind === "settings"}

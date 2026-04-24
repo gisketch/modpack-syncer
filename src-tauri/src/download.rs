@@ -129,20 +129,42 @@ pub struct FetchReport {
     pub failures: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FetchProgress {
+    pub filename: String,
+    pub status: &'static str, // "downloading" | "cached" | "downloaded" | "failed"
+    pub completed: usize,
+    pub total: usize,
+    pub cached: usize,
+    pub downloaded: usize,
+    pub failures: usize,
+}
+
 pub async fn fetch_all(entries: Vec<Entry>) -> FetchReport {
+    fetch_all_with_progress(entries, |_| {}).await
+}
+
+pub async fn fetch_all_with_progress<F>(entries: Vec<Entry>, mut on_progress: F) -> FetchReport
+where
+    F: FnMut(FetchProgress) + Send,
+{
     let sem = Arc::new(Semaphore::new(MAX_PARALLEL));
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut tasks: FuturesUnordered<_> = entries
         .into_iter()
         .map(|entry| {
             let sem = sem.clone();
+            let progress_tx = progress_tx.clone();
             async move {
                 let _permit = sem.acquire_owned().await.unwrap();
                 let was_cached = cache::exists_and_matches(&entry.sha1).unwrap_or(false);
+                let _ = progress_tx.send(entry.filename.clone());
                 let result = fetch_entry(&entry).await;
                 (entry.filename.clone(), was_cached, result)
             }
         })
         .collect();
+    drop(progress_tx);
 
     let mut report = FetchReport {
         total: tasks.len(),
@@ -150,17 +172,50 @@ pub async fn fetch_all(entries: Vec<Entry>) -> FetchReport {
         downloaded: 0,
         failures: Vec::new(),
     };
-    while let Some((filename, was_cached, result)) = tasks.next().await {
-        match result {
-            Ok(_) => {
-                if was_cached {
-                    report.cached += 1;
-                } else {
-                    report.downloaded += 1;
-                }
+
+    while !tasks.is_empty() || !progress_rx.is_closed() {
+        tokio::select! {
+            Some(filename) = progress_rx.recv() => {
+                on_progress(FetchProgress {
+                    filename,
+                    status: "downloading",
+                    completed: report.cached + report.downloaded + report.failures.len(),
+                    total: report.total,
+                    cached: report.cached,
+                    downloaded: report.downloaded,
+                    failures: report.failures.len(),
+                });
             }
-            Err(e) => report.failures.push(format!("{filename}: {e}")),
+            Some((filename, was_cached, result)) = tasks.next() => {
+                let status = match result {
+                    Ok(_) => {
+                        if was_cached {
+                            report.cached += 1;
+                            "cached"
+                        } else {
+                            report.downloaded += 1;
+                            "downloaded"
+                        }
+                    }
+                    Err(e) => {
+                        report.failures.push(format!("{filename}: {e}"));
+                        "failed"
+                    }
+                };
+
+                on_progress(FetchProgress {
+                    filename,
+                    status,
+                    completed: report.cached + report.downloaded + report.failures.len(),
+                    total: report.total,
+                    cached: report.cached,
+                    downloaded: report.downloaded,
+                    failures: report.failures.len(),
+                });
+            }
+            else => break,
         }
     }
+
     report
 }

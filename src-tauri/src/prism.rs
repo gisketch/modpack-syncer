@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::manifest::{Loader, Manifest};
 
@@ -148,6 +148,14 @@ pub struct InstanceWriteReport {
     pub overrides_copied: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedModState {
+    pub id: String,
+    pub filename: String,
+    pub sha1: String,
+    pub size: u64,
+}
+
 /// Write (or update) a Prism instance for the given pack.
 /// - `cached_mod_paths`: pre-downloaded content-addressable jar paths (already SHA-verified).
 /// - `pack_repo_dir`: local git clone of the pack (source of configs/kubejs/overrides).
@@ -204,6 +212,20 @@ pub fn write_instance(
         mods_written += 1;
     }
     std::fs::write(&sidecar, sidecar_lines.join("\n"))?;
+    let state = manifest
+        .mods
+        .iter()
+        .map(|entry| ManagedModState {
+            id: entry.id.clone(),
+            filename: entry.filename.clone(),
+            sha1: entry.sha1.clone(),
+            size: entry.size as u64,
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(
+        mods_dir.join(".modsync-state.json"),
+        serde_json::to_vec_pretty(&state).unwrap(),
+    )?;
 
     // Overrides: copy `overrides/`, `configs/`, `kubejs/` from pack repo into `.minecraft/`.
     let mut overrides_copied = 0usize;
@@ -229,6 +251,16 @@ pub fn write_instance(
         mods_written,
         overrides_copied,
     })
+}
+
+pub fn read_managed_mod_state(mods_dir: &Path) -> Result<Vec<ManagedModState>, PrismError> {
+    let path = mods_dir.join(".modsync-state.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(path)?;
+    let state = serde_json::from_slice(&bytes).map_err(anyhow::Error::from)?;
+    Ok(state)
 }
 
 fn build_components(m: &Manifest) -> Vec<serde_json::Value> {
