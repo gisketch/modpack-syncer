@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, Download, FolderGit2, Loader2, Package, Play, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatError } from "@/lib/format-error";
 import { type PackSummary, type SyncInstanceReport, tauri } from "@/lib/tauri";
@@ -45,34 +46,40 @@ export function HomeRoute() {
         <PrismStatus loading={prism.isLoading} location={prism.data ?? null} />
       </header>
 
-      <section className="relative flex flex-col gap-3 border border-[--line-soft] bg-[--surface-elevated] p-6 corner-brackets">
-        <h2 className="cp-tactical-label flex items-center gap-2 text-sm text-[--brand-core]">
-          <Plus className="h-4 w-4" /> ADD PACK
-        </h2>
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (url.trim()) addPack.mutate(url.trim());
-          }}
-        >
-          <Input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://github.com/gisketch/modsync-pack.git"
-            disabled={addPack.isPending}
-          />
-          <Button type="submit" disabled={addPack.isPending || !url.trim()}>
-            {addPack.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <FolderGit2 className="h-4 w-4" />
-            )}
-            CLONE
-          </Button>
-        </form>
-        {error && <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p>}
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plus className="h-4 w-4" /> ADD PACK
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (url.trim()) addPack.mutate(url.trim());
+            }}
+          >
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://github.com/gisketch/modsync-pack.git"
+              disabled={addPack.isPending}
+            />
+            <Button type="submit" disabled={addPack.isPending || !url.trim()}>
+              {addPack.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FolderGit2 className="h-4 w-4" />
+              )}
+              CLONE
+            </Button>
+          </form>
+          {error && (
+            <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p>
+          )}
+        </CardContent>
+      </Card>
 
       <section className="relative flex flex-col gap-3">
         <h2 className="cp-tactical-label flex items-center gap-2 text-sm text-[--brand-core]">
@@ -82,11 +89,11 @@ export function HomeRoute() {
         {packs.data && packs.data.length === 0 && (
           <p className="text-sm text-[--text-low]">No packs yet. Clone one above.</p>
         )}
-        <ul className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3">
           {packs.data?.map((p) => (
             <PackCard key={p.id} pack={p} prismAvailable={!!prism.data} />
           ))}
-        </ul>
+        </div>
       </section>
     </div>
   );
@@ -148,7 +155,7 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
   });
 
   return (
-    <li className="relative border border-[--line-soft] bg-[--surface-elevated] p-4 corner-brackets transition-colors hover:border-[--brand-core]/60">
+    <Card className="p-4 hover:border-[--brand-core]/60">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="cp-tactical-label truncate text-[--text-high] text-sm">
@@ -217,7 +224,7 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
           NO MANIFEST.JSON IN THIS REPO YET
         </p>
       )}
-    </li>
+    </Card>
   );
 }
 

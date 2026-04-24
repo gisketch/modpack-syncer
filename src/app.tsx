@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2, Package, Settings } from "lucide-react";
+import { useState } from "react";
+import { Sidebar, type SidebarItem } from "@/components/sidebar";
 import { TitleBar } from "@/components/title-bar";
 import { tauri } from "@/lib/tauri";
 import { HomeRoute } from "@/routes/home";
 import { OnboardingRoute } from "@/routes/onboarding";
+import { SettingsRoute } from "@/routes/settings";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -14,11 +17,9 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex h-screen w-screen flex-col overflow-hidden bg-[--color-bg] text-[--color-fg]">
+      <div className="flex h-screen w-screen flex-col overflow-hidden bg-[--surface-base] text-[--text-high]">
         <TitleBar />
-        <main className="flex-1 overflow-auto">
-          <RootGate />
-        </main>
+        <RootGate />
       </div>
     </QueryClientProvider>
   );
@@ -32,13 +33,41 @@ function RootGate() {
 
   if (packs.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center opacity-60">
+      <div className="flex flex-1 items-center justify-center text-[--text-low]">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     );
   }
   if (!packs.data || packs.data.length === 0) {
-    return <OnboardingRoute />;
+    return (
+      <main className="flex-1 overflow-auto">
+        <OnboardingRoute />
+      </main>
+    );
   }
-  return <HomeRoute />;
+  return <Shell />;
+}
+
+function Shell() {
+  const [active, setActive] = useState("packs");
+
+  const items: SidebarItem[] = [
+    { id: "packs", label: "PACKS", icon: Package },
+    { id: "settings", label: "SETTINGS", icon: Settings },
+  ];
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      <Sidebar
+        items={items}
+        active={active}
+        onSelect={setActive}
+        footer={<span className="cp-tactical-label text-[--text-low] text-[10px]">:: v0.1.0</span>}
+      />
+      <main className="flex-1 overflow-auto scrollbar-tactical">
+        {active === "packs" && <HomeRoute />}
+        {active === "settings" && <SettingsRoute />}
+      </main>
+    </div>
+  );
 }
