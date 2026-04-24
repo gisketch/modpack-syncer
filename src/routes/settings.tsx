@@ -240,10 +240,10 @@ export function SettingsRoute() {
       return;
     }
     if (result.data) {
-      toast.success("Update available", { description: `modsync v${result.data.version}` });
+      toast.success("Update available", { description: `gisketch//s_modpack_syncer v${result.data.version}` });
       return;
     }
-    toast.success("modsync up to date");
+    toast.success("gisketch//s_modpack_syncer up to date");
   }
 
   return (
@@ -395,7 +395,7 @@ export function SettingsRoute() {
                 </span>
               </div>
               <p className="text-[--text-low]">
-                Managed install saves portable launcher inside modsync data dir, verifies GitHub SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with <code>--offline</code>.
+                Managed install saves portable launcher inside gisketch//s_modpack_syncer data dir, verifies GitHub SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with <code>--offline</code>.
               </p>
             </div>
 
@@ -452,7 +452,7 @@ export function SettingsRoute() {
           <CardTitle className="flex items-center gap-2">
             <Info className="h-4 w-4" /> ABOUT
           </CardTitle>
-          <CardDescription className="tabular-nums">modsync v{appVersion.data ?? "..."}</CardDescription>
+          <CardDescription className="tabular-nums">gisketch//s_modpack_syncer v{appVersion.data ?? "..."}</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-[--text-low]">
@@ -529,7 +529,7 @@ export function SettingsRoute() {
           <DialogHeader>
             <DialogTitle>EDIT LAUNCHER SETTINGS</DialogTitle>
             <DialogDescription>
-              Point modsync at managed companion launcher or custom Prism-compatible binary/data dir, then set global offline username.
+              Point gisketch//s_modpack_syncer at managed companion launcher or custom Prism-compatible binary/data dir, then set global offline username.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
@@ -583,7 +583,7 @@ export function SettingsRoute() {
             <DialogDescription>
               {showPrismInstallProgress
                 ? "Downloading managed PrismLauncher-Cracked now."
-                : "Install portable PrismLauncher-Cracked into modsync data dir and auto-wire launcher settings."}
+                : "Install portable PrismLauncher-Cracked into gisketch//s_modpack_syncer data dir and auto-wire launcher settings."}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
@@ -631,7 +631,7 @@ export function SettingsRoute() {
                     <span className="font-mono text-xs text-text-low">PORTABLE INSTALL</span>
                   </div>
                   <p className="text-sm text-text-low">
-                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256 digest, unpack into modsync data dir, then save binary + data paths automatically.
+                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256 digest, unpack into gisketch//s_modpack_syncer data dir, then save binary + data paths automatically.
                   </p>
                 </button>
                 <div className="border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs text-text-low">

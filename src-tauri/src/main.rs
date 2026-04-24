@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    modsync_lib::run()
+    gisketch_s_modpack_syncer_lib::run()
 }

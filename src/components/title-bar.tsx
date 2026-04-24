@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
   const appVersion = useAppVersion();
+  const appIcon = "/icon32x32.png";
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -27,13 +28,19 @@ export function TitleBar() {
       className="flex h-9 shrink-0 select-none items-center justify-between border-[--line-soft] border-b bg-[--surface-sunken] pl-4"
     >
       <div data-tauri-drag-region className="flex items-center gap-3 text-xs">
+        <img
+          data-tauri-drag-region
+          src={appIcon}
+          alt="gisketch//s_modpack_syncer"
+          className="h-4.5 w-4.5 rounded-[4px] object-cover outline outline-1 outline-black/10"
+        />
         <span
           data-tauri-drag-region
           aria-hidden
           className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]"
         />
         <span data-tauri-drag-region className="cp-tactical-label text-[--brand-core] text-xs">
-          MODSYNC :: v{appVersion.data ?? "..."}
+          GISKETCH//S_MODPACK_SYNCER :: v{appVersion.data ?? "..."}
         </span>
       </div>
       <div className="flex h-full">

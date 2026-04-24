@@ -1,4 +1,4 @@
-// modsync — Tauri app entry
+// gisketch//s_modpack_syncer — Tauri app entry
 // Module skeletons for the core subsystems. Each module will grow over milestones (M0-M6).
 // See docs/architecture.md.
 
@@ -15,7 +15,7 @@ mod profile;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! modsync Rust backend online.", name)
+    format!("Hello, {}! gisketch//s_modpack_syncer Rust backend online.", name)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -97,10 +97,17 @@ function Shell() {
   const appVersion = useAppVersion();
   const appUpdate = useAppUpdate();
   const installAppUpdate = useInstallAppUpdate(appUpdate.updateQuery.data ?? null);
+  const appIcon = "/icon32x32.png";
+  const prismSettings = useQuery({
+    queryKey: ["prism-settings"],
+    queryFn: () => tauri.getPrismSettings(),
+    retry: false,
+  });
   const packs = useQuery({
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
   });
+  const sidebarUsername = prismSettings.data?.offlineUsername?.trim() || "UNKNOWN USER";
 
   const onPacks = view.kind === "packs" || view.kind === "pack";
   const updateProgressLabel = installAppUpdate.progress?.percent
@@ -113,13 +120,20 @@ function Shell() {
     <div className="flex flex-1 overflow-hidden">
       <Sidebar>
         <SidebarHeader>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-              :: NAVIGATION
-            </span>
-            <span className="font-heading text-sm font-bold uppercase tracking-wider text-brand-core">
-              MODSYNC
-            </span>
+          <div className="flex items-center gap-3">
+            <img
+              src={appIcon}
+              alt="gisketch//s_modpack_syncer"
+              className="h-9 w-9 rounded-md object-cover outline outline-1 outline-black/10 shadow-[0_10px_24px_rgba(0,0,0,0.22)]"
+            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                :: NAVIGATION
+              </span>
+              <span className="truncate font-heading text-sm font-bold tracking-[0.14em] text-brand-core">
+                {sidebarUsername}
+              </span>
+            </div>
           </div>
         </SidebarHeader>
         <SidebarContent>

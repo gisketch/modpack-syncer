@@ -1,6 +1,6 @@
-# modsync
+# gisketch//s_modpack_syncer
 
-Minecraft Java modpack syncer + Prism Launcher wrapper, built with **Tauri 2 + React + TypeScript**.
+Minecraft Java modpack syncer + Prism Launcher wrapper, built for **gisketch//s_modpack_syncer** with **Tauri 2 + React + TypeScript**.
 
 One binary that keeps you and your friends on the exact same mods, configs, KubeJS scripts, resource packs, and shader packs — pulled from a single source of truth (your Gitea repo) and launched through Prism.
 
@@ -67,7 +67,7 @@ bun run release:tag 0.1.0
 
 Pushing a `v*` tag runs [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml), builds Tauri on `windows-latest`, and uploads Windows bundle assets to that tag's GitHub Release page. The same workflow also supports manual dispatch from Actions when you provide an existing tag.
 
-Windows updater support is enabled for packaged Windows builds only. On launch, modsync checks the latest GitHub release updater manifest and shows `UPDATE NOW` in the sidebar only when an update exists. Non-Windows builds hide updater UI entirely.
+Windows updater support is enabled for packaged Windows builds only. On launch, gisketch//s_modpack_syncer checks the latest GitHub release updater manifest and shows `UPDATE NOW` in the sidebar only when an update exists. Non-Windows builds hide updater UI entirely.
 
 Before Windows updater builds can publish successfully, add these GitHub Actions secrets:
 

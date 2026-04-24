@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "modsync",
+  "productName": "gisketch_s_modpack_syncer",
   "version": "0.2.3",
-  "identifier": "dev.gisketch.modsync",
+  "identifier": "dev.gisketch.s_modpack_syncer",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "modsync",
+        "title": "gisketch_s_modpack_syncer",
         "width": 1200,
         "height": 800,
         "minWidth": 900,

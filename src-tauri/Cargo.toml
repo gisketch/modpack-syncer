@@ -1,12 +1,12 @@
 [package]
-name = "modsync"
+name = "gisketch_s_modpack_syncer"
 version = "0.2.3"
-description = "Minecraft modpack syncer + Prism launcher wrapper"
+description = "gisketch//s_modpack_syncer Minecraft modpack syncer + Prism launcher wrapper"
 authors = ["gisketch"]
 edition = "2021"
 
 [lib]
-name = "modsync_lib"
+name = "gisketch_s_modpack_syncer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -76,7 +76,7 @@ jobs:
           projectPath: .
           tauriScript: bun tauri
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: modsync ${{ env.RELEASE_TAG }}
+          releaseName: gisketch//s_modpack_syncer ${{ env.RELEASE_TAG }}
           releaseBody: |
             Automated Windows build for ${{ env.RELEASE_TAG }}.
 

@@ -195,7 +195,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
   async function handleBrowseInstallRoot() {
     try {
       const selected = await open({
-        title: "Select modsync data directory",
+        title: "Select gisketch//s_modpack_syncer data directory",
         defaultPath: customRootPath || appStorage.data?.dataDir || undefined,
         directory: true,
       });
@@ -217,10 +217,10 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
 
   const pageTitle = ["Choose install path", "Install Java", "Install Prism", "Set username", "Go to packs"][displayedStep];
   const pageDescription = [
-    "Pick default location or custom drive for modsync data, managed Java, launcher, cache, and packs.",
-    "Install managed Temurin runtime into chosen modsync location.",
-    "Install PrismLauncher-Cracked into chosen modsync location and auto-save launcher paths.",
-    "Save offline username modsync should force into cracked launcher.",
+    "Pick default location or custom drive for gisketch//s_modpack_syncer data, managed Java, launcher, cache, and packs.",
+    "Install managed Temurin runtime into chosen gisketch//s_modpack_syncer location.",
+    "Install PrismLauncher-Cracked into chosen gisketch//s_modpack_syncer location and auto-save launcher paths.",
+    "Save offline username gisketch//s_modpack_syncer should force into cracked launcher.",
     "Setup complete. Jump to packs page and clone modpack there.",
   ][displayedStep];
 
@@ -245,7 +245,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
               <span className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]" />
               <span className="cp-tactical-label text-[--brand-core]">:: ONBOARDING :: SYSTEM READY</span>
             </div>
-            <h1 className="text-3xl text-[--text-high] text-balance">Welcome to modsync</h1>
+            <h1 className="text-3xl text-[--text-high] text-balance">Welcome to gisketch//s_modpack_syncer</h1>
             <p className="max-w-3xl text-sm text-[--text-low] text-pretty">
               Follow setup flow in order. Each step turns into brand box when finished. Last step clones first pack or returns to packs if setup already done.
             </p>
@@ -297,7 +297,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                 <InstallStepPanel
                   eyebrow="2 / 5"
                   statusLabel={javaReady ? "READY" : managedJava.isLoading ? "CHECKING" : "MISSING"}
-                  detail="Managed Temurin 21 runtime installs into chosen modsync path."
+                  detail="Managed Temurin 21 runtime installs into chosen gisketch//s_modpack_syncer path."
                   isPending={installJava.isPending}
                   actionLabel={javaReady ? "JAVA READY" : "INSTALL JAVA"}
                   actionIcon={<Download className="h-4 w-4" />}
@@ -315,7 +315,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                 <InstallStepPanel
                   eyebrow="3 / 5"
                   statusLabel={launcherReady ? "READY" : prism.isLoading ? "CHECKING" : "MISSING"}
-                  detail="Managed PrismLauncher-Cracked installs into chosen modsync path and auto-saves binary + data paths."
+                  detail="Managed PrismLauncher-Cracked installs into chosen gisketch//s_modpack_syncer path and auto-saves binary + data paths."
                   isPending={installManagedPrism.isPending}
                   actionLabel={launcherReady ? "PRISM READY" : "INSTALL PRISM"}
                   actionIcon={<Package className="h-4 w-4" />}
@@ -453,9 +453,9 @@ function PathStepPanel({
       <div className="flex items-start gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
         <Checkbox checked={useDefaultPath} onCheckedChange={(checked) => onToggleDefault(checked === true)} className="mt-0.5 size-5" />
         <div className="flex flex-col gap-1.5">
-          <p className="text-sm text-text-high">Use default modsync location</p>
+          <p className="text-sm text-text-high">Use default gisketch//s_modpack_syncer location</p>
           <p className="text-sm text-text-low text-pretty">
-            Leave checked for normal install. Uncheck to place all modsync-managed data on another drive or folder.
+            Leave checked for normal install. Uncheck to place all gisketch//s_modpack_syncer-managed data on another drive or folder.
           </p>
         </div>
       </div>
@@ -464,7 +464,7 @@ function PathStepPanel({
           <Input
             value={customRootPath}
             onChange={(event) => onChangeCustomPath(event.target.value)}
-            placeholder="D:\\modsync or /mnt/games/modsync"
+            placeholder="D:\\gisketch_s_modpack_syncer or /mnt/games/gisketch_s_modpack_syncer"
           />
           <Button variant="secondary" onClick={onBrowse}>
             <FolderOpen className="h-4 w-4" /> BROWSE

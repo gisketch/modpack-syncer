@@ -893,7 +893,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   })}
                 </div>
                 <p className="mt-4 text-xs text-text-low">
-                  This downloads Temurin into modsync app data and points launch profile at installed binary. Prism auto mode stays separate.
+                  This downloads Temurin into gisketch//s_modpack_syncer app data and points launch profile at installed binary. Prism auto mode stays separate.
                 </p>
               </>
             )}
@@ -1161,7 +1161,7 @@ function LaunchSetupPanel({
                 </Button>
               </div>
               <p className="text-xs text-text-low">
-                Prism auto mode resolves managed compatible Java. Install dialog downloads Temurin runtime into modsync.
+                Prism auto mode resolves managed compatible Java. Install dialog downloads Temurin runtime into gisketch//s_modpack_syncer.
               </p>
             </div>
 
