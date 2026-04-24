@@ -11,6 +11,10 @@ pub enum PushAuth {
     Ssh,
 }
 
+pub struct SshAccess {
+    pub source: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GitError {
     #[error(transparent)]
@@ -78,6 +82,7 @@ pub fn head_sha(repo_dir: &Path) -> Result<String, GitError> {
 }
 
 pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result<String, GitError> {
+    eprintln!("[modsync] publish push: open repo {}", repo_dir.display());
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
     let branch = repo
@@ -94,6 +99,7 @@ pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result
     let has_changes = !repo.statuses(Some(&mut status_options))?.is_empty();
 
     let commit_sha = if has_changes {
+        eprintln!("[modsync] publish push: create commit");
         let mut index = repo.index()?;
         index.add_all(["*"], IndexAddOption::DEFAULT, None)?;
         index.write()?;
@@ -105,10 +111,13 @@ pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result
         repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[&head])?
             .to_string()
     } else {
+        eprintln!("[modsync] publish push: no local changes, push current HEAD");
         head.id().to_string()
     };
 
+    eprintln!("[modsync] publish push: push branch {branch}");
     push_branch(&repo, &branch, auth)?;
+    eprintln!("[modsync] publish push: push complete {commit_sha}");
     Ok(commit_sha)
 }
 
@@ -170,9 +179,11 @@ fn broken_backup_dir(repo_dir: &Path) -> PathBuf {
 }
 
 fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), GitError> {
+    let use_ssh_transport = matches!(&auth, PushAuth::Ssh);
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(move |_url, username_from_url, allowed_types| match &auth {
         PushAuth::Pat(token) => {
+            eprintln!("[modsync] publish push: PAT credential callback");
             if allowed_types.is_user_pass_plaintext() {
                 Cred::userpass_plaintext("x-access-token", token)
             } else if allowed_types.is_username() {
@@ -182,8 +193,9 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
             }
         }
         PushAuth::Ssh => {
+            eprintln!("[modsync] publish push: SSH credential callback");
             if allowed_types.is_ssh_key() {
-                ssh_credential(username_from_url.unwrap_or("git"))
+                resolve_ssh_credential(username_from_url.unwrap_or("git")).map(|(cred, _)| cred)
             } else if allowed_types.is_username() {
                 Cred::username(username_from_url.unwrap_or("git"))
             } else {
@@ -195,26 +207,56 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
     let mut push_options = PushOptions::new();
     push_options.remote_callbacks(callbacks);
 
-    let mut remote = repo.find_remote("origin")?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
-    remote.push(&[refspec], Some(&mut push_options))?;
+    if use_ssh_transport {
+            let origin = repo.find_remote("origin")?;
+            let origin_url = origin
+                .url()
+                .map(str::to_owned)
+                .ok_or_else(|| git2::Error::from_str("origin remote missing url"))?;
+            let previous_pushurl = origin.pushurl().map(str::to_owned);
+            drop(origin);
+
+        let push_url = ssh_push_url(&origin_url).unwrap_or(origin_url);
+            eprintln!("[modsync] publish push: SSH pushurl {push_url}");
+            repo.remote_set_pushurl("origin", Some(&push_url))?;
+            let result = {
+                let mut remote = repo.find_remote("origin")?;
+                eprintln!("[modsync] publish push: remote.push start");
+                remote.push(&[refspec], Some(&mut push_options))
+            };
+            repo.remote_set_pushurl("origin", previous_pushurl.as_deref())?;
+            result?;
+    } else {
+        let mut remote = repo.find_remote("origin")?;
+            eprintln!("[modsync] publish push: HTTPS push via origin");
+        remote.push(&[refspec], Some(&mut push_options))?;
+    }
     Ok(())
 }
 
-fn ssh_credential(username: &str) -> Result<Cred, git2::Error> {
-    Cred::ssh_key_from_agent(username).or_else(|_| {
-        for private_key in default_ssh_private_keys() {
-            if !private_key.exists() {
-                continue;
-            }
-            if let Ok(cred) = Cred::ssh_key(username, None, &private_key, None) {
-                return Ok(cred);
-            }
+pub fn verify_ssh_access() -> Result<SshAccess, GitError> {
+    let (_, source) = resolve_ssh_credential("git")?;
+    Ok(SshAccess { source })
+}
+
+fn resolve_ssh_credential(username: &str) -> Result<(Cred, String), git2::Error> {
+    for private_key in default_ssh_private_keys() {
+        if !private_key.exists() {
+            continue;
         }
-        Err(git2::Error::from_str(
-            "SSH auth failed: no agent key and no usable private key in ~/.ssh",
-        ))
-    })
+        let public_key = private_key.with_extension("pub");
+        let public_key = public_key.exists().then_some(public_key.as_path());
+        if let Ok(cred) = Cred::ssh_key(username, public_key, &private_key, None) {
+            return Ok((cred, private_key.display().to_string()));
+        }
+    }
+    if let Ok(cred) = Cred::ssh_key_from_agent(username) {
+        return Ok((cred, "ssh-agent".to_string()));
+    }
+    Err(git2::Error::from_str(
+        "SSH auth failed: no agent key and no usable private key in ~/.ssh",
+    ))
 }
 
 fn default_ssh_private_keys() -> Vec<PathBuf> {
@@ -226,4 +268,17 @@ fn default_ssh_private_keys() -> Vec<PathBuf> {
         .into_iter()
         .map(|name| ssh_dir.join(name))
         .collect()
+}
+
+fn ssh_push_url(origin_url: &str) -> Option<String> {
+    if origin_url.starts_with("git@") || origin_url.starts_with("ssh://") {
+        return Some(origin_url.to_string());
+    }
+    let parsed = url::Url::parse(origin_url).ok()?;
+    let host = parsed.host_str()?;
+    let path = parsed.path().trim_start_matches('/');
+    if path.is_empty() {
+        return None;
+    }
+        Some(format!("ssh://git@{host}/{path}"))
 }

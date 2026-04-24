@@ -28,7 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures = "0.3"
 
 # Git (libgit2 bindings, vendored so no system git needed)
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2", "https"] }
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2", "https", "ssh"] }
 
 # Local DB
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -47,6 +47,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+chrono = "0.4"
 
 # Errors + logging
 thiserror = "1"

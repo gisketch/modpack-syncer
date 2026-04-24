@@ -1,9 +1,14 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   Check,
   Download,
+  FolderOpen,
   FolderGit2,
   Globe,
   Loader2,
@@ -17,7 +22,15 @@ import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardWindowBar,
+  CardWindowTab,
+} from "@/components/ui/card";
 import {
   DialogBody,
   Dialog,
@@ -39,10 +52,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
   type ManifestEntry,
+  type PackChangelogEntry,
+  type PackChangelogItem,
   type ModStatus,
   type ModStatusValue,
   type PublishAction,
@@ -59,7 +75,7 @@ import { useNav } from "@/stores/nav-store";
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
-  const adminMode = useAppStore((s) => s.adminMode);
+  const adminMode = useAppStore((s) => s.adminModeByPack[packId] ?? false);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -80,9 +96,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const instanceName = `modsync-${packId}`;
+  const instanceDir = useQuery({
+    queryKey: ["instance-dir", instanceName],
+    queryFn: () => tauri.getInstanceMinecraftDir(instanceName),
+    enabled: !!prism.data,
+    retry: false,
+  });
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
+  const [expandedChangelog, setExpandedChangelog] = useState<Record<string, boolean>>({});
+  const [showAllChangelog, setShowAllChangelog] = useState(false);
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
@@ -108,17 +133,42 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     enabled: !!manifest.data,
     retry: false,
   });
+  const changelog = useQuery({
+    queryKey: ["pack-changelog", packId],
+    queryFn: () => tauri.packChangelog(packId, 12),
+    retry: false,
+  });
   const statusMap = new Map<string, ModStatusValue>(
     (statuses.data ?? [])
-      .filter((s) => s.status !== "deleted")
+      .filter((s) => s.status !== "deleted" && s.status !== "unpublished")
       .map((s) => [s.filename, s.status]),
   );
   const deletedMods = (statuses.data ?? []).filter((s) => s.status === "deleted");
+  const unpublishedMods = (statuses.data ?? [])
+    .filter((s) => s.status === "unpublished")
+    .sort((left, right) => left.filename.localeCompare(right.filename));
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
+  const highlightedCommitCount = launchRiskCount > 0 ? 3 : 1;
+
+  useEffect(() => {
+    if (!changelog.data?.length) return;
+    setExpandedChangelog(
+      Object.fromEntries(
+        changelog.data.map((entry, index) => [entry.commitSha, index < highlightedCommitCount]),
+      ),
+    );
+  }, [changelog.data, highlightedCommitCount]);
+
+  useEffect(() => {
+    setShowAllChangelog(false);
+  }, [packId, highlightedCommitCount]);
 
   const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
+  const visibleChangelogEntries = (changelog.data ?? []).filter(
+    (_, index) => showAllChangelog || index < highlightedCommitCount,
+  );
   const progressEntry = progress?.filename
     ? (manifest.data?.mods.find((m) => m.filename === progress.filename) ?? null)
     : null;
@@ -142,6 +192,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["packs"] }),
         qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
       ]);
       toast.success("Pack updated", {
@@ -194,7 +245,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setPublishOpen(true);
       setPublishReport(null);
     },
-    onSuccess: (scan) => {
+    onSuccess: async (scan) => {
+      await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
       setPublishReport(scan);
       toast.success("Publish scan ready", { description: `${scan.items.length} items` });
     },
@@ -203,25 +255,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Publish scan failed", { description: formatError(e) });
     },
   });
-  const publishApply = useMutation({
-    mutationFn: () => tauri.applyInstancePublish(packId),
-    onSuccess: async (result) => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
-        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
-      ]);
-      setPublishOpen(false);
-      toast.success("Publish applied", {
-        description: `${result.repoFilesWritten} files written · ${result.repoFilesRemoved} removed`,
-      });
-    },
-    onError: (e) => {
-      toast.error("Publish apply failed", { description: formatError(e) });
-    },
-  });
   const publishPush = useMutation({
-    mutationFn: async (message: string) => {
-      const applied = await tauri.applyInstancePublish(packId);
+    mutationFn: async ({ message, version }: { message: string; version: string }) => {
+      const applied = await tauri.applyInstancePublish(packId, undefined, version);
       const pushed = await tauri.commitAndPushPublish(packId, message);
       return { applied, pushed };
     },
@@ -229,6 +265,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["manifest", packId] }),
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+        qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["packs"] }),
       ]);
       setPublishOpen(false);
@@ -249,6 +286,23 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     launch.mutate();
   }
 
+  function handleSyncClick() {
+    if (unpublishedMods.length > 0) {
+      setSyncDeleteConfirmOpen(true);
+      return;
+    }
+    sync.mutate();
+  }
+
+  async function handleOpenInstanceFolder() {
+    if (!instanceDir.data) return;
+    try {
+      await openPath(instanceDir.data);
+    } catch (error) {
+      toast.error("Open folder failed", { description: formatError(error) });
+    }
+  }
+
   if (pack.data === null && !pack.isLoading) {
     return (
       <div className="p-8">
@@ -257,6 +311,19 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <AlertDescription>The requested pack does not exist.</AlertDescription>
         </Alert>
       </div>
+    );
+  }
+
+  if (publishOpen) {
+    return (
+      <PublishPreviewPage
+        packId={packId}
+        onClose={() => setPublishOpen(false)}
+        pending={publishScan.isPending}
+        report={publishReport}
+        publishing={publishPush.isPending}
+        onPublish={(message, version) => publishPush.mutate({ message, version })}
+      />
     );
   }
 
@@ -295,6 +362,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           )}
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => void handleOpenInstanceFolder()}
+            disabled={!instanceDir.data || !prism.data}
+          >
+            <FolderOpen />
+            OPEN INSTANCE
+          </Button>
           {adminMode && (
             <Button
               variant="outline"
@@ -315,7 +390,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           </Button>
           <Button
             variant="secondary"
-            onClick={() => sync.mutate()}
+            onClick={handleSyncClick}
             disabled={fetchPack.isPending || sync.isPending || !manifest.data || !prism.data}
           >
             {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -366,6 +441,60 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </Alert>
       )}
 
+      <Card>
+        <CardHeader>
+          <CardTitle>CHANGELOG</CardTitle>
+          <CardDescription>Recent pack commits grouped by change type</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {changelog.isLoading ? (
+            <div className="flex items-center gap-3 py-4 text-text-low">
+              <Loader2 className="size-4 animate-spin text-brand-core" />
+              <span className="text-sm">Loading commit history</span>
+            </div>
+          ) : changelog.data?.length ? (
+            <div className="flex flex-col gap-4">
+              <ScrollArea className={cn(showAllChangelog ? "h-[320px] pr-4" : "pr-4")}>
+                <div className="flex flex-col gap-4">
+                  {visibleChangelogEntries.map((entry) => {
+                    const originalIndex = (changelog.data ?? []).findIndex(
+                      (candidate) => candidate.commitSha === entry.commitSha,
+                    );
+                    const highlighted = originalIndex > -1 && originalIndex < highlightedCommitCount;
+                    const expanded = expandedChangelog[entry.commitSha] ?? highlighted;
+                    return (
+                      <ChangelogCard
+                        key={entry.commitSha}
+                        entry={entry}
+                        expanded={expanded}
+                        highlighted={highlighted}
+                        onToggle={() =>
+                          setExpandedChangelog((current) => ({
+                            ...current,
+                            [entry.commitSha]: !(current[entry.commitSha] ?? highlighted),
+                          }))
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+              {(changelog.data?.length ?? 0) > highlightedCommitCount ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setShowAllChangelog((value) => !value)}
+                  className="w-full"
+                >
+                  {showAllChangelog ? "HIDE OLD CHANGELOGS" : "SHOW MORE..."}
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-text-low">No recent commits found.</p>
+          )}
+        </CardContent>
+      </Card>
+
       {manifest.data && (
         <Card>
           <CardHeader>
@@ -391,6 +520,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {unpublishedMods.map((mod) => (
+                    <UnpublishedModRow
+                      key={`unpublished:${mod.filename}`}
+                      mod={mod}
+                      adminMode={adminMode}
+                    />
+                  ))}
                   {manifest.data.mods.map((m) => (
                     <ModRow
                       key={m.id}
@@ -405,7 +541,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                           ? (modrinthMap.get(m.projectId)?.title ?? null)
                           : null
                       }
-                      status={statusMap.get(m.filename) ?? "missing"}
+                      status={statusMap.get(m.filename) ?? null}
+                      loading={statuses.isLoading || statuses.isFetching}
                     />
                   ))}
                   {deletedMods.map((m) => (
@@ -461,134 +598,203 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </DialogContent>
       </Dialog>
 
-      <PublishPreviewDialog
-        open={publishOpen}
-        onClose={() => setPublishOpen(false)}
-        pending={publishScan.isPending}
-        report={publishReport}
-        applying={publishApply.isPending}
-        onApply={() => publishApply.mutate()}
-        publishing={publishPush.isPending}
-        onPublish={(message) => publishPush.mutate(message)}
-      />
+      <Dialog open={syncDeleteConfirmOpen} onOpenChange={setSyncDeleteConfirmOpen}>
+        <DialogContent variant="destructive" className="overflow-hidden max-w-xl">
+          <DialogHeader>
+            <DialogTitle>SYNC WILL DELETE UNPUBLISHED MODS</DialogTitle>
+            <DialogDescription>
+              Sync keeps Prism instance 1:1 with source. Files below exist only in local mods folder and will be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="flex flex-col gap-4 text-sm text-text-low">
+              <div className="flex flex-col gap-2 border border-line-soft/30 bg-surface-sunken p-4">
+                {unpublishedMods.map((mod) => (
+                  <p key={`sync-delete:${mod.filename}`} className="font-mono text-xs text-signal-alert">
+                    {mod.filename}
+                  </p>
+                ))}
+              </div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-signal-alert">
+                Continue only if delete list correct.
+              </p>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setSyncDeleteConfirmOpen(false)}>
+              CANCEL
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setSyncDeleteConfirmOpen(false);
+                sync.mutate();
+              }}
+            >
+              DELETE + SYNC
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function PublishPreviewDialog({
-  open,
+function PublishPreviewPage({
+  packId,
   onClose,
   pending,
   report,
-  applying,
-  onApply,
   publishing,
   onPublish,
 }: {
-  open: boolean;
+  packId: string;
   onClose: () => void;
   pending: boolean;
   report: PublishScanReport | null;
-  applying: boolean;
-  onApply: () => void;
   publishing: boolean;
-  onPublish: (message: string) => void;
+  onPublish: (message: string, version: string) => void;
 }) {
   const counts = summarizePublishReport(report);
-  const hasChanges = Boolean(report?.items.some((item) => item.action !== "unchanged"));
-  const [commitMessage, setCommitMessage] = useState("Publish instance changes");
+  const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
+  const hasChanges = changedItems.length > 0;
+  const publishVersion = useQuery({
+    queryKey: ["suggest-publish-version", packId],
+    queryFn: () => tauri.suggestPublishVersion(packId),
+    retry: false,
+  });
+  const [commitTitle, setCommitTitle] = useState("Publish instance changes");
+  const [commitDescription, setCommitDescription] = useState("");
+
+  useEffect(() => {
+    if (!publishVersion.data) return;
+    setCommitTitle(`Update ${publishVersion.data}`);
+  }, [publishVersion.data]);
 
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="overflow-hidden max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>PUBLISH PREVIEW</DialogTitle>
-          <DialogDescription>
-            {pending
-              ? "Scanning linked Prism instance…"
-              : report
-                ? `${counts.add} add · ${counts.update} update · ${counts.remove} remove`
-                : ""}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="p-6">
-          {pending && (
-            <div className="flex items-center gap-3 py-6 text-text-low">
-              <Loader2 className="size-4 animate-spin text-brand-core" />
-              <span className="text-sm">Reading instance folders</span>
-            </div>
-          )}
+    <div className="flex min-h-screen flex-col gap-6 p-8">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={publishing}>
+          <ArrowLeft /> BACK
+        </Button>
+        <Separator orientation="vertical" className="h-6" />
+        <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+          :: PUBLISH PREVIEW / {packId}
+        </span>
+      </div>
 
-          {report && !pending && (
-            <div className="flex flex-col gap-4">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-3xl text-text-high">Publish Preview</h1>
+        <p className="text-sm text-text-low">
+          {pending
+            ? "Scanning linked Prism instance..."
+            : report
+              ? `${counts.add} add · ${counts.update} update · ${counts.remove} remove`
+              : ""}
+        </p>
+      </header>
+
+      {pending && (
+        <Card>
+          <CardContent className="flex items-center gap-3 p-6 text-text-low">
+            <Loader2 className="size-4 animate-spin text-brand-core" />
+            <span className="text-sm">Reading instance folders</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {report && !pending && (
+        <>
+          <Card>
+            <CardContent className="flex flex-col gap-4 p-6">
               <Input
-                value={commitMessage}
-                onChange={(event) => setCommitMessage(event.target.value)}
-                placeholder="Publish instance changes"
+                value={publishVersion.data ?? ""}
+                placeholder="Pack version"
+                disabled
               />
-              <div className="grid grid-cols-4 gap-3 text-xs">
+              <Input
+                value={commitTitle}
+                onChange={(event) => setCommitTitle(event.target.value)}
+                placeholder="Commit title"
+              />
+              <Textarea
+                value={commitDescription}
+                onChange={(event) => setCommitDescription(event.target.value)}
+                placeholder="Commit description"
+                className="min-h-32"
+              />
+              <div className="grid grid-cols-3 gap-3 text-xs">
                 <Row k="ADD" v={String(counts.add)} />
                 <Row k="UPDATE" v={String(counts.update)} />
                 <Row k="REMOVE" v={String(counts.remove)} />
-                <Row k="UNCHANGED" v={String(counts.unchanged)} />
               </div>
+              <div className="flex justify-end">
+                <Button
+                  variant="default"
+                  onClick={() =>
+                    onPublish(
+                      buildCommitMessage(commitTitle, commitDescription),
+                      publishVersion.data ?? "",
+                    )
+                  }
+                  disabled={publishing || !hasChanges || publishVersion.isLoading || !!publishVersion.error}
+                >
+                  {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+                  COMMIT + PUSH
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
-              <ScrollArea className="max-h-[420px]">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>CATEGORY</TableHead>
-                      <TableHead>PATH</TableHead>
-                      <TableHead>ACTION</TableHead>
-                      <TableHead>SOURCE</TableHead>
-                      <TableHead className="text-right">SIZE</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.items.map((item) => (
-                      <TableRow key={`${item.category}:${item.relativePath}:${item.action}`}>
-                        <TableCell>
-                          <Badge variant="outline">{labelCategory(item.category)}</Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-[10px] text-text-low">
-                          {item.relativePath}
-                        </TableCell>
-                        <TableCell>
-                          <PublishActionChip action={item.action} />
-                        </TableCell>
-                        <TableCell className="text-xs text-text-low">
-                          {item.source ?? "instance-local"}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs text-text-low">
-                          {typeof item.size === "number" ? formatBytes(item.size) : "--"}
-                        </TableCell>
+          <Card>
+            <CardHeader>
+              <CardTitle>CHANGES</CardTitle>
+              <CardDescription>Only added, updated, removed entries shown</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {hasChanges ? (
+                <ScrollArea className="h-[calc(100vh-23rem)]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>CATEGORY</TableHead>
+                        <TableHead>PATH</TableHead>
+                        <TableHead>ACTION</TableHead>
+                        <TableHead>SOURCE</TableHead>
+                        <TableHead className="text-right">SIZE</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </div>
-          )}
-        </DialogBody>
-        <DialogFooter className="px-6 py-4">
-          <Button variant="secondary" onClick={onClose} disabled={pending || applying || publishing}>
-            CLOSE
-          </Button>
-          <Button onClick={onApply} disabled={pending || applying || publishing || !hasChanges}>
-            {applying ? <Loader2 className="animate-spin" /> : <UploadCloudIcon />}
-            APPLY TO REPO
-          </Button>
-          <Button
-            variant="default"
-            onClick={() => onPublish(commitMessage.trim() || "Publish instance changes")}
-            disabled={pending || applying || publishing || !report}
-          >
-            {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-            COMMIT + PUSH
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+                    </TableHeader>
+                    <TableBody>
+                      {changedItems.map((item) => (
+                        <TableRow key={`${item.category}:${item.relativePath}:${item.action}`}>
+                          <TableCell>
+                            <Badge variant="outline">{labelCategory(item.category)}</Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-[10px] text-text-low">
+                            {item.relativePath}
+                          </TableCell>
+                          <TableCell>
+                            <PublishActionChip action={item.action} />
+                          </TableCell>
+                          <TableCell className="text-xs text-text-low">
+                            {item.source ?? "instance-local"}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-text-low">
+                            {typeof item.size === "number" ? formatBytes(item.size) : "--"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              ) : (
+                <p className="text-sm text-text-low">No changed files to publish.</p>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -732,11 +938,13 @@ function ModRow({
   icon,
   title,
   status,
+  loading,
 }: {
   entry: ManifestEntry;
   icon: string | null;
   title: string | null;
-  status: ModStatusValue;
+  status: ModStatusValue | null;
+  loading: boolean;
 }) {
   const displayName = title ?? entry.filename.replace(/\.jar$/i, "");
   return (
@@ -764,7 +972,7 @@ function ModRow({
       </TableCell>
       <TableCell className="text-text-low text-xs uppercase">{entry.side}</TableCell>
       <TableCell>
-        <StatusChip status={status} />
+        <StatusChip status={status} loading={loading && status === null} />
       </TableCell>
       <TableCell className="text-right font-mono text-text-low text-xs">
         {formatBytes(entry.size)}
@@ -802,6 +1010,57 @@ function DeletedModRow({ mod }: { mod: ModStatus }) {
     </TableRow>
   );
 }
+
+function UnpublishedModRow({ mod, adminMode }: { mod: ModStatus; adminMode: boolean }) {
+  const displayName = mod.filename.replace(/\.jar$/i, "");
+  const warningMode = !adminMode;
+  return (
+    <TableRow className={cn(warningMode ? "bg-signal-alert/8" : "bg-signal-warn/6")}>
+      <TableCell>
+        <div
+          className={cn(
+            "flex size-8 items-center justify-center overflow-hidden rounded bg-surface-base",
+            warningMode ? "border border-signal-alert/40" : "border border-signal-warn/40",
+          )}
+        >
+          {warningMode ? (
+            <AlertTriangle className="size-4 text-signal-alert" />
+          ) : (
+            <Package className="size-4 text-signal-warn" />
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-0.5">
+          <span className={cn("text-xs", warningMode ? "text-signal-alert" : "text-text-high")}>
+            {displayName}
+          </span>
+          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">{warningMode ? "WARNING" : "INSTANCE"}</Badge>
+      </TableCell>
+      <TableCell className="text-text-low text-xs uppercase">local</TableCell>
+      <TableCell>
+        {warningMode ? <StrayModChip /> : <StatusChip status="unpublished" />}
+      </TableCell>
+      <TableCell className="text-right font-mono text-text-low text-xs">
+        {typeof mod.size === "number" ? formatBytes(mod.size) : "--"}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function StrayModChip() {
+  return (
+    <span className="inline-flex items-center gap-2 text-[10px] tracking-[0.18em] text-signal-alert">
+      <AlertTriangle className="size-3" />
+      STRAY MOD
+    </span>
+  );
+}
+
 const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: string }> = {
   synced: {
     label: "SYNCED",
@@ -823,10 +1082,24 @@ const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: st
     dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
     text: "text-signal-alert",
   },
+  unpublished: {
+    label: "UNPUBLISHED",
+    dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
+    text: "text-signal-warn",
+  },
 };
 
-function StatusChip({ status }: { status: ModStatusValue }) {
-  const meta = STATUS_META[status];
+function StatusChip({ status, loading = false }: { status: ModStatusValue | null; loading?: boolean }) {
+  if (loading) {
+    return (
+      <span className="inline-flex items-center gap-2 text-[10px] tracking-[0.18em] text-text-low">
+        <Loader2 className="size-3 animate-spin" />
+        LOADING
+      </span>
+    );
+  }
+
+  const meta = STATUS_META[status ?? "missing"];
   return (
     <span className={cn("inline-flex items-center gap-2 text-[10px] tracking-[0.18em]", meta.text)}>
       <span className={cn("size-2 rounded-full", meta.dot)} />
@@ -854,6 +1127,154 @@ function summarizePublishReport(report: PublishScanReport | null) {
     update: report?.items.filter((item) => item.action === "update").length ?? 0,
     remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
     unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
+  };
+}
+
+function ChangelogCard({
+  entry,
+  expanded,
+  highlighted,
+  onToggle,
+}: {
+  entry: PackChangelogEntry;
+  expanded: boolean;
+  highlighted: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Card
+      variant="window"
+      highlighted={highlighted}
+      size="sm"
+      className={cn(highlighted && "bg-surface-panel-strong/80")}
+    >
+      <CardWindowBar className="px-0 py-0">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left"
+        >
+          <div className="flex items-center gap-3">
+            <CardWindowTab>UPDATE {entry.packVersion}</CardWindowTab>
+            <p className="truncate text-[10px] text-text-low">{formatGmt8(entry.committedAt)}</p>
+          </div>
+          {expanded ? <ChevronDown className="size-4 text-text-low" /> : <ChevronRight className="size-4 text-text-low" />}
+        </button>
+      </CardWindowBar>
+
+      {expanded ? (
+        <CardContent className="flex flex-col gap-4 border-t border-line-soft/20 pt-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-text-high">{entry.title}</p>
+            {entry.description ? (
+              <p className="whitespace-pre-wrap text-xs text-text-low">{entry.description}</p>
+            ) : null}
+          </div>
+
+          {entry.items.length ? (
+            <div className="flex flex-col gap-4">
+              {entry.items.map((item, itemIndex) => {
+                const meta = changelogActionMeta(item.action);
+                return (
+                  <section key={`${entry.commitSha}:${item.category}:${item.action}:${itemIndex}`} className="flex flex-col gap-2">
+                    <p className={cn("text-xs", meta.headingClass)}>{formatChangelogHeading(item)}</p>
+                    <div className="flex flex-col gap-1 text-xs text-text-low">
+                      {item.details.map((detail, detailIndex) => (
+                        <p
+                          key={`${entry.commitSha}:${item.category}:${item.action}:${detailIndex}`}
+                          className={cn(meta.detailClass)}
+                        >
+                          <span className={cn("mr-2 inline-block w-3 font-mono", meta.prefixClass)}>
+                            {meta.prefix}
+                          </span>
+                          {detail}
+                        </p>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-text-low">No tracked content changes</p>
+          )}
+        </CardContent>
+      ) : null}
+    </Card>
+  );
+}
+
+function buildCommitMessage(title: string, description: string) {
+  const cleanTitle = title.trim() || "Publish instance changes";
+  const cleanDescription = description.trim();
+  return cleanDescription ? `${cleanTitle}\n\n${cleanDescription}` : cleanTitle;
+}
+
+function formatGmt8(unixSeconds: number) {
+  const date = new Date(unixSeconds * 1000);
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Singapore",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+  return formatted.toUpperCase().replace(",", ", ");
+}
+
+function formatChangelogHeading(item: PackChangelogItem) {
+  const action = item.action === "add" ? "Added" : item.action === "update" ? "Updated" : "Removed";
+  const category =
+    item.category === "mods"
+      ? item.count === 1
+        ? "Mod"
+        : "Mods"
+      : item.category === "resourcepacks"
+        ? item.count === 1
+          ? "Resourcepack"
+          : "Resourcepacks"
+        : item.category === "shaderpacks"
+          ? item.count === 1
+            ? "Shaderpack"
+            : "Shaderpacks"
+          : item.category === "config"
+            ? item.count === 1
+              ? "Config"
+              : "Configs"
+            : item.category === "kubejs"
+              ? item.count === 1
+                ? "KubeJS File"
+                : "KubeJS Files"
+              : item.count === 1
+                ? "Root File"
+                : "Root Files";
+  return `${action} ${item.count} ${category}`;
+}
+
+function changelogActionMeta(action: PackChangelogItem["action"]) {
+  if (action === "add") {
+    return {
+      prefix: "+",
+      headingClass: "text-signal-live",
+      detailClass: "text-text-high",
+      prefixClass: "text-signal-live",
+    };
+  }
+  if (action === "update") {
+    return {
+      prefix: "~",
+      headingClass: "text-signal-warn",
+      detailClass: "text-text-high",
+      prefixClass: "text-signal-warn",
+    };
+  }
+  return {
+    prefix: "-",
+    headingClass: "text-signal-alert",
+    detailClass: "text-text-low line-through",
+    prefixClass: "text-signal-alert",
   };
 }
 

@@ -12,6 +12,17 @@
     "core:window:allow-start-dragging",
     "core:window:allow-is-maximized",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$APPDATA/packs/*"
+        },
+        {
+          "path": "$APPDATA/packs/**/*"
+        }
+      ]
+    },
     "dialog:default",
     "fs:default",
     "shell:default",

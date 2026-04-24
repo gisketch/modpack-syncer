@@ -76,6 +76,11 @@ export type PublishAuthSettings = {
   hasPat: boolean;
 };
 
+export type PublishSshStatus = {
+  verified: boolean;
+  source?: string | null;
+};
+
 export type PublishApplyReport = {
   manifestEntriesWritten: number;
   repoFilesWritten: number;
@@ -85,6 +90,22 @@ export type PublishApplyReport = {
 export type PublishPushReport = {
   commitSha: string;
   method: string;
+};
+
+export type PackChangelogItem = {
+  action: PublishAction;
+  category: PublishCategory;
+  count: number;
+  details: string[];
+};
+
+export type PackChangelogEntry = {
+  commitSha: string;
+  packVersion: string;
+  title: string;
+  description: string;
+  committedAt: number;
+  items: PackChangelogItem[];
 };
 
 export type PrismLocation = {
@@ -140,22 +161,29 @@ export const tauri = {
   savePublishPat: (token: string) =>
     invoke<PublishAuthSettings>("save_publish_pat", { token }),
   clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
+  verifyPublishSsh: () => invoke<PublishSshStatus>("verify_publish_ssh"),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   syncInstance: (packId: string, instanceName?: string) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
+  getInstanceMinecraftDir: (instanceName: string) =>
+    invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
+  packChangelog: (packId: string, limit?: number) =>
+    invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit }),
+  suggestPublishVersion: (packId: string) =>
+    invoke<string>("suggest_publish_version", { packId }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>
     invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
-  applyInstancePublish: (packId: string, instanceName?: string) =>
-    invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName }),
+  applyInstancePublish: (packId: string, instanceName?: string, version?: string) =>
+    invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName, version }),
   commitAndPushPublish: (packId: string, message: string) =>
     invoke<PublishPushReport>("commit_and_push_publish", { packId, message }),
 };
 
-export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted";
+export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted" | "unpublished";
 export type ModStatus = {
   id?: string | null;
   filename: string;

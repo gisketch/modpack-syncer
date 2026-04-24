@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, FolderOpen, Info, Package } from "lucide-react";
+import { Boxes, Check, FolderOpen, Info, Loader2, Package } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,8 @@ import { tauri } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
 
 export function SettingsRoute() {
-  const adminMode = useAppStore((s) => s.adminMode);
-  const setAdminMode = useAppStore((s) => s.setAdminMode);
+  const adminModeByPack = useAppStore((s) => s.adminModeByPack);
+  const setPackAdminMode = useAppStore((s) => s.setPackAdminMode);
   const qc = useQueryClient();
   const [pat, setPat] = useState("");
   const prism = useQuery({
@@ -27,6 +27,12 @@ export function SettingsRoute() {
   const auth = useQuery({
     queryKey: ["publish-auth"],
     queryFn: () => tauri.getPublishAuthSettings(),
+  });
+  const sshStatus = useQuery({
+    queryKey: ["publish-auth", "ssh-status"],
+    queryFn: () => tauri.verifyPublishSsh(),
+    enabled: auth.data?.method === "ssh",
+    retry: false,
   });
   const savePat = useMutation({
     mutationFn: (token: string) => tauri.savePublishPat(token),
@@ -64,16 +70,27 @@ export function SettingsRoute() {
 
       <Card>
         <CardHeader>
-          <CardTitle>ADMIN MODE</CardTitle>
-          <CardDescription>Enable publish and authoring tools</CardDescription>
+          <CardTitle>PACK ADMIN MODE</CardTitle>
+          <CardDescription>Enable publish and authoring tools per pack</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-[--text-high]">Author pack from linked instance</p>
-              <p className="text-xs text-[--text-low]">Publish preview + push flow will use this.</p>
-            </div>
-            <Switch checked={adminMode} onCheckedChange={setAdminMode} />
+          <div className="flex flex-col gap-4">
+            {packs.data?.length ? (
+              packs.data.map((pack) => (
+                <div key={pack.id} className="flex items-center justify-between gap-4 border-b border-line-soft/20 pb-4 last:border-b-0 last:pb-0">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm text-[--text-high]">{pack.id}</p>
+                    <p className="text-xs text-[--text-low]">Publish preview + push only for this pack.</p>
+                  </div>
+                  <Switch
+                    checked={adminModeByPack[pack.id] ?? false}
+                    onCheckedChange={(checked) => setPackAdminMode(pack.id, checked)}
+                  />
+                </div>
+              ))
+            ) : (
+              <p className="text-xs text-[--text-low]">No packs tracked yet.</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -103,6 +120,26 @@ export function SettingsRoute() {
               <p className="text-xs text-text-low">
                 Active: {(auth.data?.method ?? "unset").toUpperCase()} · PAT {auth.data?.hasPat ? "PRESENT" : "MISSING"}
               </p>
+              {auth.data?.method === "ssh" && (
+                <div className="flex items-center gap-2 text-xs">
+                  {sshStatus.isLoading ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-core" />
+                      <span className="text-text-low">Checking SSH access…</span>
+                    </>
+                  ) : sshStatus.data?.verified ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-brand-core" />
+                      <span className="text-brand-core">Access Verified</span>
+                      {sshStatus.data.source && (
+                        <span className="truncate text-text-low">via {sshStatus.data.source}</span>
+                      )}
+                    </>
+                  ) : sshStatus.error ? (
+                    <span className="text-signal-alert">{formatError(sshStatus.error)}</span>
+                  ) : null}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Input
                   type="password"

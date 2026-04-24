@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 type Pack = {
   id: string;
@@ -18,18 +19,37 @@ type AppState = {
   packs: Pack[];
   profiles: Profile[];
   activeProfile: string | null;
-  adminMode: boolean;
+  adminModeByPack: Record<string, boolean>;
   setActiveProfile: (name: string | null) => void;
-  setAdminMode: (adminMode: boolean) => void;
+  setPackAdminMode: (packId: string, adminMode: boolean) => void;
+  isPackAdminMode: (packId: string) => boolean;
   addPack: (pack: Pack) => void;
 };
 
-export const useAppStore = create<AppState>((set) => ({
-  packs: [],
-  profiles: [],
-  activeProfile: null,
-  adminMode: false,
-  setActiveProfile: (name) => set({ activeProfile: name }),
-  setAdminMode: (adminMode) => set({ adminMode }),
-  addPack: (pack) => set((s) => ({ packs: [...s.packs, pack] })),
-}));
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      packs: [],
+      profiles: [],
+      activeProfile: null,
+      adminModeByPack: {},
+      setActiveProfile: (name) => set({ activeProfile: name }),
+      setPackAdminMode: (packId, adminMode) =>
+        set((state) => ({
+          adminModeByPack: {
+            ...state.adminModeByPack,
+            [packId]: adminMode,
+          },
+        })),
+      isPackAdminMode: (packId) => get().adminModeByPack[packId] ?? false,
+      addPack: (pack) => set((s) => ({ packs: [...s.packs, pack] })),
+    }),
+    {
+      name: "modsync-app-store",
+      partialize: (state) => ({
+        activeProfile: state.activeProfile,
+        adminModeByPack: state.adminModeByPack,
+      }),
+    },
+  ),
+);

@@ -202,7 +202,7 @@ pub fn write_instance(
     // Mods
     let mods_dir = dot_mc.join("mods");
     std::fs::create_dir_all(&mods_dir)?;
-    let mods_written = write_managed_files(&mods_dir, resolved_mod_paths, ".modsync-managed.txt")?;
+    let mods_written = write_managed_files(&mods_dir, resolved_mod_paths, ".modsync-managed.txt", true)?;
     let state = manifest
         .mods
         .iter()
@@ -223,6 +223,7 @@ pub fn write_instance(
         &resourcepacks_dir,
         resolved_resourcepack_paths,
         ".modsync-managed.txt",
+        false,
     )?;
     let shaderpacks_dir = dot_mc.join("shaderpacks");
     std::fs::create_dir_all(&shaderpacks_dir)?;
@@ -230,6 +231,7 @@ pub fn write_instance(
         &shaderpacks_dir,
         resolved_shaderpack_paths,
         ".modsync-managed.txt",
+        false,
     )?;
 
     // Overrides: copy `overrides/`, `configs/`, `kubejs/` from pack repo into `.minecraft/`.
@@ -315,7 +317,10 @@ fn write_managed_files(
     dest_dir: &Path,
     resolved_paths: &[(PathBuf, String)],
     sidecar_name: &str,
+    strict_sync: bool,
 ) -> std::io::Result<usize> {
+    use std::collections::HashSet;
+
     let sidecar = dest_dir.join(sidecar_name);
     if let Ok(prev) = std::fs::read_to_string(&sidecar) {
         for line in prev.lines() {
@@ -325,6 +330,25 @@ fn write_managed_files(
             }
         }
     }
+
+    if strict_sync {
+        let desired = resolved_paths
+            .iter()
+            .map(|(_, filename)| filename.as_str())
+            .collect::<HashSet<_>>();
+        for entry in std::fs::read_dir(dest_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if !path.is_file() || name.starts_with('.') || desired.contains(name) {
+                continue;
+            }
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     let mut written = 0usize;
     let mut sidecar_lines = Vec::new();
     for (src, filename) in resolved_paths {

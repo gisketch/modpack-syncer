@@ -28,16 +28,19 @@ function Card({
   className,
   variant = "default",
   size = "default",
+  highlighted = false,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof cardVariants> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof cardVariants> & { size?: "default" | "sm"; highlighted?: boolean }) {
   return (
     <div
       data-slot="card"
       data-size={size}
+      data-highlighted={highlighted}
       data-variant={variant}
       className={cn(
         cardVariants({ variant, size }),
-        "data-[variant=default]:gap-4 data-[variant=default]:py-5 data-[variant=window]:gap-0 data-[variant=window]:py-0 data-[size=sm]:gap-3 data-[size=sm]:py-4",
+        "data-[variant=default]:gap-4 data-[variant=default]:py-5 data-[variant=window]:gap-0 data-[variant=window]:py-0 data-[size=sm]:gap-3 data-[size=sm]:py-4 data-[highlighted=true]:border-l-[3px] data-[highlighted=true]:border-l-signal-live",
         className,
       )}
       {...props}
