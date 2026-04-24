@@ -108,6 +108,20 @@ export type PackChangelogEntry = {
   items: PackChangelogItem[];
 };
 
+export type ModrinthAddPreview = {
+  projectId: string;
+  versionId: string;
+  slug: string;
+  title: string;
+  description: string;
+  iconUrl?: string | null;
+  versionNumber: string;
+  filename: string;
+  size: number;
+  suggestedSide: Side;
+  alreadyTracked: boolean;
+};
+
 export type PrismLocation = {
   data_dir: string;
   binary: string;
@@ -173,6 +187,12 @@ export const tauri = {
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit }),
   suggestPublishVersion: (packId: string) =>
     invoke<string>("suggest_publish_version", { packId }),
+  previewModrinthMod: (packId: string, identifier: string) =>
+    invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier }),
+  addModrinthMod: (packId: string, projectId: string, versionId: string, side?: Side) =>
+    invoke<ManifestEntry>("add_modrinth_mod", { packId, projectId, versionId, side }),
+  deleteInstanceMod: (packId: string, filename: string, instanceName?: string) =>
+    invoke<void>("delete_instance_mod", { packId, filename, instanceName }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>

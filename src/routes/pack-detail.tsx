@@ -11,10 +11,13 @@ import {
   FolderOpen,
   FolderGit2,
   Globe,
+  Link2,
   Loader2,
   Package,
   Play,
+  Plus,
   RefreshCw,
+  Trash2,
   UploadCloudIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -26,7 +29,9 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
+  CardStatus,
   CardTitle,
   CardWindowBar,
   CardWindowTab,
@@ -41,7 +46,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
 import {
@@ -57,6 +64,7 @@ import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
   type ManifestEntry,
+  type ModrinthAddPreview,
   type PackChangelogEntry,
   type PackChangelogItem,
   type ModStatus,
@@ -104,10 +112,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [addModsOpen, setAddModsOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
+  const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
   const [expandedChangelog, setExpandedChangelog] = useState<Record<string, boolean>>({});
   const [showAllChangelog, setShowAllChangelog] = useState(false);
+  const [publishLogs, setPublishLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
@@ -150,6 +161,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
+  const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
+  const alreadySynced =
+    !!manifest.data &&
+    !!statuses.data &&
+    launchRiskCount === 0 &&
+    deletedMods.length === 0 &&
+    unpublishedMods.length === 0 &&
+    syncedModCount === manifest.data.mods.length;
   const highlightedCommitCount = launchRiskCount > 0 ? 3 : 1;
 
   useEffect(() => {
@@ -244,6 +263,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     onMutate: () => {
       setPublishOpen(true);
       setPublishReport(null);
+      setPublishLogs([]);
     },
     onSuccess: async (scan) => {
       await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
@@ -255,10 +275,30 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Publish scan failed", { description: formatError(e) });
     },
   });
+  const deleteInstanceMod = useMutation({
+    mutationFn: (filename: string) => tauri.deleteInstanceMod(packId, filename),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
+      toast.success("Local mod deleted");
+    },
+    onError: (error) => {
+      toast.error("Delete failed", { description: formatError(error) });
+    },
+  });
   const publishPush = useMutation({
     mutationFn: async ({ message, version }: { message: string; version: string }) => {
+      setPublishLogs((current) => [...current, "> apply manifest changes"]);
       const applied = await tauri.applyInstancePublish(packId, undefined, version);
+      setPublishLogs((current) => [
+        ...current,
+        `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
+        "> commit + push origin",
+      ]);
       const pushed = await tauri.commitAndPushPublish(packId, message);
+      setPublishLogs((current) => [
+        ...current,
+        `push done :: ${pushed.commitSha.slice(0, 10)} via ${pushed.method.toUpperCase()}`,
+      ]);
       return { applied, pushed };
     },
     onSuccess: async (result) => {
@@ -274,6 +314,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       });
     },
     onError: (e) => {
+      setPublishLogs((current) => [...current, `error :: ${formatError(e)}`]);
       toast.error("Publish push failed", { description: formatError(e) });
     },
   });
@@ -289,6 +330,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   function handleSyncClick() {
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
+      return;
+    }
+    if (alreadySynced) {
+      setSyncAlreadySyncedConfirmOpen(true);
       return;
     }
     sync.mutate();
@@ -322,6 +367,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         pending={publishScan.isPending}
         report={publishReport}
         publishing={publishPush.isPending}
+        publishLogs={publishLogs}
         onPublish={(message, version) => publishPush.mutate({ message, version })}
       />
     );
@@ -498,13 +544,22 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       {manifest.data && (
         <Card>
           <CardHeader>
-            <CardTitle>
-              <Download className="inline size-4" /> MODS
-            </CardTitle>
-            <CardDescription>
-              {manifest.data.mods.length} entries tracked by manifest
-              {deletedMods.length > 0 ? ` · ${deletedMods.length} deleted in instance` : ""}
-            </CardDescription>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-2">
+                <CardTitle>
+                  <Download className="inline size-4" /> MODS
+                </CardTitle>
+                <CardDescription>
+                  {manifest.data.mods.length} entries tracked by manifest
+                  {deletedMods.length > 0 ? ` · ${deletedMods.length} deleted in instance` : ""}
+                </CardDescription>
+              </div>
+              {adminMode ? (
+                <Button variant="outline" onClick={() => setAddModsOpen(true)}>
+                  <Plus /> ADD MODS
+                </Button>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent>
             <ScrollArea className="max-h-[420px]">
@@ -525,6 +580,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       key={`unpublished:${mod.filename}`}
                       mod={mod}
                       adminMode={adminMode}
+                      deleting={deleteInstanceMod.isPending}
+                      onDelete={() => deleteInstanceMod.mutate(mod.filename)}
                     />
                   ))}
                   {manifest.data.mods.map((m) => (
@@ -563,6 +620,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         progressView={progressView}
         report={report}
       />
+
+      <AddModDialog open={addModsOpen} onClose={() => setAddModsOpen(false)} packId={packId} />
 
       <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
         <DialogContent variant="destructive" className="overflow-hidden max-w-md">
@@ -636,6 +695,38 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={syncAlreadySyncedConfirmOpen} onOpenChange={setSyncAlreadySyncedConfirmOpen}>
+        <DialogContent className="overflow-hidden max-w-xl">
+          <DialogHeader>
+            <DialogTitle>INSTANCE ALREADY SYNCED</DialogTitle>
+            <DialogDescription>
+              Manifest + Prism instance already match. Run sync again only if local state looks wrong and refresh needed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="flex flex-col gap-4 text-sm text-text-low">
+              <div className="border border-line-soft/30 bg-surface-sunken p-4 font-mono text-[10px] uppercase tracking-[0.18em] text-text-low">
+                No missing mods. No outdated mods. No unpublished local files.
+              </div>
+              <p>Continue for forced resync.</p>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setSyncAlreadySyncedConfirmOpen(false)}>
+              CANCEL
+            </Button>
+            <Button
+              onClick={() => {
+                setSyncAlreadySyncedConfirmOpen(false);
+                sync.mutate();
+              }}
+            >
+              SYNC AGAIN
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -646,6 +737,7 @@ function PublishPreviewPage({
   pending,
   report,
   publishing,
+  publishLogs,
   onPublish,
 }: {
   packId: string;
@@ -653,6 +745,7 @@ function PublishPreviewPage({
   pending: boolean;
   report: PublishScanReport | null;
   publishing: boolean;
+  publishLogs: string[];
   onPublish: (message: string, version: string) => void;
 }) {
   const counts = summarizePublishReport(report);
@@ -746,6 +839,28 @@ function PublishPreviewPage({
             </CardContent>
           </Card>
 
+          {publishLogs.length > 0 ? (
+            <Card variant="window">
+              <CardWindowBar>
+                <CardWindowTab>PUBLISH TERMINAL</CardWindowTab>
+                <CardStatus>{publishing ? "Streaming" : "Idle"}</CardStatus>
+              </CardWindowBar>
+              <CardContent className="px-0 py-0">
+                <ScrollArea className="h-56 px-4 py-4">
+                  <div className="flex flex-col gap-2 font-mono text-xs text-text-low">
+                    {publishLogs.map((line, index) => (
+                      <p key={`${line}-${index}`}>{line}</p>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+              <CardFooter className="justify-between bg-surface-panel-strong/40 py-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
+                <span>{publishing ? "Commit in progress" : "Last run complete"}</span>
+                <span>{publishLogs.length} lines</span>
+              </CardFooter>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>CHANGES</CardTitle>
@@ -795,6 +910,169 @@ function PublishPreviewPage({
         </>
       )}
     </div>
+  );
+}
+
+function AddModDialog({
+  open,
+  onClose,
+  packId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  packId: string;
+}) {
+  const qc = useQueryClient();
+  const [input, setInput] = useState("");
+  const [selectedSide, setSelectedSide] = useState<"client" | "server" | "both">("client");
+  const preview = useMutation({
+    mutationFn: (identifier: string) => tauri.previewModrinthMod(packId, identifier),
+    onSuccess: (data) => setSelectedSide(data.suggestedSide),
+  });
+  const addMod = useMutation({
+    mutationFn: (payload: { projectId: string; versionId: string; side: "client" | "server" | "both" }) =>
+      tauri.addModrinthMod(packId, payload.projectId, payload.versionId, payload.side),
+    onSuccess: async (entry) => {
+      await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
+      toast.success("Mod staged", { description: entry.filename });
+      handleClose();
+    },
+    onError: (error) => {
+      toast.error("Add mod failed", { description: formatError(error) });
+    },
+  });
+
+  function handleClose() {
+    setInput("");
+    setSelectedSide("client");
+    preview.reset();
+    addMod.reset();
+    onClose();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
+      <DialogContent className="max-w-2xl overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>ADD MODRINTH MOD</DialogTitle>
+          <DialogDescription>
+            Paste Modrinth link, slug, or project id. Mod downloads into instance first and stays unpublished until publish.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-6 p-6">
+          <div className="flex flex-col gap-3">
+            <Label htmlFor="modrinth-link">MODRINTH SOURCE</Label>
+            <div className="flex gap-3">
+              <Input
+                id="modrinth-link"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="https://modrinth.com/mod/... or slug"
+              />
+              <Button
+                variant="outline"
+                onClick={() => preview.mutate(input.trim())}
+                disabled={!input.trim() || preview.isPending || addMod.isPending}
+              >
+                {preview.isPending ? <Loader2 className="animate-spin" /> : <Link2 />}
+                RESOLVE
+              </Button>
+            </div>
+            {preview.error ? (
+              <p className="text-sm text-signal-alert">{formatError(preview.error)}</p>
+            ) : null}
+          </div>
+
+          {preview.data ? (
+            <ResolvedModPreview preview={preview.data} selectedSide={selectedSide} onSideChange={setSelectedSide} />
+          ) : (
+            <div className="border border-line-soft/20 bg-surface-sunken px-4 py-6 text-sm text-text-low">
+              Resolve Modrinth project first.
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter className="px-6 py-4 sm:justify-between">
+          <Button variant="secondary" onClick={handleClose} disabled={addMod.isPending}>
+            CANCEL
+          </Button>
+          <Button
+            onClick={() =>
+              preview.data &&
+              addMod.mutate({
+                projectId: preview.data.projectId,
+                versionId: preview.data.versionId,
+                side: selectedSide,
+              })
+            }
+            disabled={!preview.data || preview.data.alreadyTracked || addMod.isPending}
+          >
+            {addMod.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+            {preview.data?.alreadyTracked ? "ALREADY TRACKED" : "DOWNLOAD TO INSTANCE"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ResolvedModPreview({
+  preview,
+  selectedSide,
+  onSideChange,
+}: {
+  preview: ModrinthAddPreview;
+  selectedSide: "client" | "server" | "both";
+  onSideChange: (value: "client" | "server" | "both") => void;
+}) {
+  return (
+    <Card variant="window">
+      <CardWindowBar>
+        <CardWindowTab>MODRINTH PREVIEW</CardWindowTab>
+      </CardWindowBar>
+      <CardContent className="flex flex-col gap-5 py-4">
+        <div className="flex items-start gap-4">
+          <div className="flex size-14 items-center justify-center overflow-hidden border border-line-soft/30 bg-surface-base">
+            {preview.iconUrl ? (
+              <img src={preview.iconUrl} alt="" className="size-full object-cover" loading="lazy" />
+            ) : (
+              <Package className="size-5 text-text-low" />
+            )}
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <p className="text-base text-text-high">{preview.title}</p>
+            <p className="font-mono text-[10px] text-text-low">{preview.filename}</p>
+            <p className="text-xs text-text-low">{preview.versionNumber}</p>
+            {preview.description ? (
+              <p className="line-clamp-3 text-xs text-text-low">{preview.description}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+          <div className="grid gap-2 text-xs">
+            <Row k="PROJECT" v={preview.slug} />
+            <Row k="SIZE" v={formatBytes(preview.size)} />
+            <Row k="VERSION" v={preview.versionNumber} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="mod-side">SIDE</Label>
+            <Select value={selectedSide} onValueChange={(value) => onSideChange(value as "client" | "server" | "both") }>
+              <SelectTrigger id="mod-side">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="client">CLIENT</SelectItem>
+                <SelectItem value="server">SERVER</SelectItem>
+                <SelectItem value="both">BOTH</SelectItem>
+              </SelectContent>
+            </Select>
+            {preview.alreadyTracked ? (
+              <p className="text-xs text-signal-warn">Already tracked in manifest. Add disabled.</p>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1011,7 +1289,17 @@ function DeletedModRow({ mod }: { mod: ModStatus }) {
   );
 }
 
-function UnpublishedModRow({ mod, adminMode }: { mod: ModStatus; adminMode: boolean }) {
+function UnpublishedModRow({
+  mod,
+  adminMode,
+  deleting,
+  onDelete,
+}: {
+  mod: ModStatus;
+  adminMode: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+}) {
   const displayName = mod.filename.replace(/\.jar$/i, "");
   const warningMode = !adminMode;
   return (
@@ -1046,7 +1334,13 @@ function UnpublishedModRow({ mod, adminMode }: { mod: ModStatus; adminMode: bool
         {warningMode ? <StrayModChip /> : <StatusChip status="unpublished" />}
       </TableCell>
       <TableCell className="text-right font-mono text-text-low text-xs">
-        {typeof mod.size === "number" ? formatBytes(mod.size) : "--"}
+        <div className="flex items-center justify-end gap-2">
+          <span>{typeof mod.size === "number" ? formatBytes(mod.size) : "--"}</span>
+          <Button size="sm" variant="outline" onClick={onDelete} disabled={deleting}>
+            {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            DELETE
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

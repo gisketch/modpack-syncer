@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::{cache, download, git, manifest, paths, prism};
@@ -112,6 +112,76 @@ pub struct PackChangelogEntry {
     pub description: String,
     pub committed_at: i64,
     pub items: Vec<PackChangelogItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModrinthAddPreview {
+    pub project_id: String,
+    pub version_id: String,
+    pub slug: String,
+    pub title: String,
+    pub description: String,
+    pub icon_url: Option<String>,
+    pub version_number: String,
+    pub filename: String,
+    pub size: u64,
+    pub url: String,
+    pub sha1: String,
+    pub sha512: Option<String>,
+    pub suggested_side: manifest::Side,
+    pub already_tracked: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UnpublishedModrinthState {
+    filename: String,
+    project_id: String,
+    version_id: String,
+    slug: String,
+    url: String,
+    sha1: String,
+    sha512: Option<String>,
+    size: u64,
+    side: manifest::Side,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModrinthProjectApi {
+    id: String,
+    slug: String,
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    icon_url: Option<String>,
+    client_side: String,
+    server_side: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModrinthVersionApi {
+    id: String,
+    version_number: String,
+    files: Vec<ModrinthVersionFileApi>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModrinthVersionFileApi {
+    url: String,
+    filename: String,
+    size: u64,
+    #[serde(default)]
+    primary: bool,
+    hashes: ModrinthHashesApi,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModrinthHashesApi {
+    sha1: String,
+    #[serde(default)]
+    sha512: Option<String>,
 }
 
 impl From<git::GitError> for CommandError {
@@ -502,6 +572,108 @@ pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandE
 }
 
 #[tauri::command]
+pub async fn preview_modrinth_mod(
+    pack_id: String,
+    identifier: String,
+) -> Result<ModrinthAddPreview, CommandError> {
+    let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+    let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&manifest_path))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+    resolve_modrinth_preview(&manifest, &identifier).await
+}
+
+#[tauri::command]
+pub async fn add_modrinth_mod(
+    pack_id: String,
+    project_id: String,
+    version_id: String,
+    side: Option<String>,
+) -> Result<manifest::Entry, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let manifest_path = pack_dir.join("manifest.json");
+    let manifest = tokio::task::spawn_blocking({
+        let manifest_path = manifest_path.clone();
+        move || manifest::load_from_path(&manifest_path)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    let preview = resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id).await?;
+    let chosen_side = side
+        .as_deref()
+        .map(parse_manifest_side)
+        .transpose()?
+        .unwrap_or(preview.suggested_side);
+
+    let next_entry = manifest::Entry {
+        id: preview.slug.clone(),
+        source: manifest::Source::Modrinth,
+        project_id: Some(preview.project_id.clone()),
+        version_id: Some(preview.version_id.clone()),
+        repo_path: None,
+        filename: preview.filename.clone(),
+        sha1: preview.sha1.clone(),
+        sha512: preview.sha512.clone(),
+        size: preview.size,
+        url: preview.url.clone(),
+        optional: false,
+        side: chosen_side,
+    };
+    let cached_path = download::fetch_entry(&next_entry).await?;
+    let instance_name = format!("modsync-{pack_id}");
+    let mods_dir = prism::instance_mods_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || -> Result<manifest::Entry, CommandError> {
+        std::fs::create_dir_all(&mods_dir)?;
+        copy_local_file(&cached_path, &mods_dir.join(&next_entry.filename))?;
+
+        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
+        state.retain(|entry| entry.filename != next_entry.filename);
+        state.push(UnpublishedModrinthState {
+            filename: next_entry.filename.clone(),
+            project_id: preview.project_id,
+            version_id: preview.version_id,
+            slug: preview.slug,
+            url: next_entry.url.clone(),
+            sha1: next_entry.sha1.clone(),
+            sha512: next_entry.sha512.clone(),
+            size: next_entry.size,
+            side: next_entry.side,
+        });
+        state.sort_by(|left, right| left.filename.cmp(&right.filename));
+        write_unpublished_modrinth_state(&mods_dir, &state)?;
+        Ok(next_entry)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn delete_instance_mod(
+    pack_id: String,
+    filename: String,
+    instance_name: Option<String>,
+) -> Result<(), CommandError> {
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let mods_dir = prism::instance_mods_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        let path = mods_dir.join(&filename);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
+        state.retain(|entry| entry.filename != filename);
+        write_unpublished_modrinth_state(&mods_dir, &state)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
 pub async fn scan_instance_publish(
     pack_id: String,
     instance_name: Option<String>,
@@ -628,6 +800,7 @@ pub async fn apply_instance_publish(
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let instance_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let unpublished_modrinth = read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
 
     tokio::task::spawn_blocking(move || -> Result<PublishApplyReport, CommandError> {
         let mut manifest = manifest;
@@ -646,6 +819,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("mods"),
             "mods",
             &mut manifest.mods,
+            Some(&unpublished_modrinth),
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -654,6 +828,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("resourcepacks"),
             "resourcepacks",
             &mut manifest.resourcepacks,
+            None,
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -662,6 +837,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("shaderpacks"),
             "shaderpacks",
             &mut manifest.shaderpacks,
+            None,
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1092,6 +1268,7 @@ fn apply_artifact_dir(
     repo_dir: &std::path::Path,
     repo_prefix: &str,
     entries: &mut Vec<manifest::Entry>,
+    unpublished_modrinth: Option<&[UnpublishedModrinthState]>,
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
 ) -> Result<(), CommandError> {
@@ -1107,6 +1284,11 @@ fn apply_artifact_dir(
         .iter()
         .map(|entry| entry.id.clone())
         .collect::<HashSet<_>>();
+    let unpublished_by_filename = unpublished_modrinth
+        .unwrap_or(&[])
+        .iter()
+        .map(|entry| (entry.filename.as_str(), entry))
+        .collect::<HashMap<_, _>>();
     let mut next_entries = Vec::with_capacity(instance_files.len());
     let mut seen_filenames = HashSet::new();
 
@@ -1119,24 +1301,48 @@ fn apply_artifact_dir(
         let sha1 = cache::file_sha1_hex(&path)?;
         let size = path.metadata()?.len();
         let existing = existing_by_filename.remove(&filename);
-        let needs_repo_copy = match &existing {
-            Some(entry) if entry.sha1.eq_ignore_ascii_case(&sha1) && entry.source != manifest::Source::Repo => false,
-            _ => true,
+        let unpublished = unpublished_by_filename
+            .get(filename.as_str())
+            .filter(|entry| entry.sha1.eq_ignore_ascii_case(&sha1));
+        let needs_repo_copy = if unpublished.is_some() {
+            false
+        } else {
+            !matches!(
+                &existing,
+                Some(entry) if entry.sha1.eq_ignore_ascii_case(&sha1) && entry.source != manifest::Source::Repo
+            )
         };
-        let mut entry = existing.unwrap_or_else(|| manifest::Entry {
-            id: unique_local_id(repo_prefix, &filename, &mut used_ids),
-            source: manifest::Source::Repo,
-            project_id: None,
-            version_id: None,
-            repo_path: None,
-            filename: filename.clone(),
-            sha1: sha1.clone(),
-            sha512: None,
-            size,
-            url: String::new(),
-            optional: false,
-            side: manifest::Side::Client,
-        });
+        let mut entry = if let Some(unpublished) = unpublished {
+            manifest::Entry {
+                id: unpublished.slug.clone(),
+                source: manifest::Source::Modrinth,
+                project_id: Some(unpublished.project_id.clone()),
+                version_id: Some(unpublished.version_id.clone()),
+                repo_path: None,
+                filename: filename.clone(),
+                sha1: unpublished.sha1.clone(),
+                sha512: unpublished.sha512.clone(),
+                size: unpublished.size,
+                url: unpublished.url.clone(),
+                optional: false,
+                side: unpublished.side,
+            }
+        } else {
+            existing.unwrap_or_else(|| manifest::Entry {
+                id: unique_local_id(repo_prefix, &filename, &mut used_ids),
+                source: manifest::Source::Repo,
+                project_id: None,
+                version_id: None,
+                repo_path: None,
+                filename: filename.clone(),
+                sha1: sha1.clone(),
+                sha512: None,
+                size,
+                url: String::new(),
+                optional: false,
+                side: manifest::Side::Client,
+            })
+        };
 
         if needs_repo_copy {
             let repo_path = entry
@@ -1579,3 +1785,198 @@ fn next_publish_version(current_version: &str) -> String {
 
     format!("{date_prefix}a")
 }
+
+fn read_unpublished_modrinth_state(
+    mods_dir: &std::path::Path,
+) -> Result<Vec<UnpublishedModrinthState>, CommandError> {
+    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(|error| CommandError::Other(error.to_string()))
+}
+
+fn write_unpublished_modrinth_state(
+    mods_dir: &std::path::Path,
+    state: &[UnpublishedModrinthState],
+) -> Result<(), CommandError> {
+    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
+    let bytes = serde_json::to_vec_pretty(state).map_err(anyhow::Error::from)?;
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn copy_local_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(), CommandError> {
+    if dst.exists() {
+        std::fs::remove_file(dst)?;
+    }
+    if std::fs::hard_link(src, dst).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(src, dst)?;
+    Ok(())
+}
+
+async fn resolve_modrinth_preview(
+    manifest: &manifest::Manifest,
+    identifier: &str,
+) -> Result<ModrinthAddPreview, CommandError> {
+    let project_id = normalize_modrinth_identifier(identifier)?;
+    let project = fetch_modrinth_project(&project_id).await?;
+    let version = fetch_latest_modrinth_version(&project.id, &manifest.pack.mc_version, manifest.pack.loader).await?;
+    build_modrinth_preview(manifest, project, version)
+}
+
+async fn resolve_modrinth_preview_from_ids(
+    manifest: &manifest::Manifest,
+    project_id: &str,
+    version_id: &str,
+) -> Result<ModrinthAddPreview, CommandError> {
+    let project = fetch_modrinth_project(project_id).await?;
+    let version = fetch_modrinth_version(version_id).await?;
+    build_modrinth_preview(manifest, project, version)
+}
+
+fn build_modrinth_preview(
+    manifest: &manifest::Manifest,
+    project: ModrinthProjectApi,
+    version: ModrinthVersionApi,
+) -> Result<ModrinthAddPreview, CommandError> {
+    let file = version
+        .files
+        .iter()
+        .find(|file| file.primary)
+        .cloned()
+        .or_else(|| version.files.first().cloned())
+        .ok_or_else(|| CommandError::Other("Modrinth version has no downloadable files".to_string()))?;
+    let suggested_side = suggested_manifest_side(&project.client_side, &project.server_side);
+    let already_tracked = manifest.mods.iter().any(|entry| {
+        entry.project_id.as_deref() == Some(project.id.as_str())
+            || entry.id == project.slug
+            || entry.filename == file.filename
+    });
+
+    Ok(ModrinthAddPreview {
+        project_id: project.id,
+        version_id: version.id,
+        slug: project.slug,
+        title: project.title,
+        description: project.description.unwrap_or_default(),
+        icon_url: project.icon_url,
+        version_number: version.version_number,
+        filename: file.filename,
+        size: file.size,
+        url: file.url,
+        sha1: file.hashes.sha1,
+        sha512: file.hashes.sha512,
+        suggested_side,
+        already_tracked,
+    })
+}
+
+async fn fetch_modrinth_project(project_id: &str) -> Result<ModrinthProjectApi, CommandError> {
+    reqwest::Client::new()
+        .get(format!("https://api.modrinth.com/v2/project/{project_id}"))
+        .header(reqwest::header::USER_AGENT, "modsync/0.1 (https://github.com/gisketch/modsync)")
+        .send()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .error_for_status()
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .json::<ModrinthProjectApi>()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))
+}
+
+async fn fetch_latest_modrinth_version(
+    project_id: &str,
+    mc_version: &str,
+    loader: manifest::Loader,
+) -> Result<ModrinthVersionApi, CommandError> {
+    let versions = reqwest::Client::new()
+        .get(format!("https://api.modrinth.com/v2/project/{project_id}/version"))
+        .header(reqwest::header::USER_AGENT, "modsync/0.1 (https://github.com/gisketch/modsync)")
+        .query(&[
+            ("game_versions", format!("[\"{mc_version}\"]")),
+            ("loaders", format!("[\"{}\"]", modrinth_loader(loader))),
+        ])
+        .send()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .error_for_status()
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .json::<Vec<ModrinthVersionApi>>()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?;
+    versions
+        .into_iter()
+        .next()
+        .ok_or_else(|| CommandError::Other("No compatible Modrinth version found for this pack".to_string()))
+}
+
+async fn fetch_modrinth_version(version_id: &str) -> Result<ModrinthVersionApi, CommandError> {
+    reqwest::Client::new()
+        .get(format!("https://api.modrinth.com/v2/version/{version_id}"))
+        .header(reqwest::header::USER_AGENT, "modsync/0.1 (https://github.com/gisketch/modsync)")
+        .send()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .error_for_status()
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .json::<ModrinthVersionApi>()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))
+}
+
+fn normalize_modrinth_identifier(input: &str) -> Result<String, CommandError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::Other("Enter Modrinth link, slug, or project id".to_string()));
+    }
+    if !trimmed.contains("://") {
+        return Ok(trimmed.trim_matches('/').to_string());
+    }
+    let url = url::Url::parse(trimmed).map_err(|error| CommandError::Other(error.to_string()))?;
+    if url.host_str() != Some("modrinth.com") && url.host_str() != Some("www.modrinth.com") {
+        return Err(CommandError::Other("Only Modrinth links supported for this flow".to_string()));
+    }
+    let segments = url
+        .path_segments()
+        .map(|segments| segments.filter(|segment| !segment.is_empty()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    if segments.len() < 2 {
+        return Err(CommandError::Other("Could not parse Modrinth project from link".to_string()));
+    }
+    Ok(segments[1].to_string())
+}
+
+fn modrinth_loader(loader: manifest::Loader) -> &'static str {
+    match loader {
+        manifest::Loader::NeoForge => "neoforge",
+        manifest::Loader::Fabric => "fabric",
+        manifest::Loader::Forge => "forge",
+        manifest::Loader::Quilt => "quilt",
+    }
+}
+
+fn suggested_manifest_side(client_side: &str, server_side: &str) -> manifest::Side {
+    let client_supported = client_side != "unsupported";
+    let server_supported = server_side != "unsupported";
+    match (client_supported, server_supported) {
+        (true, true) => manifest::Side::Both,
+        (true, false) => manifest::Side::Client,
+        (false, true) => manifest::Side::Server,
+        (false, false) => manifest::Side::Client,
+    }
+}
+
+fn parse_manifest_side(value: &str) -> Result<manifest::Side, CommandError> {
+    match value {
+        "client" => Ok(manifest::Side::Client),
+        "server" => Ok(manifest::Side::Server),
+        "both" => Ok(manifest::Side::Both),
+        _ => Err(CommandError::Other(format!("Unsupported side: {value}"))),
+    }
+}
+
