@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Loader = "neoforge" | "fabric" | "forge" | "quilt";
-export type ModSource = "modrinth" | "curseforge" | "url" | "minio";
+export type ModSource = "modrinth" | "curseforge" | "url";
 export type Side = "client" | "server" | "both";
 
 export type ManifestEntry = {

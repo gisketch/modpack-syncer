@@ -19,7 +19,6 @@ stack:
     runtime: tokio
     http: reqwest
     git: git2
-    object_storage: aws-sdk-s3
     db: rusqlite
   package_manager: bun
   node_version: ">=20"
@@ -39,7 +38,7 @@ launcher:
 source_of_truth:
   git_host: gitea
   git_embedded: libgit2
-  object_storage: minio
+  object_storage: none
   cdns: ["modrinth", "curseforge"]
 paths:
   specs: openspec/specs

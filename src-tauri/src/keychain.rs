@@ -1,3 +1,3 @@
-//! OS keychain wrapper for secrets (Gitea PAT, MinIO access keys).
+//! OS keychain wrapper for secrets (Gitea PAT).
 
 #![allow(dead_code)]

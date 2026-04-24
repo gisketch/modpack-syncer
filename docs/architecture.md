@@ -22,7 +22,6 @@
 |-------|-------|-----|
 | **Gitea** (self-hosted, user VPS) | `manifest.json`, `configs/`, `kubejs/`, `profiles/*.json`, `CHANGELOG.md` | Text/small files. Diffable. Free versioning. |
 | **Modrinth / CurseForge CDN** | Public mod jars, public resourcepacks, public shaderpacks | Zero self-hosting cost. Hash-verified. Upstream. |
-| **MinIO** (self-hosted, user VPS) | Custom/private resourcepacks, CF-blocked mods (fallback), large private binaries | S3-compatible. Keeps Gitea repo small. Lifecycle policies can prune old versions. |
 | **Local SQLite** (client) | Download cache index, profile state, last-synced commit SHA, user settings | Fast local queries, no server round-trip for UI. |
 
 ### 2.2 Repo layout (Gitea)
@@ -36,7 +35,6 @@ gisketch/modsync-pack/
 ├── configs/                   # mod config files (tracked)
 ├── kubejs/                    # KubeJS scripts
 ├── overrides/                 # any extra files to drop in .minecraft/
-├── assets-manifest.json       # MinIO object refs (custom resourcepacks etc.)
 ├── CHANGELOG.md
 └── README.md
 ```
@@ -50,7 +48,7 @@ gisketch/modsync-pack/
   "mods": [
     {
       "id": "sodium",
-      "source": "modrinth",           // "modrinth" | "curseforge" | "url" | "minio"
+      "source": "modrinth",           // "modrinth" | "curseforge" | "url"
       "projectId": "AANobbMI",
       "versionId": "Yp8wLY1P",
       "filename": "sodium-neoforge-0.6.0.jar",
@@ -99,7 +97,7 @@ gisketch/modsync-pack/
 User → App: add pack URL (gitea.vps.tld/gisketch/modsync-pack)
 App  → Gitea: libgit2 clone to app data dir
 App  → manifest.json: parse
-App  → Modrinth/CF/MinIO: parallel download mod jars (reqwest + tokio)
+App  → Modrinth/CF: parallel download mod jars (reqwest + tokio)
 App  → SHA verify every jar
 App  → Prism instances/: write .minecraft/ (mods, configs, kubejs, …)
 App  → User: "Ready, launch?"
@@ -121,8 +119,7 @@ App: fetches new mod metadata from Modrinth/CF APIs by filename/hash match
 UI: shows proposed manifest update
 Author: edits CHANGELOG → click "Publish v0.3.1"
 App:
-  - uploads custom assets to MinIO (aws-sdk-s3)
-  - updates manifest.json + assets-manifest.json
+  - updates manifest.json
   - git add, commit, tag, push (libgit2)
 ```
 
@@ -150,7 +147,6 @@ App:
 | Async runtime | `tokio` |
 | HTTP | `reqwest` (rustls, http2) |
 | Git | `git2` (libgit2 bindings) |
-| S3/MinIO | `aws-sdk-s3` |
 | Local DB | `rusqlite` + `r2d2` pool |
 | Hashing | `sha1`, `sha2` |
 | Zip/archives | `zip`, `async-compression` |
@@ -189,7 +185,7 @@ App:
 | `mods` | `.minecraft/mods/*.jar` | always recommended |
 | `configs` | `.minecraft/config/**` | text diff-friendly |
 | `kubejs` | `.minecraft/kubejs/**` | scripts |
-| `resourcepacks` | `.minecraft/resourcepacks/**` | Modrinth URLs + MinIO custom |
+| `resourcepacks` | `.minecraft/resourcepacks/**` | Modrinth URLs |
 | `shaderpacks` | `.minecraft/shaderpacks/**` | same |
 | `keybinds` | `options.txt` (keybind lines only) | partial-file merge to preserve user's video settings |
 | `servers` | `servers.dat` | NBT merge (don't clobber user's extra servers) |
@@ -202,8 +198,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 
 - Gitea PAT stored via OS keychain (`tauri-plugin-stronghold` or `keyring` crate).
 - Every download SHA1 + SHA512 verified against manifest before writing to disk.
-- MinIO access via short-lived STS creds if possible, else long PAT in keychain.
-- Manifest `url` fields validated against allowlist (modrinth.com, curseforge CDN host, user's VPS domain).
+- Manifest `url` fields validated against allowlist (modrinth.com, curseforge CDN host).
 - No `eval`/dynamic code execution from manifest.
 
 ---
@@ -222,7 +217,6 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 - **M0** — scaffold + Gitea clone + manifest parse (read-only).
 - **M1** — Mod download + SHA verify + Prism instance write + launch.
 - **M2** — Full sync (configs, kubejs, resourcepacks via Modrinth).
-- **M3** — MinIO integration for custom assets.
-- **M4** — Author mode: scan/diff/publish flow.
-- **M5** — Diff viewer, changelog UI, Adoptium auto-download.
-- **M6** — Partial-file sync (keybinds, servers.dat), polish, release.
+- **M3** — Author mode: scan/diff/publish flow.
+- **M4** — Diff viewer, changelog UI, Adoptium auto-download.
+- **M5** — Partial-file sync (keybinds, servers.dat), polish, release.

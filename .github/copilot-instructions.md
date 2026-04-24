@@ -16,7 +16,7 @@
 ## Stack facts
 
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind v4 (`@tailwindcss/vite`) + Zustand + TanStack Query + shadcn-style components (hand-rolled in `src/components/ui`).
-- **Backend**: Rust 2021, Tauri 2. Async via tokio, HTTP via reqwest (rustls), git via `git2` (vendored libgit2, no system git), S3 via `aws-sdk-s3`, DB via `rusqlite` (bundled).
+- **Backend**: Rust 2021, Tauri 2. Async via tokio, HTTP via reqwest (rustls), git via `git2` (vendored libgit2, no system git), DB via `rusqlite` (bundled).
 - **Package manager**: **Bun** (not npm/yarn/pnpm). Use `bun`, `bun add`, `bun run`, `bunx`.
 - **Path alias**: `@/*` → `src/*` in both `tsconfig.json` and `vite.config.ts`.
 
@@ -25,9 +25,9 @@
 - **SHA verification** is mandatory for every downloaded artifact. Never bypass it.
 - **Do not bundle Prism Launcher**. Detect an existing install; write instance folders only.
 - **Do not collect Microsoft credentials**. Prism handles MS auth.
-- **Secrets** (Gitea PAT, MinIO keys) go in the OS keychain via the `keyring` crate. Never on disk plain, never in logs.
+- **Secrets** (Gitea PAT) go in the OS keychain via the `keyring` crate. Never on disk plain, never in logs.
 - **Manifest URL allowlist** must be enforced (see spec `manifest.md`).
-- **No mod jars in git.** Manifest references upstream CDNs (or MinIO); git holds only text (manifest, configs, kubejs, profiles).
+- **No mod jars in git.** Manifest references upstream CDNs (Modrinth / CurseForge); git holds only text (manifest, configs, kubejs, profiles).
 
 ## Conventions
 

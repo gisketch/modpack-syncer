@@ -30,10 +30,6 @@ futures = "0.3"
 # Git (libgit2 bindings, vendored so no system git needed)
 git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2", "https"] }
 
-# S3 / MinIO
-aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1"
-
 # Local DB
 rusqlite = { version = "0.32", features = ["bundled"] }
 r2d2 = "0.8"
@@ -58,7 +54,7 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# OS keychain for PAT / MinIO creds
+# OS keychain for Gitea PAT
 keyring = "3"
 
 # Paths

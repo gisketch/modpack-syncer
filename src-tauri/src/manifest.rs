@@ -45,7 +45,6 @@ pub enum Source {
     Modrinth,
     Curseforge,
     Url,
-    Minio,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
