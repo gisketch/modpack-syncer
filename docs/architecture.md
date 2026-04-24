@@ -20,11 +20,11 @@
 
 | Layer | Holds | Why |
 |-------|-------|-----|
-| **Gitea** (self-hosted, user VPS) | `manifest.json`, `configs/`, `kubejs/`, `profiles/*.json`, `CHANGELOG.md` | Text/small files. Diffable. Free versioning. |
+| **GitHub** (public repo) | `manifest.json`, `configs/`, `kubejs/`, `profiles/*.json`, `CHANGELOG.md` | Text/small files. Diffable. Free versioning. |
 | **Modrinth / CurseForge CDN** | Public mod jars, public resourcepacks, public shaderpacks | Zero self-hosting cost. Hash-verified. Upstream. |
 | **Local SQLite** (client) | Download cache index, profile state, last-synced commit SHA, user settings | Fast local queries, no server round-trip for UI. |
 
-### 2.2 Repo layout (Gitea)
+### 2.2 Repo layout (GitHub)
 
 ```
 gisketch/modsync-pack/
@@ -94,8 +94,8 @@ gisketch/modsync-pack/
 
 ### 3.1 Consumer — initial install
 ```
-User → App: add pack URL (gitea.vps.tld/gisketch/modsync-pack)
-App  → Gitea: libgit2 clone to app data dir
+User → App: add pack URL (github.com/gisketch/modsync-pack)
+App  → GitHub: libgit2 clone to app data dir
 App  → manifest.json: parse
 App  → Modrinth/CF: parallel download mod jars (reqwest + tokio)
 App  → SHA verify every jar
@@ -196,7 +196,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 
 ## 7. Security
 
-- Gitea PAT stored via OS keychain (`tauri-plugin-stronghold` or `keyring` crate).
+- GitHub PAT stored via OS keychain (`tauri-plugin-stronghold` or `keyring` crate).
 - Every download SHA1 + SHA512 verified against manifest before writing to disk.
 - Manifest `url` fields validated against allowlist (modrinth.com, curseforge CDN host).
 - No `eval`/dynamic code execution from manifest.
@@ -214,7 +214,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 
 ## 9. Roadmap Phasing
 
-- **M0** — scaffold + Gitea clone + manifest parse (read-only).
+- **M0** — scaffold + GitHub clone + manifest parse (read-only).
 - **M1** — Mod download + SHA verify + Prism instance write + launch.
 - **M2** — Full sync (configs, kubejs, resourcepacks via Modrinth).
 - **M3** — Author mode: scan/diff/publish flow.

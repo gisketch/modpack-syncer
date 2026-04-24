@@ -22,7 +22,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 
 ## M1 — Pack ingest & mod download
 
-- [ ] Add-pack flow: paste Gitea URL → clone via `git2`
+- [ ] Add-pack flow: paste GitHub URL → clone via `git2`
 - [ ] `manifest.json` parser + schema validation (serde)
 - [ ] Mod download pipeline (reqwest + tokio, `Semaphore(8)` concurrency)
 - [ ] SHA1 + SHA512 verification
@@ -94,7 +94,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 ## Cross-cutting
 
 ### Security
-- [ ] Gitea PAT in OS keychain
+- [ ] GitHub PAT in OS keychain
 - [ ] Manifest URL host allowlist
 - [ ] SHA verification mandatory (no bypass)
 - [ ] Reject manifests with unknown schema version
@@ -102,7 +102,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 ### Testing
 - [ ] `cargo test` — manifest parsing, hash verify, diff logic
 - [ ] `vitest` — UI state reducers, form validation
-- [ ] Integration test: full sync against a fixture Gitea repo
+- [ ] Integration test: full sync against a fixture GitHub repo
 - [ ] E2E test: fresh install → launch (CI headless)
 
 ### Docs
@@ -110,7 +110,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 - [x] `docs/planned_features.md`
 - [ ] `README.md` (user-facing quickstart)
 - [ ] `docs/author-guide.md` (publishing flow)
-- [x] `docs/vps-setup.md` (Gitea on your VPS)
+- [x] `docs/github-setup.md` (pack repo setup)
 - [ ] `docs/manifest-schema.md` (JSON schema reference)
 
 ### Build / Release

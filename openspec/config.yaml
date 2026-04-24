@@ -36,7 +36,7 @@ launcher:
   strategy: wrap
   target: prism-launcher
 source_of_truth:
-  git_host: gitea
+  git_host: github
   git_embedded: libgit2
   object_storage: none
   cdns: ["modrinth", "curseforge"]

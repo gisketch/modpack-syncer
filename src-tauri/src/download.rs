@@ -47,7 +47,7 @@ pub enum DownloadError {
 }
 
 fn url_host_allowed(url: &str) -> bool {
-    // Minimal allowlist for M1. User-configured Gitea host merged in later.
+    // Minimal allowlist for M1. Additional hosts merged in later from user settings.
     const DEFAULTS: &[&str] = &[
         "cdn.modrinth.com",
         "edge.forgecdn.net",

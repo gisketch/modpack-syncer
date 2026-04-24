@@ -3,7 +3,7 @@ import { create } from "zustand";
 type Pack = {
   id: string;
   name: string;
-  remote: string; // gitea url
+  remote: string; // github url
   localPath: string;
   headSha: string | null;
 };

@@ -54,7 +54,7 @@ export function HomeRoute() {
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://gitea.example.com/gisketch/modsync-pack.git"
+            placeholder="https://github.com/gisketch/modsync-pack.git"
             disabled={addPack.isPending}
           />
           <Button type="submit" disabled={addPack.isPending || !url.trim()}>

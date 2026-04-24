@@ -25,7 +25,7 @@
 - **SHA verification** is mandatory for every downloaded artifact. Never bypass it.
 - **Do not bundle Prism Launcher**. Detect an existing install; write instance folders only.
 - **Do not collect Microsoft credentials**. Prism handles MS auth.
-- **Secrets** (Gitea PAT) go in the OS keychain via the `keyring` crate. Never on disk plain, never in logs.
+- **Secrets** (GitHub PAT) go in the OS keychain via the `keyring` crate. Never on disk plain, never in logs.
 - **Manifest URL allowlist** must be enforced (see spec `manifest.md`).
 - **No mod jars in git.** Manifest references upstream CDNs (Modrinth / CurseForge); git holds only text (manifest, configs, kubejs, profiles).
 
