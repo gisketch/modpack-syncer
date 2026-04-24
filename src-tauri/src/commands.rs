@@ -81,7 +81,20 @@ pub struct PublishPushReport {
 }
 
 pub type LaunchProfile = prism::LaunchProfile;
+pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
+pub type JavaInstallProgress = prism::JavaInstallProgress;
 pub type PrismAccountStatus = prism::PrismAccountStatus;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JavaInstallProgressEvent {
+    pub pack_id: String,
+    pub stage: String,
+    pub progress: u8,
+    pub current_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub log_line: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -417,6 +430,30 @@ pub async fn set_launch_profile(pack_id: String, profile: LaunchProfile) -> Resu
         .await
         .map_err(|e| CommandError::Other(e.to_string()))?
         .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn install_adoptium_java(
+    app: tauri::AppHandle,
+    pack_id: String,
+    major: u32,
+    image_type: String,
+) -> Result<InstalledJavaRuntime, CommandError> {
+    prism::install_adoptium_java(major, &image_type, |progress: JavaInstallProgress| {
+        let _ = app.emit(
+            "java-install-progress",
+            JavaInstallProgressEvent {
+                pack_id: pack_id.clone(),
+                stage: progress.stage,
+                progress: progress.progress,
+                current_bytes: progress.current_bytes,
+                total_bytes: progress.total_bytes,
+                log_line: progress.log_line,
+            },
+        );
+    })
+    .await
+    .map_err(CommandError::from)
 }
 
 #[derive(Debug, Serialize)]

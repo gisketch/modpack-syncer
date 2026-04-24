@@ -137,6 +137,15 @@ export type PrismAccountStatus = {
   displayName?: string | null;
 };
 
+export type InstalledJavaRuntime = {
+  javaPath: string;
+  installDir: string;
+  displayName: string;
+  major: number;
+  imageType: string;
+  releaseName: string;
+};
+
 export type LaunchProfile = {
   minMemoryMb: number;
   maxMemoryMb: number;
@@ -177,6 +186,15 @@ export type SyncProgressEvent = {
   failures: number;
 };
 
+export type JavaInstallProgressEvent = {
+  packId: string;
+  stage: string;
+  progress: number;
+  currentBytes?: number | null;
+  totalBytes?: number | null;
+  logLine?: string | null;
+};
+
 /**
  * Typed wrappers around Tauri commands exposed by the Rust backend.
  * Keep this file in sync with `src-tauri/src/lib.rs#invoke_handler`.
@@ -203,6 +221,8 @@ export const tauri = {
   getLaunchProfile: (packId: string) => invoke<LaunchProfile>("get_launch_profile", { packId }),
   setLaunchProfile: (packId: string, profile: LaunchProfile) =>
     invoke<LaunchProfile>("set_launch_profile", { packId, profile }),
+  installAdoptiumJava: (packId: string, major: number, imageType: string) =>
+    invoke<InstalledJavaRuntime>("install_adoptium_java", { packId, major, imageType }),
   syncInstance: (packId: string, instanceName?: string) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),

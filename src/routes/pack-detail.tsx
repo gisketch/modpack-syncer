@@ -70,7 +70,9 @@ import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
   type ManifestEntry,
+  type JavaInstallProgressEvent,
   type LaunchProfile,
+  type Loader,
   type ModrinthAddPreview,
   type PackChangelogEntry,
   type PackChangelogItem,
@@ -121,6 +123,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
   const [launchProfileDraft, setLaunchProfileDraft] = useState<LaunchProfile | null>(null);
+  const [javaInstallOpen, setJavaInstallOpen] = useState(false);
+  const [selectedJavaChoiceId, setSelectedJavaChoiceId] = useState("temurin-21-jre");
+  const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(null);
+  const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
   const [addModsOpen, setAddModsOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -139,6 +145,24 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     void listen<SyncProgressEvent>("sync-progress", (event) => {
       if (event.payload.packId !== packId) return;
       setProgress(event.payload);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [packId]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    void listen<JavaInstallProgressEvent>("java-install-progress", (event) => {
+      if (event.payload.packId !== packId) return;
+      setJavaInstallProgress(event.payload);
+      if (event.payload.logLine) {
+        setJavaInstallLogs((current) => [...current, event.payload.logLine as string]);
+      }
     }).then((dispose) => {
       unlisten = dispose;
     });
@@ -176,6 +200,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
+  const javaChoices = getJavaInstallChoices(manifest.data?.pack.mcVersion, manifest.data?.pack.loader);
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
   const alreadySynced =
     !!manifest.data &&
@@ -203,6 +228,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     if (!launchProfile.data) return;
     setLaunchProfileDraft(launchProfile.data);
   }, [launchProfile.data]);
+
+  useEffect(() => {
+    if (!javaChoices.length) return;
+    if (javaChoices.some((choice) => choice.id === selectedJavaChoiceId)) return;
+    setSelectedJavaChoiceId(javaChoices[0].id);
+  }, [javaChoices, selectedJavaChoiceId]);
 
   const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
   const visibleChangelogEntries = (changelog.data ?? []).filter(
@@ -286,6 +317,46 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
     onSuccess: () => toast.success("Prism launched"),
     onError: (e) => toast.error("Launch failed", { description: formatError(e) }),
+  });
+  const installJava = useMutation({
+    mutationFn: ({ major, imageType }: { major: number; imageType: "jre" | "jdk" }) =>
+      tauri.installAdoptiumJava(packId, major, imageType),
+    onMutate: () => {
+      setJavaInstallProgress({
+        packId,
+        stage: "queued",
+        progress: 0,
+        currentBytes: null,
+        totalBytes: null,
+        logLine: null,
+      });
+      setJavaInstallLogs(["> queue install job"]);
+    },
+    onSuccess: (runtime) => {
+      setLaunchProfileDraft((current) =>
+        current
+          ? {
+              ...current,
+              autoJava: false,
+              javaPath: runtime.javaPath,
+            }
+          : current,
+      );
+      setJavaInstallOpen(false);
+      setJavaInstallProgress((current) =>
+        current
+          ? {
+              ...current,
+              stage: "done",
+              progress: 100,
+            }
+          : current,
+      );
+      toast.success("Java installed", { description: runtime.displayName });
+    },
+    onError: (error) => {
+      toast.error("Java install failed", { description: formatError(error) });
+    },
   });
 
   const publishScan = useMutation({
@@ -375,7 +446,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     }
   }
 
-  function handleUseRecommendedJava() {
+  function handleUsePrismAutoJava() {
     setLaunchProfileDraft((current) =>
       current
         ? {
@@ -385,6 +456,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           }
         : current,
     );
+  }
+
+  function handleOpenJavaInstall() {
+    setJavaInstallOpen(true);
+  }
+
+  function handleInstallJavaSubmit() {
+    const choice = javaChoices.find((item) => item.id === selectedJavaChoiceId);
+    if (!choice) return;
+    installJava.mutate({ major: choice.major, imageType: choice.imageType });
   }
 
   function handleLaunchSubmit() {
@@ -702,7 +783,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 launchRiskCount={launchRiskCount}
                 onChange={setLaunchProfileDraft}
                 onBrowseJavaPath={() => void handleBrowseJavaPath()}
-                onUseRecommendedJava={handleUseRecommendedJava}
+                onUsePrismAutoJava={handleUsePrismAutoJava}
+                onOpenJavaInstall={handleOpenJavaInstall}
               />
             ) : (
               <div className="flex items-center gap-3 text-sm text-text-low">
@@ -722,6 +804,90 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             >
               {launch.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
               {launchRiskCount > 0 ? "LAUNCH ANYWAY" : "LAUNCH"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={javaInstallOpen} onOpenChange={(open) => !installJava.isPending && setJavaInstallOpen(open)}>
+        <DialogContent className="max-w-2xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>INSTALL JAVA</DialogTitle>
+            <DialogDescription>
+              NeoForge 1.21.1 + Fabric 1.21.1 run on Java 21. Pick managed Adoptium runtime to download.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="grid gap-3">
+              {javaChoices.map((choice) => {
+                const selected = selectedJavaChoiceId === choice.id;
+
+                return (
+                  <button
+                    key={choice.id}
+                    type="button"
+                    onClick={() => setSelectedJavaChoiceId(choice.id)}
+                    className={cn(
+                      "grid gap-2 border px-4 py-4 text-left transition-colors",
+                      selected
+                        ? "border-brand-core bg-brand-core/10"
+                        : "border-line-soft/20 bg-surface-sunken/60 hover:border-brand-core/40 hover:bg-brand-core/5",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-heading text-sm text-text-high">{choice.title}</span>
+                        {choice.recommended ? <Badge variant="default">RECOMMENDED</Badge> : null}
+                      </div>
+                      <span className="font-mono text-xs text-text-low">JAVA {choice.major}</span>
+                    </div>
+                    <p className="text-sm text-text-low">{choice.detail}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-4 text-xs text-text-low">
+              This downloads Temurin into modsync app data and points launch profile at installed binary. Prism auto mode stays separate.
+            </p>
+            <div className="mt-4 flex flex-col gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
+              <div className="flex items-center justify-between gap-3 text-xs text-text-low">
+                <span className="font-heading uppercase tracking-[0.18em]">INSTALL PROGRESS</span>
+                <span className="font-mono">{javaInstallProgress?.progress ?? 0}%</span>
+              </div>
+              <div className="h-2 overflow-hidden border border-line-soft/30 bg-surface">
+                <div
+                  className="h-full bg-brand-core transition-[width] duration-200"
+                  style={{ width: `${Math.max(javaInstallProgress?.progress ?? 0, installJava.isPending ? 4 : 0)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 text-[11px] text-text-low">
+                <span>{javaInstallProgress?.stage?.toUpperCase() ?? "IDLE"}</span>
+                <span>
+                  {javaInstallProgress?.currentBytes != null
+                    ? `${formatByteCount(javaInstallProgress.currentBytes)}${javaInstallProgress.totalBytes != null ? ` / ${formatByteCount(javaInstallProgress.totalBytes)}` : ""}`
+                    : ""}
+                </span>
+              </div>
+              <div className="max-h-40 overflow-y-auto border border-line-soft/20 bg-black/30 p-3 font-mono text-[11px] text-text-low">
+                {javaInstallLogs.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {javaInstallLogs.map((line, index) => (
+                      <span key={`java-install-log:${index}`}>{line}</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span>No install activity yet.</span>
+                )}
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setJavaInstallOpen(false)} disabled={installJava.isPending}>
+              CANCEL
+            </Button>
+            <Button onClick={handleInstallJavaSubmit} disabled={installJava.isPending || !javaChoices.length}>
+              {installJava.isPending ? <Loader2 className="animate-spin" /> : <Download />}
+              INSTALL SELECTED JAVA
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -808,7 +974,8 @@ function LaunchSetupPanel({
   launchRiskCount,
   onChange,
   onBrowseJavaPath,
-  onUseRecommendedJava,
+  onUsePrismAutoJava,
+  onOpenJavaInstall,
 }: {
   packName: string;
   profile: LaunchProfile;
@@ -816,7 +983,8 @@ function LaunchSetupPanel({
   launchRiskCount: number;
   onChange: (profile: LaunchProfile) => void;
   onBrowseJavaPath: () => void;
-  onUseRecommendedJava: () => void;
+  onUsePrismAutoJava: () => void;
+  onOpenJavaInstall: () => void;
 }) {
   const sliderValue = [profile.maxMemoryMb];
   const packValue = packSynced ? "SYNCED" : `${launchRiskCount} RISKS`;
@@ -968,12 +1136,15 @@ function LaunchSetupPanel({
                 <Button variant="secondary" onClick={onBrowseJavaPath}>
                   <Settings2 className="size-4" /> BROWSE JAVA
                 </Button>
-                <Button variant="outline" onClick={onUseRecommendedJava}>
-                  <Download className="size-4" /> AUTO INSTALL RECOMMENDED JAVA
+                <Button variant="outline" onClick={onUsePrismAutoJava}>
+                  <HardDrive className="size-4" /> USE PRISM AUTO
+                </Button>
+                <Button variant="outline" onClick={onOpenJavaInstall}>
+                  <Download className="size-4" /> INSTALL JAVA
                 </Button>
               </div>
               <p className="text-xs text-text-low">
-                Auto mode lets Prism resolve compatible Java and auto-download when supported.
+                Prism auto mode resolves managed compatible Java. Install dialog downloads Temurin runtime into modsync.
               </p>
             </div>
 
@@ -1013,6 +1184,58 @@ function CompactLaunchStat({
       </div>
     </div>
   );
+}
+
+type JavaInstallChoice = {
+  id: string;
+  major: number;
+  imageType: "jre" | "jdk";
+  title: string;
+  detail: string;
+  recommended: boolean;
+};
+
+function formatByteCount(value: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return unitIndex === 0 ? `${Math.round(size)} ${units[unitIndex]}` : `${size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getJavaInstallChoices(mcVersion?: string, loader?: Loader): JavaInstallChoice[] {
+  const requiredMajor = mcVersion?.startsWith("1.21") ? 21 : 17;
+  const loaderLabel = loader ? loader.toUpperCase() : "PACK";
+
+  return [
+    {
+      id: `temurin-${requiredMajor}-jre`,
+      major: requiredMajor,
+      imageType: "jre",
+      title: `Temurin ${requiredMajor} JRE`,
+      detail: `${loaderLabel} ${mcVersion ?? "runtime"} recommended pick. Smallest install for play.`,
+      recommended: true,
+    },
+    {
+      id: `temurin-${requiredMajor}-jdk`,
+      major: requiredMajor,
+      imageType: "jdk",
+      title: `Temurin ${requiredMajor} JDK`,
+      detail: `Same Java ${requiredMajor}, but with full JDK tools bundled.`,
+      recommended: false,
+    },
+    {
+      id: "temurin-17-jre",
+      major: 17,
+      imageType: "jre",
+      title: "Temurin 17 JRE",
+      detail: requiredMajor === 21 ? "Legacy fallback only. Not recommended for Minecraft 1.21.1 packs." : "Legacy runtime for older packs.",
+      recommended: false,
+    },
+  ];
 }
 
 function PublishPreviewPage({

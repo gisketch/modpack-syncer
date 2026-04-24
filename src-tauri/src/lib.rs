@@ -45,6 +45,7 @@ pub fn run() {
             commands::get_prism_account_status,
             commands::get_launch_profile,
             commands::set_launch_profile,
+            commands::install_adoptium_java,
             commands::sync_instance,
             commands::launch_instance,
             commands::launch_pack,

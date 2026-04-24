@@ -49,6 +49,12 @@ pub fn launch_profile_path(pack_id: &str) -> anyhow::Result<PathBuf> {
     Ok(launch_profiles_dir()?.join(format!("{pack_id}.json")))
 }
 
+pub fn managed_java_runtimes_dir() -> anyhow::Result<PathBuf> {
+    let path = data_dir()?.join("java-runtimes");
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
 /// Derive a filesystem-safe pack id from a clone URL.
 pub fn pack_id_from_url(url: &str) -> String {
     let stripped = url
