@@ -1,0 +1,15 @@
+{
+  "name": "modsync-example",
+  "version": "0.1.0",
+  "mcVersion": "1.21.1",
+  "loader": "fabric",
+  "loaderVersion": "0.16.10",
+  "channel": "release",
+  "mods": [
+    { "modrinth": "fabric-api" },
+    { "modrinth": "sodium" },
+    { "modrinth": "lithium" }
+  ],
+  "resourcepacks": [],
+  "shaderpacks": []
+}
