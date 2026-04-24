@@ -141,10 +141,17 @@ pub fn instance_mods_dir(instance_name: &str) -> Option<PathBuf> {
     Some(dot_minecraft(&data.join("instances").join(instance_name)).join("mods"))
 }
 
+pub fn instance_minecraft_dir(instance_name: &str) -> Option<PathBuf> {
+    let data = data_dir()?;
+    Some(dot_minecraft(&data.join("instances").join(instance_name)))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct InstanceWriteReport {
     pub instance_dir: String,
     pub mods_written: usize,
+    pub resourcepacks_written: usize,
+    pub shaderpacks_written: usize,
     pub overrides_copied: usize,
 }
 
@@ -162,7 +169,9 @@ pub struct ManagedModState {
 pub fn write_instance(
     instance_name: &str,
     manifest: &Manifest,
-    cached_mod_paths: &[(PathBuf, String)], // (cache_path, target_filename)
+    resolved_mod_paths: &[(PathBuf, String)],
+    resolved_resourcepack_paths: &[(PathBuf, String)],
+    resolved_shaderpack_paths: &[(PathBuf, String)],
     pack_repo_dir: &Path,
 ) -> Result<InstanceWriteReport, PrismError> {
     let data = data_dir().ok_or(PrismError::NotDetected)?;
@@ -193,25 +202,7 @@ pub fn write_instance(
     // Mods
     let mods_dir = dot_mc.join("mods");
     std::fs::create_dir_all(&mods_dir)?;
-    // Purge stale modsync-managed jars. Track our jars by sidecar manifest.
-    let sidecar = mods_dir.join(".modsync-managed.txt");
-    if let Ok(prev) = std::fs::read_to_string(&sidecar) {
-        for line in prev.lines() {
-            let p = mods_dir.join(line);
-            if p.exists() {
-                let _ = std::fs::remove_file(p);
-            }
-        }
-    }
-    let mut mods_written = 0usize;
-    let mut sidecar_lines = Vec::new();
-    for (src, filename) in cached_mod_paths {
-        let dst = mods_dir.join(filename);
-        copy_or_link(src, &dst)?;
-        sidecar_lines.push(filename.clone());
-        mods_written += 1;
-    }
-    std::fs::write(&sidecar, sidecar_lines.join("\n"))?;
+    let mods_written = write_managed_files(&mods_dir, resolved_mod_paths, ".modsync-managed.txt")?;
     let state = manifest
         .mods
         .iter()
@@ -225,6 +216,20 @@ pub fn write_instance(
     std::fs::write(
         mods_dir.join(".modsync-state.json"),
         serde_json::to_vec_pretty(&state).unwrap(),
+    )?;
+    let resourcepacks_dir = dot_mc.join("resourcepacks");
+    std::fs::create_dir_all(&resourcepacks_dir)?;
+    let resourcepacks_written = write_managed_files(
+        &resourcepacks_dir,
+        resolved_resourcepack_paths,
+        ".modsync-managed.txt",
+    )?;
+    let shaderpacks_dir = dot_mc.join("shaderpacks");
+    std::fs::create_dir_all(&shaderpacks_dir)?;
+    let shaderpacks_written = write_managed_files(
+        &shaderpacks_dir,
+        resolved_shaderpack_paths,
+        ".modsync-managed.txt",
     )?;
 
     // Overrides: copy `overrides/`, `configs/`, `kubejs/` from pack repo into `.minecraft/`.
@@ -249,6 +254,8 @@ pub fn write_instance(
     Ok(InstanceWriteReport {
         instance_dir: inst_dir.display().to_string(),
         mods_written,
+        resourcepacks_written,
+        shaderpacks_written,
         overrides_copied,
     })
 }
@@ -302,6 +309,32 @@ fn copy_or_link(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     std::fs::copy(src, dst)?;
     Ok(())
+}
+
+fn write_managed_files(
+    dest_dir: &Path,
+    resolved_paths: &[(PathBuf, String)],
+    sidecar_name: &str,
+) -> std::io::Result<usize> {
+    let sidecar = dest_dir.join(sidecar_name);
+    if let Ok(prev) = std::fs::read_to_string(&sidecar) {
+        for line in prev.lines() {
+            let p = dest_dir.join(line);
+            if p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
+    let mut written = 0usize;
+    let mut sidecar_lines = Vec::new();
+    for (src, filename) in resolved_paths {
+        let dst = dest_dir.join(filename);
+        copy_or_link(src, &dst)?;
+        sidecar_lines.push(filename.clone());
+        written += 1;
+    }
+    std::fs::write(sidecar, sidecar_lines.join("\n"))?;
+    Ok(written)
 }
 
 fn copy_dir_merge(src: &Path, dst: &Path) -> std::io::Result<usize> {

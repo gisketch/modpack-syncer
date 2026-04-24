@@ -12,7 +12,7 @@ use sha2::Sha512;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 
-use crate::{cache, manifest::Entry};
+use crate::{cache, manifest::{Entry, Source}};
 
 const MAX_PARALLEL: usize = 8;
 const USER_AGENT: &str = concat!("modsync/", env!("CARGO_PKG_VERSION"));
@@ -44,6 +44,8 @@ pub enum DownloadError {
     Sha512Mismatch { filename: String },
     #[error("disallowed url host: {0}")]
     DisallowedHost(String),
+    #[error("repo entry missing repoPath: {0}")]
+    MissingRepoPath(String),
 }
 
 fn url_host_allowed(url: &str) -> bool {
@@ -65,6 +67,9 @@ fn url_host_allowed(url: &str) -> bool {
 /// Download a single manifest entry into the content-addressable cache.
 /// No-op if a valid copy already exists.
 pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadError> {
+    if entry.source == Source::Repo {
+        return Err(DownloadError::MissingRepoPath(entry.filename.clone()));
+    }
     let sha1_expected = entry.sha1.to_ascii_lowercase();
     let cache_path = cache::path_for(&sha1_expected)?;
 
@@ -119,6 +124,30 @@ pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadEr
 
     std::fs::rename(&part_path, &cache_path)?;
     Ok(cache_path)
+}
+
+pub fn verify_file(path: &std::path::Path, entry: &Entry) -> Result<(), DownloadError> {
+    let got_sha1 = cache::file_sha1_hex(path)?;
+    let expected_sha1 = entry.sha1.to_ascii_lowercase();
+    if got_sha1 != expected_sha1 {
+        return Err(DownloadError::Sha1Mismatch {
+            filename: entry.filename.clone(),
+            expected: expected_sha1,
+            actual: got_sha1,
+        });
+    }
+    if let Some(expected_512) = entry.sha512.as_ref() {
+        let mut file = std::fs::File::open(path)?;
+        let mut hasher = Sha512::new();
+        std::io::copy(&mut file, &mut hasher)?;
+        let got = hex::encode(hasher.finalize());
+        if !got.eq_ignore_ascii_case(expected_512) {
+            return Err(DownloadError::Sha512Mismatch {
+                filename: entry.filename.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type Loader = "neoforge" | "fabric" | "forge" | "quilt";
-export type ModSource = "modrinth" | "curseforge" | "url";
+export type ModSource = "modrinth" | "curseforge" | "url" | "repo";
 export type Side = "client" | "server" | "both";
 
 export type ManifestEntry = {
@@ -9,11 +9,12 @@ export type ManifestEntry = {
   source: ModSource;
   projectId?: string | null;
   versionId?: string | null;
+  repoPath?: string | null;
   filename: string;
   sha1: string;
   sha512?: string | null;
   size: number;
-  url: string;
+  url?: string | null;
   optional: boolean;
   side: Side;
 };
@@ -46,6 +47,46 @@ export type FetchReport = {
   failures: string[];
 };
 
+export type PublishCategory =
+  | "mods"
+  | "resourcepacks"
+  | "shaderpacks"
+  | "config"
+  | "kubejs"
+  | "root";
+
+export type PublishAction = "add" | "update" | "remove" | "unchanged";
+
+export type PublishScanItem = {
+  category: PublishCategory;
+  relativePath: string;
+  size?: number | null;
+  sha1?: string | null;
+  action: PublishAction;
+  source?: string | null;
+};
+
+export type PublishScanReport = {
+  instanceDir: string;
+  items: PublishScanItem[];
+};
+
+export type PublishAuthSettings = {
+  method?: string | null;
+  hasPat: boolean;
+};
+
+export type PublishApplyReport = {
+  manifestEntriesWritten: number;
+  repoFilesWritten: number;
+  repoFilesRemoved: number;
+};
+
+export type PublishPushReport = {
+  commitSha: string;
+  method: string;
+};
+
 export type PrismLocation = {
   data_dir: string;
   binary: string;
@@ -54,6 +95,8 @@ export type PrismLocation = {
 export type InstanceWriteReport = {
   instance_dir: string;
   mods_written: number;
+  resourcepacks_written: number;
+  shaderpacks_written: number;
   overrides_copied: number;
 };
 
@@ -91,6 +134,12 @@ export const tauri = {
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
+  getPublishAuthSettings: () => invoke<PublishAuthSettings>("get_publish_auth_settings"),
+  setPublishAuthMethod: (method?: string | null) =>
+    invoke<PublishAuthSettings>("set_publish_auth_method", { method }),
+  savePublishPat: (token: string) =>
+    invoke<PublishAuthSettings>("save_publish_pat", { token }),
+  clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   syncInstance: (packId: string, instanceName?: string) =>
@@ -98,6 +147,12 @@ export const tauri = {
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
+  scanInstancePublish: (packId: string, instanceName?: string) =>
+    invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
+  applyInstancePublish: (packId: string, instanceName?: string) =>
+    invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName }),
+  commitAndPushPublish: (packId: string, message: string) =>
+    invoke<PublishPushReport>("commit_and_push_publish", { packId, message }),
 };
 
 export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted";

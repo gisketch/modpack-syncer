@@ -31,6 +31,10 @@ pub fn cache_dir() -> anyhow::Result<PathBuf> {
     Ok(p)
 }
 
+pub fn publish_auth_path() -> anyhow::Result<PathBuf> {
+    Ok(data_dir()?.join("publish-auth.json"))
+}
+
 /// Derive a filesystem-safe pack id from a clone URL.
 pub fn pack_id_from_url(url: &str) -> String {
     let stripped = url

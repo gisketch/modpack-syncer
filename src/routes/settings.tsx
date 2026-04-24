@@ -1,9 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, FolderOpen, Info, Package } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { formatError } from "@/lib/format-error";
 import { tauri } from "@/lib/tauri";
+import { useAppStore } from "@/stores/app-store";
 
 export function SettingsRoute() {
+  const adminMode = useAppStore((s) => s.adminMode);
+  const setAdminMode = useAppStore((s) => s.setAdminMode);
+  const qc = useQueryClient();
+  const [pat, setPat] = useState("");
   const prism = useQuery({
     queryKey: ["prism"],
     queryFn: () => tauri.detectPrism(),
@@ -13,6 +24,35 @@ export function SettingsRoute() {
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
   });
+  const auth = useQuery({
+    queryKey: ["publish-auth"],
+    queryFn: () => tauri.getPublishAuthSettings(),
+  });
+  const savePat = useMutation({
+    mutationFn: (token: string) => tauri.savePublishPat(token),
+    onSuccess: async () => {
+      setPat("");
+      await qc.invalidateQueries({ queryKey: ["publish-auth"] });
+      toast.success("PAT saved");
+    },
+    onError: (e) => toast.error("PAT save failed", { description: formatError(e) }),
+  });
+  const clearPat = useMutation({
+    mutationFn: () => tauri.clearPublishPat(),
+    onSuccess: async () => {
+      setPat("");
+      await qc.invalidateQueries({ queryKey: ["publish-auth"] });
+      toast.success("PAT cleared");
+    },
+    onError: (e) => toast.error("PAT clear failed", { description: formatError(e) }),
+  });
+  const setMethod = useMutation({
+    mutationFn: (method: string) => tauri.setPublishAuthMethod(method),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["publish-auth"] });
+    },
+    onError: (e) => toast.error("Auth method save failed", { description: formatError(e) }),
+  });
 
   return (
     <div className="flex flex-col gap-6 p-8">
@@ -21,6 +61,66 @@ export function SettingsRoute() {
         <h1 className="text-2xl text-[--text-high]">Settings</h1>
         <p className="text-sm text-[--text-low]">Environment + diagnostics</p>
       </header>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>ADMIN MODE</CardTitle>
+          <CardDescription>Enable publish and authoring tools</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-[--text-high]">Author pack from linked instance</p>
+              <p className="text-xs text-[--text-low]">Publish preview + push flow will use this.</p>
+            </div>
+            <Switch checked={adminMode} onCheckedChange={setAdminMode} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>PUBLISH AUTH</CardTitle>
+          <CardDescription>Choose publish auth mode and store GitHub PAT securely</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="flex gap-2">
+              <Button
+                variant={auth.data?.method === "pat" ? "default" : "secondary"}
+                onClick={() => setMethod.mutate("pat")}
+              >
+                PAT
+              </Button>
+              <Button
+                variant={auth.data?.method === "ssh" ? "default" : "secondary"}
+                onClick={() => setMethod.mutate("ssh")}
+              >
+                SSH
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-text-low">
+                Active: {(auth.data?.method ?? "unset").toUpperCase()} · PAT {auth.data?.hasPat ? "PRESENT" : "MISSING"}
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={pat}
+                  onChange={(e) => setPat(e.target.value)}
+                  placeholder="github_pat_..."
+                />
+                <Button onClick={() => pat.trim() && savePat.mutate(pat.trim())} disabled={!pat.trim() || savePat.isPending}>
+                  SAVE PAT
+                </Button>
+                <Button variant="secondary" onClick={() => clearPat.mutate()} disabled={clearPat.isPending}>
+                  CLEAR
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

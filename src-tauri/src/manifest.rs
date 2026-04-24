@@ -45,6 +45,7 @@ pub enum Source {
     Modrinth,
     Curseforge,
     Url,
+    Repo,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,11 +64,14 @@ pub struct Entry {
     pub project_id: Option<String>,
     #[serde(default, rename = "versionId")]
     pub version_id: Option<String>,
+    #[serde(default, rename = "repoPath")]
+    pub repo_path: Option<String>,
     pub filename: String,
     pub sha1: String,
     #[serde(default)]
     pub sha512: Option<String>,
     pub size: u64,
+    #[serde(default)]
     pub url: String,
     #[serde(default)]
     pub optional: bool,
@@ -140,5 +144,31 @@ mod tests {
         assert_eq!(m.mods.len(), 1);
         assert_eq!(m.mods[0].source, Source::Modrinth);
         assert_eq!(m.mods[0].side, Side::Client);
+    }
+
+    #[test]
+    fn parses_repo_entry() {
+        let json = r#"{
+            "schemaVersion": 1,
+            "pack": {
+                "name": "demo",
+                "version": "0.1.0",
+                "mcVersion": "1.21.1",
+                "loader": "fabric",
+                "loaderVersion": "0.16.10"
+            },
+            "mods": [{
+                "id": "local-mod",
+                "source": "repo",
+                "repoPath": "mods/local-mod.jar",
+                "filename": "local-mod.jar",
+                "sha1": "deadbeef",
+                "size": 123,
+                "url": ""
+            }]
+        }"#;
+        let m: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.mods[0].source, Source::Repo);
+        assert_eq!(m.mods[0].repo_path.as_deref(), Some("mods/local-mod.jar"));
     }
 }

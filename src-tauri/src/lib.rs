@@ -33,11 +33,18 @@ pub fn run() {
             commands::list_packs,
             commands::update_pack,
             commands::load_manifest,
+            commands::get_publish_auth_settings,
+            commands::set_publish_auth_method,
+            commands::save_publish_pat,
+            commands::clear_publish_pat,
             commands::fetch_mods,
             commands::detect_prism,
             commands::sync_instance,
             commands::launch_instance,
             commands::mod_statuses,
+            commands::scan_instance_publish,
+            commands::apply_instance_publish,
+            commands::commit_and_push_publish,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

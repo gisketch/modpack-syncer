@@ -10,6 +10,7 @@ import {
   Package,
   Play,
   RefreshCw,
+  UploadCloudIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
@@ -43,16 +45,21 @@ import {
   type ManifestEntry,
   type ModStatus,
   type ModStatusValue,
+  type PublishAction,
+  type PublishCategory,
+  type PublishScanReport,
   type SyncProgressEvent,
   type SyncInstanceReport,
   tauri,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/stores/app-store";
 import { useNav } from "@/stores/nav-store";
 
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
+  const adminMode = useAppStore((s) => s.adminMode);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -74,8 +81,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
 
   const instanceName = `modsync-${packId}`;
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
+  const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
 
   useEffect(() => {
@@ -164,7 +173,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setReport(r);
       statuses.refetch();
       toast.success("Sync complete", {
-        description: `${r.instance.mods_written} mods · ${r.instance.overrides_copied} overrides`,
+        description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
       });
     },
     onError: (e) => {
@@ -177,6 +186,59 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     mutationFn: () => tauri.launchInstance(instanceName),
     onSuccess: () => toast.success("Prism launched"),
     onError: (e) => toast.error("Launch failed", { description: formatError(e) }),
+  });
+
+  const publishScan = useMutation({
+    mutationFn: () => tauri.scanInstancePublish(packId),
+    onMutate: () => {
+      setPublishOpen(true);
+      setPublishReport(null);
+    },
+    onSuccess: (scan) => {
+      setPublishReport(scan);
+      toast.success("Publish scan ready", { description: `${scan.items.length} items` });
+    },
+    onError: (e) => {
+      setPublishOpen(false);
+      toast.error("Publish scan failed", { description: formatError(e) });
+    },
+  });
+  const publishApply = useMutation({
+    mutationFn: () => tauri.applyInstancePublish(packId),
+    onSuccess: async (result) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+      ]);
+      setPublishOpen(false);
+      toast.success("Publish applied", {
+        description: `${result.repoFilesWritten} files written · ${result.repoFilesRemoved} removed`,
+      });
+    },
+    onError: (e) => {
+      toast.error("Publish apply failed", { description: formatError(e) });
+    },
+  });
+  const publishPush = useMutation({
+    mutationFn: async (message: string) => {
+      const applied = await tauri.applyInstancePublish(packId);
+      const pushed = await tauri.commitAndPushPublish(packId, message);
+      return { applied, pushed };
+    },
+    onSuccess: async (result) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+        qc.invalidateQueries({ queryKey: ["packs"] }),
+      ]);
+      setPublishOpen(false);
+      toast.success("Publish pushed", {
+        description: `${result.pushed.commitSha.slice(0, 10)} via ${result.pushed.method.toUpperCase()}`,
+      });
+    },
+    onError: (e) => {
+      toast.error("Publish push failed", { description: formatError(e) });
+    },
   });
 
   function handleLaunchClick() {
@@ -233,6 +295,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           )}
         </div>
         <div className="flex gap-2">
+          {adminMode && (
+            <Button
+              variant="outline"
+              onClick={() => publishScan.mutate()}
+              disabled={publishScan.isPending || sync.isPending || fetchPack.isPending}
+            >
+              {publishScan.isPending ? <Loader2 className="animate-spin" /> : <UploadCloudIcon />}
+              PUBLISH
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={() => fetchPack.mutate()}
@@ -281,7 +353,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         <Alert>
           <AlertTitle>Sync report</AlertTitle>
           <AlertDescription>
-            Wrote {report.instance.mods_written} mods, {report.instance.overrides_copied} overrides.
+            Wrote {report.instance.mods_written} mods, {report.instance.resourcepacks_written} resourcepacks,
+            {" "}{report.instance.shaderpacks_written} shaderpacks, {report.instance.overrides_copied} overrides.
             Cached {report.fetch.cached} / downloaded {report.fetch.downloaded} / total{" "}
             {report.fetch.total}.
             {report.fetch.failures.length > 0 && (
@@ -387,7 +460,135 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PublishPreviewDialog
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        pending={publishScan.isPending}
+        report={publishReport}
+        applying={publishApply.isPending}
+        onApply={() => publishApply.mutate()}
+        publishing={publishPush.isPending}
+        onPublish={(message) => publishPush.mutate(message)}
+      />
     </div>
+  );
+}
+
+function PublishPreviewDialog({
+  open,
+  onClose,
+  pending,
+  report,
+  applying,
+  onApply,
+  publishing,
+  onPublish,
+}: {
+  open: boolean;
+  onClose: () => void;
+  pending: boolean;
+  report: PublishScanReport | null;
+  applying: boolean;
+  onApply: () => void;
+  publishing: boolean;
+  onPublish: (message: string) => void;
+}) {
+  const counts = summarizePublishReport(report);
+  const hasChanges = Boolean(report?.items.some((item) => item.action !== "unchanged"));
+  const [commitMessage, setCommitMessage] = useState("Publish instance changes");
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="overflow-hidden max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>PUBLISH PREVIEW</DialogTitle>
+          <DialogDescription>
+            {pending
+              ? "Scanning linked Prism instance…"
+              : report
+                ? `${counts.add} add · ${counts.update} update · ${counts.remove} remove`
+                : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="p-6">
+          {pending && (
+            <div className="flex items-center gap-3 py-6 text-text-low">
+              <Loader2 className="size-4 animate-spin text-brand-core" />
+              <span className="text-sm">Reading instance folders</span>
+            </div>
+          )}
+
+          {report && !pending && (
+            <div className="flex flex-col gap-4">
+              <Input
+                value={commitMessage}
+                onChange={(event) => setCommitMessage(event.target.value)}
+                placeholder="Publish instance changes"
+              />
+              <div className="grid grid-cols-4 gap-3 text-xs">
+                <Row k="ADD" v={String(counts.add)} />
+                <Row k="UPDATE" v={String(counts.update)} />
+                <Row k="REMOVE" v={String(counts.remove)} />
+                <Row k="UNCHANGED" v={String(counts.unchanged)} />
+              </div>
+
+              <ScrollArea className="max-h-[420px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>CATEGORY</TableHead>
+                      <TableHead>PATH</TableHead>
+                      <TableHead>ACTION</TableHead>
+                      <TableHead>SOURCE</TableHead>
+                      <TableHead className="text-right">SIZE</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.items.map((item) => (
+                      <TableRow key={`${item.category}:${item.relativePath}:${item.action}`}>
+                        <TableCell>
+                          <Badge variant="outline">{labelCategory(item.category)}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-[10px] text-text-low">
+                          {item.relativePath}
+                        </TableCell>
+                        <TableCell>
+                          <PublishActionChip action={item.action} />
+                        </TableCell>
+                        <TableCell className="text-xs text-text-low">
+                          {item.source ?? "instance-local"}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs text-text-low">
+                          {typeof item.size === "number" ? formatBytes(item.size) : "--"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter className="px-6 py-4">
+          <Button variant="secondary" onClick={onClose} disabled={pending || applying || publishing}>
+            CLOSE
+          </Button>
+          <Button onClick={onApply} disabled={pending || applying || publishing || !hasChanges}>
+            {applying ? <Loader2 className="animate-spin" /> : <UploadCloudIcon />}
+            APPLY TO REPO
+          </Button>
+          <Button
+            variant="default"
+            onClick={() => onPublish(commitMessage.trim() || "Publish instance changes")}
+            disabled={pending || applying || publishing || !report}
+          >
+            {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+            COMMIT + PUSH
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -419,7 +620,7 @@ function SyncDialog({
             {pending
               ? syncProgressDescription(progress)
               : report
-                ? `${report.instance.mods_written} mods · ${report.instance.overrides_copied} overrides`
+                ? `${report.instance.mods_written} mods · ${report.instance.resourcepacks_written} packs · ${report.instance.overrides_copied} overrides`
                 : ""}
           </DialogDescription>
         </DialogHeader>
@@ -484,6 +685,8 @@ function SyncDialog({
               {report && !pending && (
                 <div className="flex flex-col gap-2 text-xs">
                   <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
+                  <Row k="RESOURCEPACKS WRITTEN" v={String(report.instance.resourcepacks_written)} />
+                  <Row k="SHADERPACKS WRITTEN" v={String(report.instance.shaderpacks_written)} />
                   <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
                   <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
                   <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
@@ -630,6 +833,32 @@ function StatusChip({ status }: { status: ModStatusValue }) {
       {meta.label}
     </span>
   );
+}
+
+function PublishActionChip({ action }: { action: PublishAction }) {
+  const text =
+    action === "add"
+      ? "text-brand-core"
+      : action === "update"
+        ? "text-signal-warn"
+        : action === "remove"
+          ? "text-signal-alert"
+          : "text-text-low";
+
+  return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{action}</span>;
+}
+
+function summarizePublishReport(report: PublishScanReport | null) {
+  return {
+    add: report?.items.filter((item) => item.action === "add").length ?? 0,
+    update: report?.items.filter((item) => item.action === "update").length ?? 0,
+    remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
+    unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
+  };
+}
+
+function labelCategory(category: PublishCategory) {
+  return category.toUpperCase();
 }
 
 function syncProgressLabel(progress: SyncProgressEvent | null) {
