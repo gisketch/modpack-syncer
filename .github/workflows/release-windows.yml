@@ -59,6 +59,10 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify release version matches tag
+        shell: bash
+        run: bun run release:verify "$RELEASE_TAG"
+
       - name: Typecheck frontend
         run: bun run typecheck
 
@@ -66,6 +70,8 @@ jobs:
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           tauriScript: bun tauri
@@ -77,5 +83,5 @@ jobs:
             Download installer assets from this release.
           generateReleaseNotes: true
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
-          uploadUpdaterJson: false
-          uploadUpdaterSignatures: false
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true

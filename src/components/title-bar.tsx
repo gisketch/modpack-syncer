@@ -1,10 +1,12 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useAppVersion } from "@/hooks/use-app-version";
 import { cn } from "@/lib/utils";
 
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
+  const appVersion = useAppVersion();
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -31,7 +33,7 @@ export function TitleBar() {
           className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]"
         />
         <span data-tauri-drag-region className="cp-tactical-label text-[--brand-core] text-xs">
-          MODSYNC :: v0.1.0
+          MODSYNC :: v{appVersion.data ?? "..."}
         </span>
       </div>
       <div className="flex h-full">

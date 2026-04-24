@@ -41,6 +41,9 @@ bun run tauri dev
 | `bun run tauri dev` | Full Tauri app (Rust + frontend) |
 | `bun run build` | Frontend production build |
 | `bun run tauri build` | Full app bundle |
+| `bun run release:sync <version>` | Sync app version across UI/build config files |
+| `bun run release:tag <version>` | Verify clean tree, then create + push release tag |
+| `bun run release:verify <tag>` | Verify a `v*` tag matches all release version files |
 | `bun run test` | Vitest (frontend) |
 | `bun run lint` | Biome lint |
 | `bun run format` | Biome format |
@@ -51,11 +54,23 @@ bun run tauri dev
 Windows app releases publish through GitHub Actions.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+bun run release:sync 0.1.0
+# review + commit version changes
+bun run release:tag 0.1.0
 ```
 
+`release:sync` updates [package.json](package.json), [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json), and [src-tauri/Cargo.toml](src-tauri/Cargo.toml) so runtime UI version and packaged app version stay aligned.
+
+`release:tag` refuses to run unless working tree clean and all version files already match the requested release. This keeps tag creation safe without auto-committing release changes.
+
 Pushing a `v*` tag runs [.github/workflows/release-windows.yml](.github/workflows/release-windows.yml), builds Tauri on `windows-latest`, and uploads Windows bundle assets to that tag's GitHub Release page. The same workflow also supports manual dispatch from Actions when you provide an existing tag.
+
+Windows updater support is enabled for packaged Windows builds only. On launch, modsync checks the latest GitHub release updater manifest and shows `UPDATE NOW` in the sidebar only when an update exists. Non-Windows builds hide updater UI entirely.
+
+Before Windows updater builds can publish successfully, add these GitHub Actions secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (optional if key has no password)
 
 ## Layout
 

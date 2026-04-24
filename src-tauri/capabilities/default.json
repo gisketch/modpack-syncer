@@ -27,6 +27,7 @@
     "fs:default",
     "shell:default",
     "os:default",
-    "log:default"
+    "log:default",
+    "updater:default"
   ]
 }

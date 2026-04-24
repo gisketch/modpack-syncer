@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Loader2, Package, Settings } from "lucide-react";
+import { Download, Loader2, Package, Settings } from "lucide-react";
 import { TitleBar } from "@/components/title-bar";
 import {
   Sidebar,
+  SidebarAction,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -12,6 +13,8 @@ import {
   SidebarSubItem,
   SidebarSubmenu,
 } from "@/components/ui/sidebar";
+import { useAppVersion } from "@/hooks/use-app-version";
+import { useAppUpdate, useInstallAppUpdate } from "@/hooks/use-app-update";
 import { Toaster } from "@/components/ui/sonner";
 import { tauri } from "@/lib/tauri";
 import { HomeRoute } from "@/routes/home";
@@ -29,6 +32,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <AppUpdateBootstrap />
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-[--surface-base] text-[--text-high]">
         <TitleBar />
         <RootGate />
@@ -36,6 +40,11 @@ export function App() {
       </div>
     </QueryClientProvider>
   );
+}
+
+function AppUpdateBootstrap() {
+  useAppUpdate();
+  return null;
 }
 
 function RootGate() {
@@ -85,12 +94,20 @@ function RootGate() {
 function Shell() {
   const view = useNav((s) => s.view);
   const go = useNav((s) => s.go);
+  const appVersion = useAppVersion();
+  const appUpdate = useAppUpdate();
+  const installAppUpdate = useInstallAppUpdate(appUpdate.updateQuery.data ?? null);
   const packs = useQuery({
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
   });
 
   const onPacks = view.kind === "packs" || view.kind === "pack";
+  const updateProgressLabel = installAppUpdate.progress?.percent
+    ? `${installAppUpdate.progress.percent}%`
+    : installAppUpdate.progress?.phase === "installing"
+      ? "INSTALLING"
+      : "UPDATING";
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -153,7 +170,21 @@ function Shell() {
           </SidebarItem>
         </SidebarContent>
         <SidebarFooter>
-          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">:: v0.1.0</span>
+          {appUpdate.isWindows && appUpdate.updateQuery.data ? (
+            <SidebarAction
+              onClick={() => installAppUpdate.mutation.mutate()}
+              disabled={installAppUpdate.mutation.isPending}
+              className="min-h-10 active:scale-[0.96] transition-transform"
+            >
+              {installAppUpdate.mutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              <span className="tabular-nums">
+                {installAppUpdate.mutation.isPending ? updateProgressLabel : `UPDATE NOW v${appUpdate.updateQuery.data.version}`}
+              </span>
+            </SidebarAction>
+          ) : null}
+          <span className="tabular-nums text-[10px] uppercase tracking-[0.18em] text-text-low">
+            :: v{appVersion.data ?? "..."}
+          </span>
         </SidebarFooter>
       </Sidebar>
       <main className="flex-1 overflow-auto scrollbar-tactical">

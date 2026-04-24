@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useAppUpdate } from "@/hooks/use-app-update";
+import { useAppVersion } from "@/hooks/use-app-version";
 import { formatError } from "@/lib/format-error";
 import { type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
@@ -26,6 +28,8 @@ import { useNav } from "@/stores/nav-store";
 
 export function SettingsRoute() {
   const go = useNav((s) => s.go);
+  const appUpdate = useAppUpdate();
+  const appVersion = useAppVersion();
   const adminModeByPack = useAppStore((s) => s.adminModeByPack);
   const setPackAdminMode = useAppStore((s) => s.setPackAdminMode);
   const qc = useQueryClient();
@@ -227,6 +231,19 @@ export function SettingsRoute() {
 
   function handleInstallManagedPrism() {
     installManagedPrism.mutate();
+  }
+
+  async function handleCheckForUpdates() {
+    const result = await appUpdate.updateQuery.refetch();
+    if (result.error) {
+      toast.error("Update check failed", { description: formatError(result.error) });
+      return;
+    }
+    if (result.data) {
+      toast.success("Update available", { description: `modsync v${result.data.version}` });
+      return;
+    }
+    toast.success("modsync up to date");
   }
 
   return (
@@ -435,7 +452,7 @@ export function SettingsRoute() {
           <CardTitle className="flex items-center gap-2">
             <Info className="h-4 w-4" /> ABOUT
           </CardTitle>
-          <CardDescription>modsync v0.1.0</CardDescription>
+          <CardDescription className="tabular-nums">modsync v{appVersion.data ?? "..."}</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-[--text-low]">
@@ -443,6 +460,50 @@ export function SettingsRoute() {
           </p>
         </CardContent>
       </Card>
+
+      {appUpdate.isWindows ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="h-4 w-4" /> APP UPDATE
+            </CardTitle>
+            <CardDescription>Windows builds check latest GitHub release on launch.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs tabular-nums">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="cp-tactical-label text-[--text-low]">CURRENT</span>
+                  <span className="text-[--text-high]">v{appVersion.data ?? "..."}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="cp-tactical-label text-[--text-low]">LATEST</span>
+                  <span className="text-[--text-high]">
+                    {appUpdate.updateQuery.data ? `v${appUpdate.updateQuery.data.version}` : "CURRENT"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="cp-tactical-label text-[--text-low]">STATUS</span>
+                  <span className="text-[--text-high]">
+                    {appUpdate.updateQuery.isFetching
+                      ? "CHECKING"
+                      : appUpdate.updateQuery.data
+                        ? "UPDATE READY"
+                        : "UP TO DATE"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={handleCheckForUpdates} disabled={appUpdate.updateQuery.isFetching}>
+                  {appUpdate.updateQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  CHECK FOR UPDATES
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
