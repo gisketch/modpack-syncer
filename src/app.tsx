@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Loader2, Package, Settings } from "lucide-react";
-import { useState } from "react";
 import { TitleBar } from "@/components/title-bar";
 import {
   Sidebar,
@@ -14,7 +13,9 @@ import { Toaster } from "@/components/ui/sonner";
 import { tauri } from "@/lib/tauri";
 import { HomeRoute } from "@/routes/home";
 import { OnboardingRoute } from "@/routes/onboarding";
+import { PackDetailRoute } from "@/routes/pack-detail";
 import { SettingsRoute } from "@/routes/settings";
+import { useNav } from "@/stores/nav-store";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,7 +59,10 @@ function RootGate() {
 }
 
 function Shell() {
-  const [active, setActive] = useState<"packs" | "settings">("packs");
+  const view = useNav((s) => s.view);
+  const go = useNav((s) => s.go);
+
+  const onPacks = view.kind === "packs" || view.kind === "pack";
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -76,10 +80,10 @@ function Shell() {
         <SidebarContent>
           <SidebarItem
             href="#"
-            active={active === "packs"}
+            active={onPacks}
             onClick={(e) => {
               e.preventDefault();
-              setActive("packs");
+              go({ kind: "packs" });
             }}
           >
             <SidebarItemIcon>
@@ -89,10 +93,10 @@ function Shell() {
           </SidebarItem>
           <SidebarItem
             href="#"
-            active={active === "settings"}
+            active={view.kind === "settings"}
             onClick={(e) => {
               e.preventDefault();
-              setActive("settings");
+              go({ kind: "settings" });
             }}
           >
             <SidebarItemIcon>
@@ -106,8 +110,9 @@ function Shell() {
         </SidebarFooter>
       </Sidebar>
       <main className="flex-1 overflow-auto scrollbar-tactical">
-        {active === "packs" && <HomeRoute />}
-        {active === "settings" && <SettingsRoute />}
+        {view.kind === "packs" && <HomeRoute />}
+        {view.kind === "pack" && <PackDetailRoute packId={view.id} />}
+        {view.kind === "settings" && <SettingsRoute />}
       </main>
     </div>
   );

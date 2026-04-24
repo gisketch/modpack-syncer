@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Download, FolderGit2, Loader2, Package, Play, Plus, RefreshCw } from "lucide-react";
+import { Boxes, ChevronRight, FolderGit2, Loader2, Package, Plus } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatError } from "@/lib/format-error";
-import { type PackSummary, type SyncInstanceReport, tauri } from "@/lib/tauri";
+import { type PackSummary, tauri } from "@/lib/tauri";
+import { useNav } from "@/stores/nav-store";
 
 export function HomeRoute() {
   const qc = useQueryClient();
@@ -27,9 +31,14 @@ export function HomeRoute() {
     onSuccess: () => {
       setUrl("");
       setError(null);
+      toast.success("Pack cloned");
       qc.invalidateQueries({ queryKey: ["packs"] });
     },
-    onError: (e: unknown) => setError(formatError(e)),
+    onError: (e: unknown) => {
+      const msg = formatError(e);
+      setError(msg);
+      toast.error("Clone failed", { description: msg });
+    },
   });
 
   return (
@@ -46,10 +55,17 @@ export function HomeRoute() {
         <PrismStatus loading={prism.isLoading} location={prism.data ?? null} />
       </header>
 
+      {!prism.data && !prism.isLoading && (
+        <Alert variant="destructive">
+          <AlertTitle>Prism Launcher not detected</AlertTitle>
+          <AlertDescription>Install Prism Launcher to sync and launch your packs.</AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Plus className="h-4 w-4" /> ADD PACK
+            <Plus className="size-4" /> ADD PACK
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -67,23 +83,22 @@ export function HomeRoute() {
               disabled={addPack.isPending}
             />
             <Button type="submit" disabled={addPack.isPending || !url.trim()}>
-              {addPack.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FolderGit2 className="h-4 w-4" />
-              )}
+              {addPack.isPending ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
               CLONE
             </Button>
           </form>
           {error && (
-            <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p>
+            <Alert variant="destructive" className="mt-3">
+              <AlertTitle>Clone failed</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
         </CardContent>
       </Card>
 
       <section className="relative flex flex-col gap-3">
         <h2 className="cp-tactical-label flex items-center gap-2 text-sm text-[--brand-core]">
-          <Package className="h-4 w-4" /> PACKS
+          <Package className="size-4" /> PACKS
         </h2>
         {packs.isLoading && <p className="cp-tactical-label text-[--text-low] text-xs">LOADING</p>}
         {packs.data && packs.data.length === 0 && (
@@ -91,7 +106,7 @@ export function HomeRoute() {
         )}
         <div className="flex flex-col gap-3">
           {packs.data?.map((p) => (
-            <PackCard key={p.id} pack={p} prismAvailable={!!prism.data} />
+            <PackCard key={p.id} pack={p} />
           ))}
         </div>
       </section>
@@ -108,130 +123,60 @@ function PrismStatus({
 }) {
   if (loading) {
     return (
-      <span className="cp-tactical-label flex items-center gap-2 text-[--text-low] text-xs">
-        <Loader2 className="h-3 w-3 animate-spin" /> DETECTING PRISM
-      </span>
+      <Badge variant="outline">
+        <Loader2 className="size-3 animate-spin" /> DETECTING
+      </Badge>
     );
   }
   if (!location) {
     return (
-      <span className="cp-tactical-label flex items-center gap-2 border border-[--signal-alert] bg-[--surface-sunken] px-3 py-1.5 text-[--signal-alert] text-xs clip-diagonal-sm">
-        <span className="h-1.5 w-1.5 bg-[--signal-alert]" />
-        PRISM NOT DETECTED
-      </span>
+      <Badge variant="destructive">
+        <span className="size-1.5 bg-[--signal-alert]" /> PRISM NOT DETECTED
+      </Badge>
     );
   }
   return (
-    <span className="cp-tactical-label flex items-center gap-2 border border-[--brand-core] bg-[--surface-sunken] px-3 py-1.5 text-[--brand-core] text-xs clip-diagonal-sm">
-      <span className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]" />
-      <Boxes className="h-3 w-3" /> PRISM READY
-    </span>
+    <Badge>
+      <Boxes className="size-3" /> PRISM READY
+    </Badge>
   );
 }
 
-function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable: boolean }) {
+function PackCard({ pack }: { pack: PackSummary }) {
+  const go = useNav((s) => s.go);
   const manifest = useQuery({
     queryKey: ["manifest", pack.id],
     queryFn: () => tauri.loadManifest(pack.id),
     retry: false,
   });
 
-  const [report, setReport] = useState<SyncInstanceReport | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const instanceName = `modsync-${pack.id}`;
-
-  const sync = useMutation({
-    mutationFn: () => tauri.syncInstance(pack.id),
-    onSuccess: (r) => {
-      setReport(r);
-      setSyncError(null);
-    },
-    onError: (e) => setSyncError(formatError(e)),
-  });
-
-  const launch = useMutation({
-    mutationFn: () => tauri.launchInstance(instanceName),
-    onError: (e) => setSyncError(formatError(e)),
-  });
-
   return (
-    <Card className="p-4 hover:border-[--brand-core]/60">
+    <Card
+      className="cursor-pointer p-4 transition-colors hover:border-[--brand-core]/60"
+      onClick={() => go({ kind: "pack", id: pack.id })}
+    >
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="cp-tactical-label truncate text-[--text-high] text-sm">
             {manifest.data?.pack.name ?? pack.id}
           </p>
-          <p className="text-[--text-low] font-mono text-xs truncate">
+          <p className="truncate font-mono text-[--text-low] text-xs">
             {pack.head_sha.slice(0, 10)} · {pack.path}
           </p>
+          {manifest.data && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Badge variant="outline">v{manifest.data.pack.version}</Badge>
+              <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
+              <Badge variant="outline">{manifest.data.pack.loader.toUpperCase()}</Badge>
+              <Badge variant="outline">{manifest.data.mods.length} MODS</Badge>
+            </div>
+          )}
+          {manifest.isError && (
+            <p className="cp-tactical-label mt-2 text-[--signal-alert] text-xs">NO MANIFEST.JSON</p>
+          )}
         </div>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => sync.mutate()}
-            disabled={sync.isPending || !manifest.data || !prismAvailable}
-            title={prismAvailable ? "Download mods + write Prism instance" : "Install Prism first"}
-          >
-            {sync.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            SYNC
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => launch.mutate()}
-            disabled={launch.isPending || !prismAvailable || sync.isPending}
-          >
-            {launch.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            LAUNCH
-          </Button>
-        </div>
+        <ChevronRight className="size-5 text-[--text-low]" />
       </div>
-      {manifest.data && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <Tag>v{manifest.data.pack.version}</Tag>
-          <Tag>MC {manifest.data.pack.mcVersion}</Tag>
-          <Tag>{manifest.data.pack.loader.toUpperCase()}</Tag>
-          <Tag>
-            <Download className="inline h-3 w-3" /> {manifest.data.mods.length} MODS
-          </Tag>
-        </div>
-      )}
-      {report && (
-        <div className="mt-3 flex flex-col gap-1 border-t border-[--line-soft] pt-3 text-xs">
-          <p className="cp-tactical-label text-[--signal-live]">:: SYNC OK</p>
-          <p className="text-[--text-low]">
-            {report.instance.mods_written} mods · {report.instance.overrides_copied} override files
-            · cached {report.fetch.cached}/{report.fetch.total}
-          </p>
-          <p className="font-mono text-[--text-low] text-[10px] truncate opacity-60">
-            {report.instance.instance_dir}
-          </p>
-        </div>
-      )}
-      {syncError && (
-        <p className="mt-3 cp-tactical-label text-[--signal-alert] text-xs">ERR :: {syncError}</p>
-      )}
-      {manifest.isError && (
-        <p className="mt-3 cp-tactical-label text-[--signal-alert] text-xs">
-          NO MANIFEST.JSON IN THIS REPO YET
-        </p>
-      )}
     </Card>
-  );
-}
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="cp-tactical-label border border-[--line-soft] bg-[--surface-sunken] px-2 py-0.5 text-[--brand-core] text-[10px]">
-      {children}
-    </span>
   );
 }
