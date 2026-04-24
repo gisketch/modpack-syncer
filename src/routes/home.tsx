@@ -168,7 +168,7 @@ function PackCard({ pack, prismAvailable }: { pack: PackSummary; prismAvailable:
           <Button
             size="sm"
             onClick={() => launch.mutate()}
-            disabled={launch.isPending || !report || !prismAvailable || sync.isPending}
+            disabled={launch.isPending || !prismAvailable || sync.isPending}
           >
             {launch.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
