@@ -1618,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "gisketch_s_modpack_syncer"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "chrono",

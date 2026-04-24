@@ -184,7 +184,7 @@ function Shell() {
           </SidebarItem>
         </SidebarContent>
         <SidebarFooter>
-          {appUpdate.isWindows && appUpdate.updateQuery.data ? (
+          {appUpdate.canInstall && appUpdate.updateQuery.data ? (
             <SidebarAction
               onClick={() => installAppUpdate.mutation.mutate()}
               disabled={installAppUpdate.mutation.isPending}

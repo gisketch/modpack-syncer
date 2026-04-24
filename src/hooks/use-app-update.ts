@@ -25,20 +25,22 @@ export function useAppPlatform() {
 export function useAppUpdate() {
   const platformQuery = useAppPlatform();
   const isWindows = platformQuery.data === "windows";
+  const canInstall = isWindows;
   const updateQuery = useQuery({
     queryKey: ["app-update"],
     queryFn: async () => {
-      if (!isWindows) {
+      if (!platformQuery.data) {
         return null;
       }
       return check();
     },
-    enabled: !!platformQuery.data && isWindows,
+    enabled: !!platformQuery.data,
     retry: false,
     staleTime: 300_000,
   });
 
   return {
+    canInstall,
     isWindows,
     platformQuery,
     updateQuery,

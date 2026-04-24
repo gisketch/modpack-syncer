@@ -461,49 +461,62 @@ export function SettingsRoute() {
         </CardContent>
       </Card>
 
-      {appUpdate.isWindows ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Download className="h-4 w-4" /> APP UPDATE
-            </CardTitle>
-            <CardDescription>Windows builds check latest GitHub release on launch.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col gap-4">
-              <div className="grid gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs tabular-nums">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="cp-tactical-label text-[--text-low]">CURRENT</span>
-                  <span className="text-[--text-high]">v{appVersion.data ?? "..."}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="cp-tactical-label text-[--text-low]">LATEST</span>
-                  <span className="text-[--text-high]">
-                    {appUpdate.updateQuery.data ? `v${appUpdate.updateQuery.data.version}` : "CURRENT"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="cp-tactical-label text-[--text-low]">STATUS</span>
-                  <span className="text-[--text-high]">
-                    {appUpdate.updateQuery.isFetching
-                      ? "CHECKING"
-                      : appUpdate.updateQuery.data
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Download className="h-4 w-4" /> APP UPDATE
+          </CardTitle>
+          <CardDescription>
+            {appUpdate.canInstall
+              ? "Windows builds check latest GitHub release and can install in-app."
+              : "Check latest GitHub release here. In-app install stays disabled on this OS."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs tabular-nums">
+              <div className="flex items-center justify-between gap-3">
+                <span className="cp-tactical-label text-[--text-low]">PLATFORM</span>
+                <span className="text-[--text-high]">{appUpdate.platformQuery.data?.toUpperCase() ?? "..."}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="cp-tactical-label text-[--text-low]">CURRENT</span>
+                <span className="text-[--text-high]">v{appVersion.data ?? "..."}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="cp-tactical-label text-[--text-low]">LATEST</span>
+                <span className="text-[--text-high]">
+                  {appUpdate.updateQuery.data ? `v${appUpdate.updateQuery.data.version}` : "CURRENT"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="cp-tactical-label text-[--text-low]">STATUS</span>
+                <span className="text-[--text-high]">
+                  {appUpdate.updateQuery.isFetching
+                    ? "CHECKING"
+                    : appUpdate.updateQuery.data
+                      ? appUpdate.canInstall
                         ? "UPDATE READY"
-                        : "UP TO DATE"}
-                  </span>
-                </div>
+                        : "CHECK ONLY"
+                      : "UP TO DATE"}
+                </span>
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={handleCheckForUpdates} disabled={appUpdate.updateQuery.isFetching}>
-                  {appUpdate.updateQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  CHECK FOR UPDATES
-                </Button>
-              </div>
+              {!appUpdate.canInstall ? (
+                <p className="text-text-low">
+                  Linux view stays for diagnostics. Download + install still manual on this OS.
+                </p>
+              ) : null}
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={handleCheckForUpdates} disabled={appUpdate.updateQuery.isFetching}>
+                {appUpdate.updateQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                CHECK FOR UPDATES
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
