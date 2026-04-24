@@ -111,6 +111,7 @@ Legend: `[ ]` planned · `[~]` in progress · `[x]` done · `[?]` under discussi
 - [ ] `README.md` (user-facing quickstart)
 - [ ] `docs/author-guide.md` (publishing flow)
 - [x] `docs/github-setup.md` (pack repo setup)
+- [x] `docs/minimal-pack-guide.md` (first-pack quick start)
 - [ ] `docs/manifest-schema.md` (JSON schema reference)
 
 ### Build / Release
