@@ -445,6 +445,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                           onChange={(event) => setOfflineUsername(event.target.value)}
                           placeholder="Username"
                           autoFocus
+                          className="normal-case tracking-normal"
                         />
                       </div>
                       <StatusLine label="NEXT" value="PACKS" />

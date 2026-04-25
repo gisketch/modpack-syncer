@@ -13,6 +13,7 @@ First-run environment setup flow.
 7. Onboarding MUST be presented as a step-by-step window flow with a segmented progress indicator, not as one long scrolling page.
 8. The default install directory MUST control where managed Java runtimes, managed launchers, and cloned modpacks are stored.
 9. Completing the username step MUST route users to the Packs page.
+10. Offline username inputs MUST preserve user-entered letter casing visually and in saved values.
 
 ## See
 

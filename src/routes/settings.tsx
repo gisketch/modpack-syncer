@@ -547,6 +547,7 @@ export function SettingsRoute() {
                 value={offlineUsername}
                 onChange={(e) => setOfflineUsername(e.target.value)}
                 placeholder="Offline username used for cracked launcher"
+                className="normal-case tracking-normal"
               />
               <p className="text-xs text-[--text-low]">
                 Binary override always wins first. Data dir optional, but portable managed installs
