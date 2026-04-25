@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useAppVersion } from "@/hooks/use-app-version";
 import { formatError } from "@/lib/format-error";
 import { type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
@@ -48,6 +49,7 @@ export function SettingsRoute() {
   const [prismInstallProgress, setPrismInstallProgress] =
     useState<PrismInstallProgressEvent | null>(null);
   const [prismInstallLogs, setPrismInstallLogs] = useState<string[]>([]);
+  const appVersion = useAppVersion();
   const prism = useQuery({
     queryKey: ["prism"],
     queryFn: () => tauri.detectPrism(),
@@ -479,7 +481,7 @@ export function SettingsRoute() {
           <CardTitle className="flex items-center gap-2">
             <Info className="h-4 w-4" /> ABOUT
           </CardTitle>
-          <CardDescription>modsync v0.1.0</CardDescription>
+          <CardDescription>modsync v{appVersion.data ?? "..."}</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-[--text-low]">
