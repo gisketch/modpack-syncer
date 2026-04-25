@@ -270,6 +270,7 @@ type PublishTabDefinition = {
     | "shaderpacks"
     | "resourcepacks"
     | "shader-settings"
+    | "presets"
     | "configs"
     | "options"
     | "others";
@@ -308,6 +309,12 @@ function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefiniti
       label: "SHADER SETTINGS",
       description: "Iris selector file plus shader preset .txt files alongside shaderpacks.",
       match: (item) => item.category === "shader-settings",
+    },
+    {
+      id: "presets",
+      label: "PRESETS",
+      description: "Pack-owned option preset JSON files.",
+      match: (item) => item.category === "option-presets",
     },
     {
       id: "configs",
@@ -377,6 +384,9 @@ function labelCategory(category: PublishCategory, relativePath?: string) {
   }
   if (category === "shader-settings") {
     return "SHADER SETTINGS";
+  }
+  if (category === "option-presets") {
+    return "PRESETS";
   }
   if (category === "root") {
     return "ROOT";

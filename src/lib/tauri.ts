@@ -54,6 +54,7 @@ export type PublishCategory =
   | "resourcepacks"
   | "shaderpacks"
   | "shader-settings"
+  | "option-presets"
   | "config"
   | "kubejs"
   | "root";

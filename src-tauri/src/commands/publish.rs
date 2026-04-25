@@ -60,6 +60,11 @@ pub async fn scan_instance_publish(
             &instance_dir_for_scan,
             &pack_dir,
         )?);
+        items.extend(scan_repo_status_dir(
+            PublishCategory::OptionPresets,
+            &pack_dir,
+            "presets",
+        )?);
         items.extend(scan_tree_dir(
             PublishCategory::Kubejs,
             &instance_dir_for_scan.join("kubejs"),
@@ -391,6 +396,68 @@ fn scan_root_files(
         }
     }
     Ok(out)
+}
+
+fn scan_repo_status_dir(
+    category: PublishCategory,
+    repo_root: &std::path::Path,
+    prefix: &str,
+) -> Result<Vec<PublishScanItem>, CommandError> {
+    let repo = git2::Repository::open(repo_root)?;
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let statuses = repo.statuses(Some(&mut options))?;
+    let prefix_slash = format!("{prefix}/");
+    let mut out = Vec::new();
+
+    for status in statuses.iter() {
+        let Some(path) = status.path() else {
+            continue;
+        };
+        if !path.starts_with(&prefix_slash) {
+            continue;
+        }
+        let relative_path = path.to_string();
+        let full_path = repo_root.join(path);
+        let action = publish_action_from_git_status(status.status());
+        out.push(PublishScanItem {
+            category: category.clone(),
+            relative_path,
+            size: full_path.metadata().ok().map(|metadata| metadata.len()),
+            sha1: if full_path.is_file() {
+                Some(cache::file_sha1_hex(&full_path)?)
+            } else {
+                None
+            },
+            action,
+            source: Some("repo-git".to_string()),
+        });
+    }
+
+    out.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(out)
+}
+
+fn publish_action_from_git_status(status: git2::Status) -> PublishAction {
+    if status.intersects(git2::Status::WT_DELETED | git2::Status::INDEX_DELETED) {
+        PublishAction::Remove
+    } else if status.intersects(git2::Status::WT_NEW | git2::Status::INDEX_NEW) {
+        PublishAction::Add
+    } else if status.intersects(
+        git2::Status::WT_MODIFIED
+            | git2::Status::INDEX_MODIFIED
+            | git2::Status::WT_RENAMED
+            | git2::Status::INDEX_RENAMED
+            | git2::Status::WT_TYPECHANGE
+            | git2::Status::INDEX_TYPECHANGE,
+    ) {
+        PublishAction::Update
+    } else {
+        PublishAction::Unchanged
+    }
 }
 
 fn list_regular_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, CommandError> {
