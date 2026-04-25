@@ -260,7 +260,10 @@ fn scan_artifact_dir(
         let sha1 = cache::file_sha1_hex(&path)?;
         let size = path.metadata()?.len();
         let (action, source) = match baseline.get(&filename) {
-            Some(entry) if entry.sha1.eq_ignore_ascii_case(&sha1) => {
+            Some(entry)
+                if entry.sha1.eq_ignore_ascii_case(&sha1)
+                    || should_trust_artifact_filename_match(&category) =>
+            {
                 (PublishAction::Unchanged, Some(source_label(entry.source)))
             }
             Some(entry) => (PublishAction::Update, Some(source_label(entry.source))),
@@ -592,7 +595,9 @@ fn apply_artifact_dir(
         let unpublished = unpublished_by_filename
             .get(filename.as_str())
             .filter(|entry| entry.sha1.eq_ignore_ascii_case(&sha1));
-        let needs_repo_copy = if unpublished.is_some() {
+        let preserve_existing_same_name =
+            existing.is_some() && should_trust_artifact_filename_match_prefix(repo_prefix);
+        let needs_repo_copy = if unpublished.is_some() || preserve_existing_same_name {
             false
         } else {
             !matches!(
@@ -631,6 +636,12 @@ fn apply_artifact_dir(
                 side: manifest::Side::Client,
             })
         };
+
+        if preserve_existing_same_name {
+            seen_filenames.insert(filename);
+            next_entries.push(entry);
+            continue;
+        }
 
         if needs_repo_copy {
             let repo_path = entry
@@ -732,8 +743,16 @@ fn should_skip_artifact_publish(category: &PublishCategory, filename: &str) -> b
     matches!(category, PublishCategory::Shaderpacks) && filename.ends_with(".txt")
 }
 
+fn should_trust_artifact_filename_match(category: &PublishCategory) -> bool {
+    matches!(category, PublishCategory::Shaderpacks)
+}
+
 fn should_skip_artifact_publish_prefix(repo_prefix: &str, filename: &str) -> bool {
     repo_prefix == "shaderpacks" && filename.ends_with(".txt")
+}
+
+fn should_trust_artifact_filename_match_prefix(repo_prefix: &str) -> bool {
+    repo_prefix == "shaderpacks"
 }
 
 fn should_skip_tree_publish(category: &PublishCategory, relative_path: &str) -> bool {

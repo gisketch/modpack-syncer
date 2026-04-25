@@ -45,11 +45,18 @@ pub async fn sync_instance(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
+    let sync_shaderpacks = manifest
+        .shaderpacks
+        .iter()
+        .filter(|entry| !is_shaderpack_sidecar(&entry.filename))
+        .cloned()
+        .collect::<Vec<_>>();
+
     let remote_mods = manifest
         .mods
         .iter()
         .chain(manifest.resourcepacks.iter())
-        .chain(manifest.shaderpacks.iter())
+        .chain(sync_shaderpacks.iter())
         .filter(|entry| entry.source != manifest::Source::Repo)
         .cloned()
         .collect::<Vec<_>>();
@@ -99,7 +106,7 @@ pub async fn sync_instance(
 
     let resolved_mods = resolve_entries(&pack_dir, &manifest.mods)?;
     let resolved_resourcepacks = resolve_entries(&pack_dir, &manifest.resourcepacks)?;
-    let resolved_shaderpacks = resolve_entries(&pack_dir, &manifest.shaderpacks)?;
+    let resolved_shaderpacks = resolve_entries(&pack_dir, &sync_shaderpacks)?;
     let launch_profile = prism::load_launch_profile(&pack_id)?;
 
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
@@ -225,6 +232,10 @@ pub async fn preview_shader_settings_sync(
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+fn is_shaderpack_sidecar(filename: &str) -> bool {
+    filename.ends_with(".txt")
 }
 
 fn resolve_entries(

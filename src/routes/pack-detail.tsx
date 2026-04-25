@@ -266,6 +266,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     .sort((left, right) => left.filename.localeCompare(right.filename));
   const resourcepackStatusMap = buildArtifactStatusMap(artifactPublishScan.data, "resourcepacks");
   const shaderpackStatusMap = buildArtifactStatusMap(artifactPublishScan.data, "shaderpacks");
+  const visibleShaderpacks = (manifest.data?.shaderpacks ?? []).filter(
+    (entry) => !entry.filename.endsWith(".txt"),
+  );
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
@@ -274,11 +277,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         (entry) => resourcepackStatusMap.get(entry.filename) !== "synced",
       ).length
     : 0;
-  const shaderpackRiskCount = manifest.data
-    ? manifest.data.shaderpacks.filter(
-        (entry) => shaderpackStatusMap.get(entry.filename) !== "synced",
-      ).length
-    : 0;
+  const shaderpackRiskCount = visibleShaderpacks.filter(
+    (entry) => shaderpackStatusMap.get(entry.filename) !== "synced",
+  ).length;
   const stagedArtifactCount =
     unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
   const javaChoices = getJavaInstallChoices(
@@ -392,7 +393,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         total:
           (manifest.data?.mods.length ?? 0) +
           (manifest.data?.resourcepacks.length ?? 0) +
-          (manifest.data?.shaderpacks.length ?? 0),
+          visibleShaderpacks.length,
         cached: 0,
         downloaded: 0,
         failures: 0,
@@ -1014,7 +1015,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   <Download className="inline size-4" /> SHADERPACKS
                 </CardTitle>
                 <CardDescription>
-                  {manifest.data.shaderpacks.length} entries tracked by manifest
+                  {visibleShaderpacks.length} entries tracked by manifest
                   {unpublishedShaderpacks.length > 0
                     ? ` · ${unpublishedShaderpacks.length} staged locally`
                     : ""}
@@ -1055,7 +1056,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       }
                     />
                   ))}
-                  {manifest.data.shaderpacks.map((entry) => (
+                  {visibleShaderpacks.map((entry) => (
                     <ModRow
                       key={entry.id}
                       entry={entry}
