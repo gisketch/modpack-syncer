@@ -135,6 +135,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
+  const [syncReviewOpen, setSyncReviewOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -187,7 +188,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const artifactPublishScan = useQuery({
     queryKey: ["artifact-publish-scan", packId],
     queryFn: () => tauri.scanInstancePublish(packId),
-    enabled: adminMode && !!manifest.data && !!instanceDir.data,
+    enabled: !!manifest.data && !!instanceDir.data,
     retry: false,
   });
   const changelog = useQuery({
@@ -227,18 +228,33 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       status: "unpublished" as const,
     }))
     .sort((left, right) => left.filename.localeCompare(right.filename));
+  const resourcepackStatusMap = buildArtifactStatusMap(artifactPublishScan.data, "resourcepacks");
+  const shaderpackStatusMap = buildArtifactStatusMap(artifactPublishScan.data, "shaderpacks");
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
+  const resourcepackRiskCount = manifest.data
+    ? manifest.data.resourcepacks.filter((entry) => resourcepackStatusMap.get(entry.filename) !== "synced").length
+    : 0;
+  const shaderpackRiskCount = manifest.data
+    ? manifest.data.shaderpacks.filter((entry) => shaderpackStatusMap.get(entry.filename) !== "synced").length
+    : 0;
+  const stagedArtifactCount =
+    unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
   const javaChoices = getJavaInstallChoices(manifest.data?.pack.mcVersion, manifest.data?.pack.loader);
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
   const alreadySynced =
     !!manifest.data &&
     !!statuses.data &&
     launchRiskCount === 0 &&
+    resourcepackRiskCount === 0 &&
+    shaderpackRiskCount === 0 &&
     deletedMods.length === 0 &&
-    unpublishedMods.length === 0 &&
+    stagedArtifactCount === 0 &&
     syncedModCount === manifest.data.mods.length;
+  const syncSummary = buildSyncSummary(artifactPublishScan.data);
+  const syncReviewTabs = buildSyncReviewTabs(artifactPublishScan.data);
+  const syncReviewDefaultTab = syncReviewTabs.find((tab) => tab.count > 0)?.id ?? "mods";
   const newUpdateCount = (() => {
     const entries = changelog.data ?? [];
     if (entries.length === 0) return 0;
@@ -272,7 +288,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const activeChangelogEntry = changelog.data?.[activeChangelogIndex] ?? null;
   const progressEntry = progress?.filename
-    ? (manifest.data?.mods.find((m) => m.filename === progress.filename) ?? null)
+    ? (
+        [...(manifest.data?.mods ?? []), ...(manifest.data?.resourcepacks ?? []), ...(manifest.data?.shaderpacks ?? [])].find(
+          (entry) => entry.filename === progress.filename,
+        ) ?? null
+      )
     : null;
   const progressView = progress
     ? {
@@ -296,6 +316,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["manifest", packId] }),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
       ]);
       toast.success("Pack updated", {
         description: updatedPack.head_sha.slice(0, 10),
@@ -315,7 +336,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         status: "downloading",
         filename: null,
         completed: 0,
-        total: manifest.data?.mods.length ?? 0,
+        total:
+          (manifest.data?.mods.length ?? 0) +
+          (manifest.data?.resourcepacks.length ?? 0) +
+          (manifest.data?.shaderpacks.length ?? 0),
         cached: 0,
         downloaded: 0,
         failures: 0,
@@ -331,6 +355,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       await Promise.all([
         statuses.refetch(),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
       ]);
       toast.success("Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
@@ -446,6 +471,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["packs"] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
       ]);
       setPublishOpen(false);
       toast.success("Publish pushed", {
@@ -512,6 +538,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   function handleSyncClick() {
+    setSyncReviewOpen(true);
+  }
+
+  function handleConfirmSyncFromReview() {
+    setSyncReviewOpen(false);
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
@@ -852,8 +883,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                           ? (modrinthMap.get(entry.projectId)?.title ?? null)
                           : null
                       }
-                      status={null}
-                      loading={false}
+                      status={resourcepackStatusMap.get(entry.filename) ?? null}
+                      loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                     />
                   ))}
                 </TableBody>
@@ -927,8 +958,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                           ? (modrinthMap.get(entry.projectId)?.title ?? null)
                           : null
                       }
-                      status={null}
-                      loading={false}
+                      status={shaderpackStatusMap.get(entry.filename) ?? null}
+                      loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                     />
                   ))}
                 </TableBody>
@@ -946,6 +977,108 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         progressView={progressView}
         report={report}
       />
+
+      <Dialog open={syncReviewOpen} onOpenChange={setSyncReviewOpen}>
+        <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
+          <DialogHeader>
+            <DialogTitle>SYNC PREVIEW</DialogTitle>
+            <DialogDescription>
+              Review category changes before writing Prism instance.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
+            {artifactPublishScan.isLoading || artifactPublishScan.isFetching ? (
+              <Card>
+                <CardContent className="flex items-center gap-3 p-5 text-sm text-text-low">
+                  <Loader2 className="size-4 animate-spin text-brand-core" />
+                  Building sync diff...
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {syncSummary.map((item) => (
+                    <SyncPreviewCard key={item.category} summary={item} />
+                  ))}
+                </div>
+                <Tabs defaultValue={syncReviewDefaultTab} className="min-h-0 gap-4">
+                  <TabsList className="flex-wrap gap-2">
+                    {syncReviewTabs.map((tab) => (
+                      <TabsTrigger key={tab.id} value={tab.id}>
+                        <span>{tab.label}</span>
+                        <span className="font-mono text-[10px] tabular-nums text-text-low">{tab.count}</span>
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {syncReviewTabs.map((tab) => (
+                    <TabsContent key={tab.id} value={tab.id} className="min-h-0 outline-none">
+                      <Card variant="window" className="min-h-0">
+                        <CardWindowBar>
+                          <CardWindowTab>{tab.label}</CardWindowTab>
+                          <CardStatus>{tab.count} CHANGES</CardStatus>
+                        </CardWindowBar>
+                        <CardContent className="min-h-0 p-0">
+                          {tab.items.length > 0 ? (
+                            <ScrollArea className="h-[26rem] px-4 py-4">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>ACTION</TableHead>
+                                    <TableHead>PATH</TableHead>
+                                    <TableHead>SOURCE</TableHead>
+                                    <TableHead className="text-right">SIZE</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {tab.items.map((item) => (
+                                    <TableRow key={`${tab.id}:${item.relativePath}:${item.action}`}>
+                                      <TableCell>
+                                        <SyncPlanActionChip action={item.action} />
+                                      </TableCell>
+                                      <TableCell className="font-mono text-[10px] text-text-low">
+                                        {item.relativePath}
+                                      </TableCell>
+                                      <TableCell className="text-xs text-text-low">
+                                        {item.source ?? "instance-local"}
+                                      </TableCell>
+                                      <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
+                                        {typeof item.size === "number" ? formatBytes(item.size) : "--"}
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </ScrollArea>
+                          ) : (
+                            <div className="px-4 py-8 text-center text-sm text-text-low">No changes in {tab.label.toLowerCase()}.</div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  ))}
+                </Tabs>
+                <Card>
+                  <CardContent className="px-4 py-3 text-xs text-text-low">
+                    Sync adds missing pack files, updates changed managed files, deletes local-only managed extras in selected categories.
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setSyncReviewOpen(false)}>
+              CANCEL
+            </Button>
+            <Button
+              onClick={handleConfirmSyncFromReview}
+              disabled={artifactPublishScan.isLoading || artifactPublishScan.isFetching || sync.isPending}
+            >
+              {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              CONTINUE TO SYNC
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AddModDialog
         open={addEntryDialogOpen}
@@ -1203,7 +1336,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <DialogBody className="p-6">
             <div className="flex flex-col gap-4 text-sm text-text-low">
               <div className="border border-line-soft/30 bg-surface-sunken p-4 font-mono text-[10px] uppercase tracking-[0.18em] text-text-low">
-                No missing mods. No outdated mods. No unpublished local files.
+                No missing mods. No outdated mods. No missing resourcepacks. No missing shaderpacks. No unpublished local files.
               </div>
               <p>Continue for forced resync.</p>
             </div>
@@ -1647,13 +1780,9 @@ function PublishPreviewPage({
             <CardContent>
               {hasChanges ? (
                 <Tabs defaultValue={defaultTab} className="gap-5">
-                  <TabsList className="flex-wrap border-b-0 gap-2">
+                  <TabsList className="flex-wrap gap-2">
                     {publishTabs.map((tab) => (
-                      <TabsTrigger
-                        key={tab.id}
-                        value={tab.id}
-                        className="min-h-10 min-w-10 rounded-[1.1rem] border border-line-soft/20 px-3 py-2 data-active:border-brand-core/40 data-active:border-t-2"
-                      >
+                      <TabsTrigger key={tab.id} value={tab.id}>
                         <span>{tab.label}</span>
                         <span className="font-mono text-[10px] tabular-nums text-text-low">{tab.count}</span>
                       </TabsTrigger>
@@ -1661,15 +1790,17 @@ function PublishPreviewPage({
                   </TabsList>
                   {publishTabs.map((tab) => (
                     <TabsContent key={tab.id} value={tab.id} className="outline-none">
-                      <div className="mb-4 flex items-center justify-between gap-3 rounded-[1.25rem] border border-line-soft/20 bg-surface-sunken/55 px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{tab.label}</span>
-                          <span className="text-xs text-text-low [text-wrap:pretty]">{tab.description}</span>
-                        </div>
-                        <div className="text-right font-mono text-xs tabular-nums text-text-low">
-                          {tab.count} {tab.count === 1 ? "change" : "changes"}
-                        </div>
-                      </div>
+                      <Card className="mb-4">
+                        <CardContent className="flex items-center justify-between gap-3 p-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{tab.label}</span>
+                            <span className="text-xs text-text-low [text-wrap:pretty]">{tab.description}</span>
+                          </div>
+                          <div className="text-right font-mono text-xs tabular-nums text-text-low">
+                            {tab.count} {tab.count === 1 ? "change" : "changes"}
+                          </div>
+                        </CardContent>
+                      </Card>
                       {tab.items.length > 0 ? (
                         <ScrollArea className="h-[calc(100vh-27rem)]">
                           <Table>
@@ -1706,9 +1837,11 @@ function PublishPreviewPage({
                           </Table>
                         </ScrollArea>
                       ) : (
-                        <div className="rounded-[1.25rem] border border-dashed border-line-soft/25 bg-surface-sunken/35 px-4 py-8 text-center text-sm text-text-low">
-                          No changed files in {tab.label.toLowerCase()}.
-                        </div>
+                        <Card>
+                          <CardContent className="px-4 py-8 text-center text-sm text-text-low">
+                            No changed files in {tab.label.toLowerCase()}.
+                          </CardContent>
+                        </Card>
                       )}
                     </TabsContent>
                   ))}
@@ -1917,7 +2050,7 @@ function SyncDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="overflow-hidden">
+      <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
         <DialogHeader>
           <DialogTitle>{pending ? "SYNCING" : report ? "SYNC OK" : "SYNC"}</DialogTitle>
           <DialogDescription>
@@ -1929,78 +2062,85 @@ function SyncDialog({
           </DialogDescription>
         </DialogHeader>
 
-            <DialogBody className="p-6">
+            <DialogBody className="min-h-0 flex-1 overflow-y-auto p-5 xl:p-6">
               {pending && (
                 <div className="flex flex-col gap-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                      :: {syncProgressLabel(progress)}
-                    </span>
-                    <span className="font-heading text-xs tracking-[0.18em] text-brand-core">
-                      {progress?.completed ?? 0}/{progress?.total ?? 0}
-                    </span>
-                  </div>
+                  <Card variant="window">
+                    <CardWindowBar>
+                      <CardWindowTab>{syncProgressLabel(progress)}</CardWindowTab>
+                      <CardStatus>
+                        {progress?.completed ?? 0}/{progress?.total ?? 0}
+                      </CardStatus>
+                    </CardWindowBar>
+                    <CardContent className="flex flex-col gap-5 p-5">
+                      <Slider value={[completed]} max={total} disabled>
+                        <SliderControl>
+                          <SliderTrack>
+                            <SliderIndicator />
+                          </SliderTrack>
+                          <SliderThumb className="opacity-0" />
+                        </SliderControl>
+                      </Slider>
 
-                  <Slider value={[completed]} max={total} disabled>
-                    <SliderControl>
-                      <SliderTrack>
-                        <SliderIndicator />
-                      </SliderTrack>
-                      <SliderThumb className="opacity-0" />
-                    </SliderControl>
-                  </Slider>
+                      <div className="flex items-center gap-3 border border-line-soft/30 bg-surface-sunken px-4 py-4">
+                        <div className="flex size-10 items-center justify-center overflow-hidden border border-line-soft/40 bg-surface-base">
+                          {progressView?.icon ? (
+                            <img
+                              src={progressView.icon}
+                              alt=""
+                              className="size-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : progress?.status === "downloaded" || progress?.status === "cached" ? (
+                            <Check className="size-4 text-brand-core" />
+                          ) : progress?.status === "downloading" || progress?.status === "writing-instance" ? (
+                            <Loader2 className="size-4 animate-spin text-brand-core" />
+                          ) : (
+                            <Package className="size-4 text-text-low" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-text-high">{currentLabel}</p>
+                          <p className="truncate font-mono text-[10px] text-text-low">
+                            {progress?.status === "writing-instance"
+                              ? "Writing Prism instance"
+                              : progressView?.filename ?? "Waiting for next artifact"}
+                          </p>
+                        </div>
+                        <StatusChip status={syncProgressToStatus(progress)} />
+                      </div>
 
-                  <div className="flex items-center gap-3 border border-line-soft/30 bg-surface-sunken px-4 py-4">
-                    <div className="flex size-10 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
-                      {progressView?.icon ? (
-                        <img
-                          src={progressView.icon}
-                          alt=""
-                          className="size-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : progress?.status === "downloaded" || progress?.status === "cached" ? (
-                        <Check className="size-4 text-brand-core" />
-                      ) : progress?.status === "downloading" || progress?.status === "writing-instance" ? (
-                        <Loader2 className="size-4 animate-spin text-brand-core" />
-                      ) : (
-                        <Package className="size-4 text-text-low" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-text-high">{currentLabel}</p>
-                      <p className="truncate font-mono text-[10px] text-text-low">
-                        {progress?.status === "writing-instance"
-                          ? "Writing Prism instance"
-                          : progressView?.filename ?? "Waiting for next mod"}
-                      </p>
-                    </div>
-                    <StatusChip status={syncProgressToStatus(progress)} />
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <Row k="CACHED" v={String(progress?.cached ?? 0)} />
-                    <Row k="DOWNLOADED" v={String(progress?.downloaded ?? 0)} />
-                    <Row k="FAILURES" v={String(progress?.failures ?? 0)} alert={(progress?.failures ?? 0) > 0} />
-                  </div>
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <Row k="CACHED" v={String(progress?.cached ?? 0)} />
+                        <Row k="DOWNLOADED" v={String(progress?.downloaded ?? 0)} />
+                        <Row k="FAILURES" v={String(progress?.failures ?? 0)} alert={(progress?.failures ?? 0) > 0} />
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
               )}
 
               {report && !pending && (
-                <div className="flex flex-col gap-2 text-xs">
-                  <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
-                  <Row k="RESOURCEPACKS WRITTEN" v={String(report.instance.resourcepacks_written)} />
-                  <Row k="SHADERPACKS WRITTEN" v={String(report.instance.shaderpacks_written)} />
-                  <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
-                  <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
-                  <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
-                  {report.fetch.failures.length > 0 && (
-                    <Row k="FAILURES" v={String(report.fetch.failures.length)} alert />
-                  )}
-                  <p className="mt-2 truncate font-mono text-[10px] text-[--text-low]">
-                    {report.instance.instance_dir}
-                  </p>
-                </div>
+                <Card variant="window">
+                  <CardWindowBar>
+                    <CardWindowTab>SYNC REPORT</CardWindowTab>
+                    <CardStatus>COMPLETE</CardStatus>
+                  </CardWindowBar>
+                  <CardContent className="flex flex-col gap-2 p-5 text-xs">
+                    <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
+                    <Row k="RESOURCEPACKS WRITTEN" v={String(report.instance.resourcepacks_written)} />
+                    <Row k="SHADERPACKS WRITTEN" v={String(report.instance.shaderpacks_written)} />
+                    <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
+                    <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
+                    <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
+                    {report.fetch.failures.length > 0 && (
+                      <Row k="FAILURES" v={String(report.fetch.failures.length)} alert />
+                    )}
+                    <p className="mt-2 truncate font-mono text-[10px] text-[--text-low]">
+                      {report.instance.instance_dir}
+                    </p>
+                  </CardContent>
+                </Card>
               )}
             </DialogBody>
 
@@ -2321,6 +2461,95 @@ function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefiniti
   });
 }
 
+function buildArtifactStatusMap(
+  report: PublishScanReport | null | undefined,
+  category: "resourcepacks" | "shaderpacks",
+) {
+  const map = new Map<string, ModStatusValue>();
+  for (const item of report?.items ?? []) {
+    if (item.category !== category) continue;
+    if (item.action === "add") continue;
+    map.set(
+      item.relativePath,
+      item.action === "unchanged"
+        ? "synced"
+        : item.action === "update"
+          ? "outdated"
+          : "missing",
+    );
+  }
+  return map;
+}
+
+type SyncCategorySummary = {
+  category: "mods" | "resourcepacks" | "shaderpacks";
+  label: string;
+  add: number;
+  update: number;
+  remove: number;
+};
+
+type SyncReviewTab = {
+  id: SyncCategorySummary["category"];
+  label: string;
+  items: PublishScanReport["items"];
+  count: number;
+};
+
+function buildSyncSummary(report: PublishScanReport | null | undefined): SyncCategorySummary[] {
+  const categories: SyncCategorySummary["category"][] = ["mods", "resourcepacks", "shaderpacks"];
+  return categories.map((category) => {
+    const items = (report?.items ?? []).filter((item) => item.category === category);
+    return {
+      category,
+      label: labelCategory(category),
+      add: items.filter((item) => item.action === "remove").length,
+      update: items.filter((item) => item.action === "update").length,
+      remove: items.filter((item) => item.action === "add").length,
+    };
+  });
+}
+
+function buildSyncReviewTabs(report: PublishScanReport | null | undefined): SyncReviewTab[] {
+  const categories: SyncCategorySummary["category"][] = ["mods", "resourcepacks", "shaderpacks"];
+  return categories.map((category) => {
+    const items = (report?.items ?? []).filter((item) => item.category === category && item.action !== "unchanged");
+    return {
+      id: category,
+      label: labelCategory(category),
+      items,
+      count: items.length,
+    };
+  });
+}
+
+function SyncPreviewCard({ summary }: { summary: SyncCategorySummary }) {
+  return (
+    <Card variant="window">
+      <CardWindowBar>
+        <CardWindowTab>{summary.label}</CardWindowTab>
+        <CardStatus>{summary.add + summary.update + summary.remove} CHANGES</CardStatus>
+      </CardWindowBar>
+      <CardContent className="grid grid-cols-3 gap-2 p-4 text-xs">
+        <Row k="ADD" v={String(summary.add)} />
+        <Row k="UPDATE" v={String(summary.update)} />
+        <Row k="DELETE" v={String(summary.remove)} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SyncPlanActionChip({ action }: { action: PublishAction }) {
+  const label = action === "remove" ? "ADD" : action === "update" ? "UPDATE" : "DELETE";
+  const text =
+    action === "remove"
+      ? "text-brand-core"
+      : action === "update"
+        ? "text-signal-warn"
+        : "text-signal-alert";
+  return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{label}</span>;
+}
+
 function summarizePublishReport(report: PublishScanReport | null) {
   return {
     add: report?.items.filter((item) => item.action === "add").length ?? 0,
@@ -2519,7 +2748,7 @@ function syncProgressDescription(progress: SyncProgressEvent | null) {
   if (progress.status === "writing-instance") {
     return `Writing instance files · ${progress.completed}/${progress.total}`;
   }
-  return `${progress.completed}/${progress.total} mods processed`;
+  return `${progress.completed}/${progress.total} artifacts processed`;
 }
 
 function syncProgressToStatus(progress: SyncProgressEvent | null): ModStatusValue {

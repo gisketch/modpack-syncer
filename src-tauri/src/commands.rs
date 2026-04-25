@@ -582,14 +582,16 @@ pub async fn sync_instance(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
-    let remote_mods = m
+    let remote_artifacts = m
         .mods
         .iter()
+        .chain(m.resourcepacks.iter())
+        .chain(m.shaderpacks.iter())
         .filter(|entry| entry.source != manifest::Source::Repo)
         .cloned()
         .collect::<Vec<_>>();
 
-    let fetch_report = download::fetch_all_with_progress(remote_mods, {
+    let fetch_report = download::fetch_all_with_progress(remote_artifacts, {
         let app = app.clone();
         let pack_id = pack_id.clone();
         move |progress| {
