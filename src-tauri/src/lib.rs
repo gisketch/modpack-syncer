@@ -1,4 +1,4 @@
-// gisketch//s_modpack_syncer — Tauri app entry
+// modsync — Tauri app entry
 // Module skeletons for the core subsystems. Each module will grow over milestones (M0-M6).
 // See docs/architecture.md.
 
@@ -15,7 +15,7 @@ mod profile;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! gisketch//s_modpack_syncer Rust backend online.", name)
+    format!("Hello, {}! modsync Rust backend online.", name)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,7 +27,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_log::Builder::new().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::add_pack,
@@ -39,12 +38,8 @@ pub fn run() {
             commands::save_publish_pat,
             commands::clear_publish_pat,
             commands::verify_publish_ssh,
-            commands::get_app_storage_settings,
-            commands::set_app_storage_settings,
             commands::get_prism_settings,
             commands::set_prism_settings,
-            commands::get_launch_defaults,
-            commands::set_launch_defaults,
             commands::fetch_mods,
             commands::detect_prism,
             commands::get_prism_account_status,
@@ -63,11 +58,11 @@ pub fn run() {
             commands::preview_modrinth_mod,
             commands::add_modrinth_mod,
             commands::delete_instance_mod,
-            commands::unpublished_artifact_statuses,
             commands::mod_statuses,
             commands::scan_instance_publish,
             commands::preview_options_sync,
             commands::set_options_sync_ignored,
+            commands::preview_shader_settings_sync,
             commands::apply_instance_publish,
             commands::commit_and_push_publish,
         ])

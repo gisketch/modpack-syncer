@@ -89,6 +89,8 @@ import {
   type PublishAction,
   type PublishCategory,
   type PublishScanReport,
+  type ShaderSettingsChange,
+  type ShaderSettingsPreview,
   type SyncProgressEvent,
   type SyncInstanceReport,
   tauri,
@@ -140,6 +142,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
   const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "options">("artifacts");
+  const [shaderSyncDecision, setShaderSyncDecision] = useState<"undecided" | "sync" | "skip">("undecided");
+  const [pendingShaderSync, setPendingShaderSync] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -199,7 +203,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const optionsSyncPreview = useQuery({
     queryKey: ["options-sync-preview", packId],
     queryFn: () => tauri.previewOptionsSync(packId),
-    enabled: syncReviewOpen && syncReviewStep === "options" && !!instanceDir.data && hasTrackedOptionsFile,
+    enabled: syncReviewOpen && !!instanceDir.data && hasTrackedOptionsFile,
+    retry: false,
+  });
+  const shaderSettingsPreview = useQuery({
+    queryKey: ["shader-settings-preview", packId],
+    queryFn: () => tauri.previewShaderSettingsSync(packId),
+    enabled: syncReviewOpen && !!instanceDir.data,
     retry: false,
   });
   const changelog = useQuery({
@@ -339,6 +349,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
+        qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
       toast.success("Pack updated", {
         description: updatedPack.head_sha.slice(0, 10),
@@ -350,7 +361,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const sync = useMutation({
-    mutationFn: () => tauri.syncInstance(packId),
+    mutationFn: ({ syncShaderSettings }: { syncShaderSettings: boolean }) => tauri.syncInstance(packId, undefined, syncShaderSettings),
     onMutate: () => {
       setSyncOpen(true);
       setProgress({
@@ -379,6 +390,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
+        qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
       toast.success("Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
@@ -467,6 +479,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         await qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] });
       }
       await qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
+      await qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] });
       toast.success(`Local ${describeArtifactCategory(variables.category).singular.toLowerCase()} deleted`);
     },
     onError: (error) => {
@@ -497,6 +510,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["packs"] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
+        qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
       setPublishOpen(false);
       toast.success("Publish pushed", {
@@ -564,12 +578,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
 
   function handleSyncClick() {
     setSyncReviewStep("artifacts");
+    setShaderSyncDecision("undecided");
+    setPendingShaderSync(false);
     setSyncReviewOpen(true);
   }
 
   function handleCloseSyncReview() {
     setSyncReviewOpen(false);
     setSyncReviewStep("artifacts");
+    setShaderSyncDecision("undecided");
+    setPendingShaderSync(false);
   }
 
   function handleSyncReviewNext() {
@@ -577,7 +595,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   function handleConfirmSyncFromReview() {
+    const applyShaderSettings = shaderSettingsPreview.data?.requiresDecision
+      ? shaderSyncDecision === "sync"
+      : false;
     handleCloseSyncReview();
+    setPendingShaderSync(applyShaderSettings);
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
@@ -586,7 +608,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setSyncAlreadySyncedConfirmOpen(true);
       return;
     }
-    sync.mutate();
+    sync.mutate({ syncShaderSettings: applyShaderSettings });
   }
 
   function handleOpenAddEntry(category: ManifestArtifactCategory) {
@@ -1108,6 +1130,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 error={optionsSyncPreview.error}
                 onToggleIgnore={(key, ignored) => setOptionsSyncIgnored.mutate({ key, ignored })}
                 togglingIgnore={setOptionsSyncIgnored.isPending}
+                shaderPreview={shaderSettingsPreview.data}
+                shaderLoading={shaderSettingsPreview.isLoading || shaderSettingsPreview.isFetching}
+                shaderError={shaderSettingsPreview.error}
+                shaderDecision={shaderSyncDecision}
+                onShaderDecisionChange={setShaderSyncDecision}
               />
             )}
           </DialogBody>
@@ -1129,7 +1156,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 <Button variant="secondary" onClick={() => setSyncReviewStep("artifacts")}>
                   <ChevronLeft /> BACK
                 </Button>
-                <Button onClick={handleConfirmSyncFromReview} disabled={sync.isPending}>
+                <Button
+                  onClick={handleConfirmSyncFromReview}
+                  disabled={sync.isPending || !!shaderSettingsPreview.data?.requiresDecision && shaderSyncDecision === "undecided"}
+                >
                   {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                   CONTINUE TO SYNC
                 </Button>
@@ -1375,7 +1405,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               variant="destructive"
               onClick={() => {
                 setSyncDeleteConfirmOpen(false);
-                sync.mutate();
+                sync.mutate({ syncShaderSettings: pendingShaderSync });
               }}
             >
               DELETE + SYNC
@@ -1407,7 +1437,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <Button
               onClick={() => {
                 setSyncAlreadySyncedConfirmOpen(false);
-                sync.mutate();
+                sync.mutate({ syncShaderSettings: pendingShaderSync });
               }}
             >
               SYNC AGAIN
@@ -2461,7 +2491,7 @@ function PublishActionChip({ action }: { action: PublishAction }) {
 }
 
 type PublishTabDefinition = {
-  id: "mods" | "shaderpacks" | "resourcepacks" | "configs" | "options" | "others";
+  id: "mods" | "shaderpacks" | "resourcepacks" | "shader-settings" | "configs" | "options" | "others";
   label: string;
   description: string;
   items: PublishScanReport["items"];
@@ -2487,6 +2517,12 @@ function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefiniti
       label: "RESOURCEPACKS",
       description: "Resource pack archives staged for manifest resourcepacks list.",
       match: (item) => item.category === "resourcepacks",
+    },
+    {
+      id: "shader-settings",
+      label: "SHADER SETTINGS",
+      description: "Iris selector file plus shader preset .txt files alongside shaderpacks.",
+      match: (item) => item.category === "shader-settings",
     },
     {
       id: "configs",
@@ -2605,6 +2641,11 @@ function OptionsReviewStep({
   error,
   onToggleIgnore,
   togglingIgnore,
+  shaderPreview,
+  shaderLoading,
+  shaderError,
+  shaderDecision,
+  onShaderDecisionChange,
 }: {
   hasTrackedOptionsFile: boolean;
   preview?: OptionsSyncPreview;
@@ -2612,14 +2653,21 @@ function OptionsReviewStep({
   error: unknown;
   onToggleIgnore: (key: string, ignored: boolean) => void;
   togglingIgnore: boolean;
+  shaderPreview?: ShaderSettingsPreview;
+  shaderLoading: boolean;
+  shaderError: unknown;
+  shaderDecision: "undecided" | "sync" | "skip";
+  onShaderDecisionChange: (decision: "undecided" | "sync" | "skip") => void;
 }) {
-  const [showIgnored, setShowIgnored] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(true);
+  const hasShaderSettings = shaderLoading || !!shaderError || !!shaderPreview?.hasPackIrisFile;
+  const shaderChangeCount = (shaderPreview?.irisChanges.length ?? 0) + (shaderPreview?.presetChanges.length ?? 0);
 
-  if (!hasTrackedOptionsFile) {
+  if (!hasTrackedOptionsFile && !hasShaderSettings) {
     return (
       <Card>
         <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
-          No tracked <span className="mx-1 font-mono text-text-high">options.txt</span> preset for this pack yet.
+          No tracked options or shader preset files for this pack yet.
         </CardContent>
       </Card>
     );
@@ -2646,12 +2694,19 @@ function OptionsReviewStep({
     );
   }
 
-  if (!preview) {
+  if (hasTrackedOptionsFile && !preview) {
     return null;
   }
 
-  const defaultTab = preview.groups.find((group) => group.changes.length > 0)?.category ?? "keybinds";
-  const changedCount = preview.groups.reduce((sum, group) => sum + group.changes.length, 0);
+  const reviewTabs: Array<OptionsSyncPreview["groups"][number]["category"] | "shader-settings"> = preview
+    ? ["keybinds", "video", ...(hasShaderSettings ? (["shader-settings"] as const) : []), "other"]
+    : ["shader-settings"];
+  const defaultTab =
+    preview?.groups.find((group) => group.changes.length > 0)?.category ??
+    (hasShaderSettings && shaderChangeCount > 0 ? "shader-settings" : reviewTabs[0]);
+  const changedCount = preview?.groups.reduce((sum, group) => sum + group.changes.length, 0) ?? 0;
+  const totalChangedCount = changedCount + shaderChangeCount;
+  const groupsByCategory = new Map((preview?.groups ?? []).map((group) => [group.category, group]));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
@@ -2659,16 +2714,17 @@ function OptionsReviewStep({
         <Card variant="window" className="flex min-h-0 flex-col">
           <CardWindowBar>
             <CardWindowTab>OPTION SUMMARY</CardWindowTab>
-            <CardStatus>{changedCount} CHANGES</CardStatus>
+            <CardStatus>{totalChangedCount} CHANGES</CardStatus>
           </CardWindowBar>
           <CardContent className="min-h-0 flex-1 p-0">
             <ScrollArea className="h-full px-4 py-4">
               <div className="flex flex-col gap-3">
                 <div className="grid gap-2">
-                  <Row k="PACK FILE" v={preview.hasPackFile ? "FOUND" : "MISSING"} />
-                  <Row k="INSTANCE FILE" v={preview.hasInstanceFile ? "FOUND" : "MISSING"} />
-                  <Row k="IGNORED KEYS" v={String(preview.ignoredKeys.length)} />
-                  {preview.groups.map((group) => (
+                  <Row k="PACK FILE" v={preview?.hasPackFile ? "FOUND" : "MISSING"} />
+                  <Row k="INSTANCE FILE" v={preview?.hasInstanceFile ? "FOUND" : "MISSING"} />
+                  <Row k="IGNORED KEYS" v={String(preview?.ignoredKeys.length ?? 0)} />
+                  {hasShaderSettings ? <Row k="SHADER SETTINGS" v={String(shaderChangeCount)} /> : null}
+                  {(preview?.groups ?? []).map((group) => (
                     <Row key={group.category} k={group.label} v={String(group.changes.length)} />
                   ))}
                 </div>
@@ -2677,110 +2733,319 @@ function OptionsReviewStep({
           </CardContent>
         </Card>
 
-        <Tabs defaultValue={defaultTab} className="flex min-h-0 flex-col gap-4 md:min-w-0">
-          <TabsList className="flex-wrap gap-2">
-            {preview.groups.map((group) => (
-              <TabsTrigger key={group.category} value={group.category}>
-                <span>{group.label}</span>
-                <span className="font-mono text-[10px] tabular-nums text-text-low">{group.changes.length}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {preview.groups.map((group) => {
-            const visibleChanges = sortOptionsSyncChanges(group.changes).filter(
-              (change) => showIgnored || !change.ignored,
-            );
+        <div className="flex min-h-0 flex-col gap-3 md:min-w-0">
+          {preview || hasShaderSettings ? (
+            <Tabs defaultValue={defaultTab} className="flex min-h-0 flex-1 flex-col gap-4">
+              <TabsList className="flex-wrap gap-2">
+                {reviewTabs.map((tab) => {
+                  const group = tab === "shader-settings" ? null : groupsByCategory.get(tab);
+                  const label = tab === "shader-settings" ? "SHADER SETTINGS" : group?.label ?? tab.toUpperCase();
+                  const count = tab === "shader-settings" ? shaderChangeCount : group?.changes.length ?? 0;
+                  return (
+                    <TabsTrigger key={tab} value={tab}>
+                      <span>{label}</span>
+                      <span className="font-mono text-[10px] tabular-nums text-text-low">{count}</span>
+                    </TabsTrigger>
+                  );
+                })}
+              </TabsList>
+              {reviewTabs.map((tab) => {
+                if (tab === "shader-settings") {
+                  return (
+                    <TabsContent key={tab} value={tab} className="min-h-0 flex-1 outline-none">
+                      <ShaderSettingsTab
+                        preview={shaderPreview}
+                        loading={shaderLoading}
+                        error={shaderError}
+                        decision={shaderDecision}
+                        onDecisionChange={onShaderDecisionChange}
+                      />
+                    </TabsContent>
+                  );
+                }
 
-            return (
-              <TabsContent key={group.category} value={group.category} className="min-h-0 flex-1 outline-none">
-                <Card variant="window" className="flex h-full min-h-0 flex-col">
-                <CardWindowBar>
-                  <CardWindowTab>{group.label}</CardWindowTab>
-                  <CardStatus>{visibleChanges.length} CHANGES</CardStatus>
-                  <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
-                    <span>SHOW IGNORED</span>
-                    <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
-                  </div>
-                </CardWindowBar>
-                <CardContent className="min-h-0 flex-1 p-0">
-                  {visibleChanges.length > 0 ? (
-                    <ScrollArea className="h-full">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="px-3 py-2">ACTION</TableHead>
-                            <TableHead className="px-3 py-2">KEY</TableHead>
-                            <TableHead className="px-3 py-2">PACK VALUE</TableHead>
-                            <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
-                            <TableHead className="px-3 py-2 text-center">IGNORE</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody className="divide-y-0">
-                          {visibleChanges.map((change) => (
-                            <TableRow
-                              key={`${group.category}:${change.key}`}
-                              className={cn(
-                                "h-8 border-l-2",
-                                getOptionsChangeRowTone(change.action),
-                                change.ignored && "opacity-45",
-                              )}
-                            >
-                              <TableCell className="px-3 py-1.5 align-top">
-                                <SyncPlanActionChip action={change.action} />
-                              </TableCell>
-                              <TableCell className="px-3 py-1.5 align-top">
-                                <OptionsPreviewKey optionKey={change.key} />
-                              </TableCell>
-                              <TableCell className="px-3 py-1.5 align-top">
-                                <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
-                              </TableCell>
-                              <TableCell className="px-3 py-1.5 align-top">
-                                <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
-                              </TableCell>
-                              <TableCell
-                                className="cursor-pointer px-3 py-1.5 align-middle"
-                                role="button"
-                                tabIndex={togglingIgnore ? -1 : 0}
-                                title={change.ignored ? "Stop ignoring key" : "Ignore key"}
-                                onClick={() => {
-                                  if (!togglingIgnore) {
-                                    onToggleIgnore(change.key, !change.ignored);
-                                  }
-                                }}
-                                onKeyDown={(event) => {
-                                  if ((event.key === "Enter" || event.key === " ") && !togglingIgnore) {
-                                    event.preventDefault();
-                                    onToggleIgnore(change.key, !change.ignored);
-                                  }
-                                }}
-                              >
-                                <div className="flex items-center justify-center">
-                                  <Checkbox
-                                    checked={change.ignored}
-                                    disabled={togglingIgnore}
-                                    aria-label={`Ignore ${change.key}`}
-                                    className="pointer-events-none"
-                                  />
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </ScrollArea>
-                  ) : (
-                    <div className="px-4 py-8 text-center text-sm text-text-low">
-                      {showIgnored
-                        ? `No changes in ${group.label.toLowerCase()}.`
-                        : `No visible changes in ${group.label.toLowerCase()}.`}
-                    </div>
-                  )}
-                </CardContent>
-                </Card>
-              </TabsContent>
-            );
-          })}
-        </Tabs>
+                const group = groupsByCategory.get(tab);
+                if (!group) {
+                  return null;
+                }
+
+                const visibleChanges = sortOptionsSyncChanges(group.changes).filter(
+                  (change) => showIgnored || !change.ignored,
+                );
+
+                return (
+                  <TabsContent key={group.category} value={group.category} className="min-h-0 flex-1 outline-none">
+                    <Card variant="window" className="flex h-full min-h-0 flex-col">
+                      <CardWindowBar>
+                        <CardWindowTab>{group.label}</CardWindowTab>
+                        <CardStatus>{visibleChanges.length} CHANGES</CardStatus>
+                        <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
+                          <span>SHOW IGNORED</span>
+                          <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                        </div>
+                      </CardWindowBar>
+                      <CardContent className="min-h-0 flex-1 p-0">
+                        {visibleChanges.length > 0 ? (
+                          <ScrollArea className="h-full">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="px-3 py-2">ACTION</TableHead>
+                                  <TableHead className="px-3 py-2">KEY</TableHead>
+                                  <TableHead className="px-3 py-2">PACK VALUE</TableHead>
+                                  <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
+                                  <TableHead className="px-3 py-2 text-center">IGNORE</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody className="divide-y-0">
+                                {visibleChanges.map((change) => (
+                                  <TableRow
+                                    key={`${group.category}:${change.key}`}
+                                    className={cn(
+                                      "h-8 border-l-2",
+                                      getOptionsChangeRowTone(change.action),
+                                      change.ignored && "opacity-45",
+                                    )}
+                                  >
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <SyncPlanActionChip action={change.action} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <OptionsPreviewKey optionKey={change.key} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
+                                    </TableCell>
+                                    <TableCell
+                                      className="cursor-pointer px-3 py-1.5 align-middle"
+                                      role="button"
+                                      tabIndex={togglingIgnore ? -1 : 0}
+                                      title={change.ignored ? "Stop ignoring key" : "Ignore key"}
+                                      onClick={() => {
+                                        if (!togglingIgnore) {
+                                          onToggleIgnore(change.key, !change.ignored);
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if ((event.key === "Enter" || event.key === " ") && !togglingIgnore) {
+                                          event.preventDefault();
+                                          onToggleIgnore(change.key, !change.ignored);
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex items-center justify-center">
+                                        <Checkbox
+                                          checked={change.ignored}
+                                          disabled={togglingIgnore}
+                                          aria-label={`Ignore ${change.key}`}
+                                          className="pointer-events-none"
+                                        />
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </ScrollArea>
+                        ) : (
+                          <div className="px-4 py-8 text-center text-sm text-text-low">
+                            {showIgnored
+                              ? `No changes in ${group.label.toLowerCase()}.`
+                              : `No visible changes in ${group.label.toLowerCase()}.`}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </TabsContent>
+                );
+              })}
+            </Tabs>
+          ) : (
+            <Card>
+              <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
+                No tracked <span className="mx-1 font-mono text-text-high">options.txt</span> preset for this pack yet.
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShaderSettingsTab({
+  preview,
+  loading,
+  error,
+  decision,
+  onDecisionChange,
+}: {
+  preview?: ShaderSettingsPreview;
+  loading: boolean;
+  error: unknown;
+  decision: "undecided" | "sync" | "skip";
+  onDecisionChange: (decision: "undecided" | "sync" | "skip") => void;
+}) {
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center gap-3 px-4 py-3 text-sm text-text-low">
+          <Loader2 className="size-4 animate-spin text-brand-core" />
+          Reading shader settings...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="size-4" />
+        <AlertTitle>SHADER PREVIEW FAILED</AlertTitle>
+        <AlertDescription>{formatError(error)}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!preview?.hasPackIrisFile) {
+    return (
+      <Card>
+        <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
+          No tracked shader settings for this pack yet.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const localShader = preview.localShaderPack ?? "NONE";
+  const packShader = preview.packShaderPack ?? "NONE";
+  const statusLabel =
+    preview.status === "disabled-local"
+      ? "SHADERS OFF LOCALLY"
+      : preview.status === "mismatch"
+        ? "SHADER MISMATCH"
+        : preview.status === "missing-preset"
+          ? "PACK PRESET MISSING"
+          : "SHADER PRESET READY";
+
+  return (
+    <Card variant="window" className="flex h-full min-h-0 flex-col">
+      <CardWindowBar>
+        <CardWindowTab>SHADER SETTINGS</CardWindowTab>
+        <CardStatus>{statusLabel}</CardStatus>
+      </CardWindowBar>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-4 p-4">
+        <div className="grid gap-2 md:grid-cols-2">
+          <Row k="LOCAL SHADER" v={localShader} />
+          <Row k="PACK SHADER" v={packShader} />
+          <Row k="IRIS DIFFS" v={String(preview.irisDiffCount)} />
+          <Row k="PRESET DIFFS" v={String(preview.presetDiffCount)} />
+        </div>
+        <p className="text-xs text-text-low [text-wrap:pretty]">
+          {preview.status === "disabled-local"
+            ? "Shaders off locally. Sync can still write pack shader selection + preset."
+            : preview.status === "mismatch"
+              ? "Local shader differs from pack shader preset. Sync shader applies pack iris.properties + matching preset file."
+              : preview.status === "missing-preset"
+                ? "Pack iris.properties exists, but matching shader preset .txt missing. Sync shader will only update iris.properties."
+                : "Sync shader copies pack iris.properties and matching shader preset .txt when present."}
+        </p>
+        {preview.requiresDecision ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={decision === "sync" ? "default" : "outline"}
+              onClick={() => onDecisionChange("sync")}
+            >
+              SYNC SHADER
+            </Button>
+            <Button
+              variant={decision === "skip" ? "secondary" : "outline"}
+              onClick={() => onDecisionChange("skip")}
+            >
+              IGNORE THIS SYNC
+            </Button>
+          </div>
+        ) : (
+          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">No shader sync decision needed.</p>
+        )}
+        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-2">
+          <ShaderDiffTable
+            title="IRIS.PROPERTIES"
+            description="Pack config values vs local instance config/iris.properties."
+            changes={preview.irisChanges}
+          />
+          <ShaderDiffTable
+            title="SHADER PRESET"
+            description="Pack shaderpacks/*.txt values vs local active preset sidecar."
+            changes={preview.presetChanges}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ShaderDiffTable({
+  title,
+  description,
+  changes,
+}: {
+  title: string;
+  description: string;
+  changes: ShaderSettingsChange[];
+}) {
+  const sortedChanges = sortShaderSettingsChanges(changes);
+
+  return (
+    <div className="flex min-h-0 flex-col overflow-hidden border border-line-soft/20 bg-surface-sunken/30">
+      <div className="flex items-center justify-between gap-3 border-b border-line-soft/20 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">{title}</p>
+          <p className="text-xs text-text-low [text-wrap:pretty]">{description}</p>
+        </div>
+        <span className="font-mono text-[10px] tabular-nums text-text-low">{sortedChanges.length}</span>
+      </div>
+      <div className="min-h-0 flex-1">
+        {sortedChanges.length > 0 ? (
+          <ScrollArea className="h-full">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-3 py-2">ACTION</TableHead>
+                  <TableHead className="px-3 py-2">KEY</TableHead>
+                  <TableHead className="px-3 py-2">PACK VALUE</TableHead>
+                  <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y-0">
+                {sortedChanges.map((change) => (
+                  <TableRow
+                    key={`${title}:${change.key}`}
+                    className={cn("h-8 border-l-2", getOptionsChangeRowTone(change.action))}
+                  >
+                    <TableCell className="px-3 py-1.5 align-top">
+                      <SyncPlanActionChip action={change.action} />
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 align-top">
+                      <OptionsPreviewKey optionKey={change.key} />
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 align-top">
+                      <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 align-top">
+                      <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        ) : (
+          <div className="px-4 py-8 text-center text-sm text-text-low">No changed keys.</div>
+        )}
       </div>
     </div>
   );
@@ -2819,6 +3084,12 @@ function sortOptionsSyncChanges(changes: OptionsSyncPreview["groups"][number]["c
       action === "remove" ? 0 : action === "update" ? 1 : action === "add" ? 2 : 3;
     return order(left.action) - order(right.action) || left.key.localeCompare(right.key);
   });
+}
+
+function sortShaderSettingsChanges(changes: ShaderSettingsChange[]) {
+  const order = (action: PublishAction) =>
+    action === "remove" ? 0 : action === "update" ? 1 : action === "add" ? 2 : 3;
+  return [...changes].sort((left, right) => order(left.action) - order(right.action) || left.key.localeCompare(right.key));
 }
 
 function getOptionsChangeRowTone(action: PublishAction) {
@@ -3133,6 +3404,9 @@ function changelogActionMeta(action: PackChangelogItem["action"]) {
 function labelCategory(category: PublishCategory, relativePath?: string) {
   if (category === "root" && relativePath === "options.txt") {
     return "OPTIONS";
+  }
+  if (category === "shader-settings") {
+    return "SHADER SETTINGS";
   }
   if (category === "root") {
     return "ROOT";

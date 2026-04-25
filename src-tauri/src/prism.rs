@@ -8,15 +8,13 @@ use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 use flate2::read::GzDecoder;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
+use tar::Archive;
 use uuid::Uuid;
 use zip::ZipArchive;
 
@@ -63,15 +61,6 @@ pub struct LaunchProfile {
     pub java_path: Option<String>,
     pub extra_jvm_args: String,
     pub auto_java: bool,
-    #[serde(default)]
-    pub show_console: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LaunchDefaults {
-    #[serde(default)]
-    pub show_console: bool,
 }
 
 impl Default for LaunchProfile {
@@ -82,7 +71,6 @@ impl Default for LaunchProfile {
             java_path: None,
             extra_jvm_args: String::new(),
             auto_java: true,
-            show_console: false,
         }
     }
 }
@@ -193,27 +181,10 @@ pub fn save_settings(settings: PrismSettings) -> Result<PrismSettings, PrismErro
     Ok(settings)
 }
 
-pub fn get_launch_defaults() -> Result<LaunchDefaults, PrismError> {
-    let path = paths::launch_defaults_path()?;
-    if !path.exists() {
-        return Ok(LaunchDefaults::default());
-    }
-    let bytes = std::fs::read(path)?;
-    let defaults = serde_json::from_slice::<LaunchDefaults>(&bytes).map_err(anyhow::Error::from)?;
-    Ok(defaults)
-}
-
-pub fn save_launch_defaults(defaults: LaunchDefaults) -> Result<LaunchDefaults, PrismError> {
-    let path = paths::launch_defaults_path()?;
-    let bytes = serde_json::to_vec_pretty(&defaults).map_err(anyhow::Error::from)?;
-    std::fs::write(path, bytes)?;
-    Ok(defaults)
-}
-
 pub fn load_launch_profile(pack_id: &str) -> Result<LaunchProfile, PrismError> {
     let path = paths::launch_profile_path(pack_id)?;
     if !path.exists() {
-        return Ok(default_launch_profile()?);
+        return Ok(LaunchProfile::default());
     }
     let bytes = std::fs::read(path)?;
     let profile = serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
@@ -243,42 +214,6 @@ pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
         }
     }
     Ok(false)
-}
-
-fn default_launch_profile() -> Result<LaunchProfile, PrismError> {
-    let defaults = get_launch_defaults().unwrap_or_default();
-
-    if let Some(java_path) = preferred_managed_java_path()? {
-        return Ok(LaunchProfile {
-            java_path: Some(java_path),
-            auto_java: false,
-            show_console: defaults.show_console,
-            ..LaunchProfile::default()
-        });
-    }
-
-    Ok(LaunchProfile {
-        show_console: defaults.show_console,
-        ..LaunchProfile::default()
-    })
-}
-
-fn preferred_managed_java_path() -> Result<Option<String>, PrismError> {
-    let mut runtimes = std::fs::read_dir(paths::managed_java_runtimes_dir()?)?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect::<Vec<_>>();
-
-    runtimes.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
-
-    for runtime in runtimes {
-        if let Some(java_path) = find_java_binary(&runtime) {
-            return Ok(Some(java_path.to_string_lossy().to_string()));
-        }
-    }
-
-    Ok(None)
 }
 
 pub fn clear_onboarding_settings(major: u32) -> Result<PrismSettings, PrismError> {
@@ -852,16 +787,6 @@ fn apply_launch_profile_to_cfg(settings: &mut BTreeMap<String, String>, profile:
         settings.insert("OverrideJavaLocation".to_string(), "false".to_string());
         settings.remove("JavaPath");
     }
-
-    if profile.show_console {
-        settings.insert("OverrideConsole".to_string(), "true".to_string());
-        settings.insert("ShowConsole".to_string(), "true".to_string());
-        settings.insert("ShowConsoleOnError".to_string(), "true".to_string());
-    } else {
-        settings.insert("OverrideConsole".to_string(), "false".to_string());
-        settings.remove("ShowConsole");
-        settings.remove("ShowConsoleOnError");
-    }
 }
 
 fn write_managed_files(
@@ -1199,28 +1124,39 @@ fn install_prism_release(
     }
     std::fs::create_dir_all(&install_dir)?;
 
-    if asset_name.ends_with(".zip") {
-        extract_zip_archive(&bytes, &install_dir)?;
-    } else if asset_name.ends_with(".tar.gz") {
-        extract_tar_gz_archive(&bytes, &install_dir)?;
-    } else {
-        return Err(PrismError::UnsupportedPlatform(format!(
-            "{} asset {}",
-            managed_prism_target_label(),
-            asset_name
-        )));
+    #[cfg(target_os = "linux")]
+    {
+        let decoder = GzDecoder::new(Cursor::new(bytes));
+        let mut archive = Archive::new(decoder);
+        archive.unpack(&install_dir)?;
+
+        let binary_path = install_dir.join("PrismLauncher");
+        if !binary_path.is_file() {
+            return Err(PrismError::Other(anyhow::anyhow!(
+                "managed launcher missing executable at {}",
+                binary_path.display()
+            )));
+        }
+
+        return Ok(ManagedPrismInstall {
+            binary_path: binary_path.display().to_string(),
+            data_dir: install_dir.display().to_string(),
+            install_dir: install_dir.display().to_string(),
+            version: release_tag.to_string(),
+            asset_name: asset_name.to_string(),
+            release_url: release_url.to_string(),
+            offline_supported: true,
+        });
     }
 
-    let binary_path = managed_prism_binary_path(&install_dir)?;
-    Ok(ManagedPrismInstall {
-        binary_path: binary_path.display().to_string(),
-        data_dir: install_dir.display().to_string(),
-        install_dir: install_dir.display().to_string(),
-        version: release_tag.to_string(),
-        asset_name: asset_name.to_string(),
-        release_url: release_url.to_string(),
-        offline_supported: true,
-    })
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = release_url;
+        let _ = asset_name;
+        let _ = bytes;
+        let _ = install_dir;
+        Err(PrismError::UnsupportedPlatform(managed_prism_target_label()))
+    }
 }
 
 fn managed_prism_target_label() -> String {
@@ -1228,46 +1164,19 @@ fn managed_prism_target_label() -> String {
 }
 
 fn managed_prism_asset_name(tag: &str) -> Option<String> {
-    managed_prism_asset_name_for(std::env::consts::OS, std::env::consts::ARCH, tag)
-}
-
-fn managed_prism_asset_name_for(os: &str, arch: &str, tag: &str) -> Option<String> {
-    match os {
-        "linux" => match arch {
+    #[cfg(target_os = "linux")]
+    {
+        return match std::env::consts::ARCH {
             "x86_64" => Some(format!("PrismLauncher-Linux-Qt6-Portable-{tag}.tar.gz")),
             "aarch64" => Some(format!("PrismLauncher-Linux-aarch64-Qt6-Portable-{tag}.tar.gz")),
             _ => None,
-        },
-        "macos" => Some(format!("PrismLauncher-macOS-{tag}.zip")),
-        "windows" => match arch {
-            "x86_64" => Some(format!("PrismLauncher-Windows-MSVC-Portable-{tag}.zip")),
-            "aarch64" => Some(format!("PrismLauncher-Windows-MSVC-arm64-Portable-{tag}.zip")),
-            _ => None,
-        },
-        _ => None,
+        };
     }
-}
 
-fn managed_prism_binary_path(install_dir: &Path) -> Result<PathBuf, PrismError> {
-    let Some(relative_path) = managed_prism_binary_relative_path_for(std::env::consts::OS) else {
-        return Err(PrismError::UnsupportedPlatform(managed_prism_target_label()));
-    };
-    let binary_path = install_dir.join(relative_path);
-    if !binary_path.is_file() {
-        return Err(PrismError::Other(anyhow::anyhow!(
-            "managed launcher missing executable at {}",
-            binary_path.display()
-        )));
-    }
-    Ok(binary_path)
-}
-
-fn managed_prism_binary_relative_path_for(os: &str) -> Option<&'static str> {
-    match os {
-        "linux" => Some("PrismLauncher"),
-        "macos" => Some("Prism Launcher.app/Contents/MacOS/prismlauncher"),
-        "windows" => Some("prismlauncher.exe"),
-        _ => None,
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = tag;
+        None
     }
 }
 
@@ -1457,17 +1366,6 @@ fn extract_zip_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismErro
         let Some(relative_path) = entry.enclosed_name().map(|value| value.to_path_buf()) else {
             continue;
         };
-        if relative_path
-            .components()
-            .next()
-            .and_then(|component| match component {
-                Component::Normal(value) => value.to_str(),
-                _ => None,
-            })
-            == Some("__MACOSX")
-        {
-            continue;
-        }
         let output_path = install_dir.join(relative_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&output_path)?;
@@ -1478,58 +1376,8 @@ fn extract_zip_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismErro
         }
         let mut output = std::fs::File::create(&output_path)?;
         std::io::copy(&mut entry, &mut output)?;
-        #[cfg(unix)]
-        if let Some(mode) = entry.unix_mode() {
-            std::fs::set_permissions(&output_path, PermissionsExt::from_mode(mode))?;
-        }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{managed_prism_asset_name_for, managed_prism_binary_relative_path_for};
-
-    #[test]
-    fn managed_prism_asset_names_cover_supported_platforms() {
-        assert_eq!(
-            managed_prism_asset_name_for("linux", "x86_64", "11.0.2-1").as_deref(),
-            Some("PrismLauncher-Linux-Qt6-Portable-11.0.2-1.tar.gz")
-        );
-        assert_eq!(
-            managed_prism_asset_name_for("linux", "aarch64", "11.0.2-1").as_deref(),
-            Some("PrismLauncher-Linux-aarch64-Qt6-Portable-11.0.2-1.tar.gz")
-        );
-        assert_eq!(
-            managed_prism_asset_name_for("macos", "x86_64", "11.0.2-1").as_deref(),
-            Some("PrismLauncher-macOS-11.0.2-1.zip")
-        );
-        assert_eq!(
-            managed_prism_asset_name_for("windows", "x86_64", "11.0.2-1").as_deref(),
-            Some("PrismLauncher-Windows-MSVC-Portable-11.0.2-1.zip")
-        );
-        assert_eq!(
-            managed_prism_asset_name_for("windows", "aarch64", "11.0.2-1").as_deref(),
-            Some("PrismLauncher-Windows-MSVC-arm64-Portable-11.0.2-1.zip")
-        );
-    }
-
-    #[test]
-    fn managed_prism_asset_names_reject_unsupported_targets() {
-        assert_eq!(managed_prism_asset_name_for("windows", "x86", "11.0.2-1"), None);
-        assert_eq!(managed_prism_asset_name_for("freebsd", "x86_64", "11.0.2-1"), None);
-    }
-
-    #[test]
-    fn managed_prism_binary_paths_cover_supported_platforms() {
-        assert_eq!(managed_prism_binary_relative_path_for("linux"), Some("PrismLauncher"));
-        assert_eq!(
-            managed_prism_binary_relative_path_for("macos"),
-            Some("Prism Launcher.app/Contents/MacOS/prismlauncher")
-        );
-        assert_eq!(managed_prism_binary_relative_path_for("windows"), Some("prismlauncher.exe"));
-        assert_eq!(managed_prism_binary_relative_path_for("freebsd"), None);
-    }
 }
 
 fn extract_tar_gz_archive(bytes: &[u8], install_dir: &Path) -> Result<(), PrismError> {

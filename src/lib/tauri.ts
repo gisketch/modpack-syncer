@@ -53,6 +53,7 @@ export type PublishCategory =
   | "mods"
   | "resourcepacks"
   | "shaderpacks"
+  | "shader-settings"
   | "config"
   | "kubejs"
   | "root";
@@ -119,6 +120,37 @@ export type OptionsSyncPreview = {
   ignoredKeys: string[];
 };
 
+export type ShaderSettingsStatus =
+  | "missing-pack-config"
+  | "matched"
+  | "mismatch"
+  | "disabled-local"
+  | "missing-preset";
+
+export type ShaderSettingsPreview = {
+  status: ShaderSettingsStatus;
+  hasPackIrisFile: boolean;
+  hasInstanceIrisFile: boolean;
+  packShaderPack?: string | null;
+  localShaderPack?: string | null;
+  packShadersEnabled: boolean;
+  localShadersEnabled: boolean;
+  packPresetPath?: string | null;
+  localPresetPath?: string | null;
+  irisDiffCount: number;
+  presetDiffCount: number;
+  irisChanges: ShaderSettingsChange[];
+  presetChanges: ShaderSettingsChange[];
+  requiresDecision: boolean;
+};
+
+export type ShaderSettingsChange = {
+  key: string;
+  packValue?: string | null;
+  instanceValue?: string | null;
+  action: PublishAction;
+};
+
 export type PackChangelogItem = {
   action: PublishAction;
   category: PublishCategory;
@@ -154,18 +186,18 @@ export type PrismLocation = {
   binary: string;
 };
 
+export type PrismSettings = {
+  binaryPath?: string | null;
+  dataDir?: string | null;
+  offlineUsername?: string | null;
+};
+
 export type AppStorageSettings = {
   defaultDataDir: string;
   dataDir: string;
   overrideDataDir?: string | null;
   isDefault: boolean;
   confirmed: boolean;
-};
-
-export type PrismSettings = {
-  binaryPath?: string | null;
-  dataDir?: string | null;
-  offlineUsername?: string | null;
 };
 
 export type PrismAccountStatus = {
@@ -198,7 +230,7 @@ export type LaunchProfile = {
   javaPath?: string | null;
   extraJvmArgs: string;
   autoJava: boolean;
-  showConsole: boolean;
+  showConsole?: boolean;
 };
 
 export type LaunchDefaults = {
@@ -278,8 +310,7 @@ export const tauri = {
   setPrismSettings: (binaryPath?: string | null, dataDir?: string | null, offlineUsername?: string | null) =>
     invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
   getLaunchDefaults: () => invoke<LaunchDefaults>("get_launch_defaults"),
-  setLaunchDefaults: (defaults: LaunchDefaults) =>
-    invoke<LaunchDefaults>("set_launch_defaults", { defaults }),
+  setLaunchDefaults: (defaults: LaunchDefaults) => invoke<LaunchDefaults>("set_launch_defaults", { defaults }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),
@@ -291,8 +322,8 @@ export const tauri = {
   installAdoptiumJava: (packId: string, major: number, imageType: string) =>
     invoke<InstalledJavaRuntime>("install_adoptium_java", { packId, major, imageType }),
   installManagedPrism: () => invoke<ManagedPrismInstall>("install_managed_prism"),
-  syncInstance: (packId: string, instanceName?: string) =>
-    invoke<SyncInstanceReport>("sync_instance", { packId, instanceName }),
+  syncInstance: (packId: string, instanceName?: string, syncShaderSettings?: boolean) =>
+    invoke<SyncInstanceReport>("sync_instance", { packId, instanceName, syncShaderSettings }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   launchPack: (packId: string, instanceName?: string) => invoke<void>("launch_pack", { packId, instanceName }),
   getInstanceMinecraftDir: (instanceName: string) =>
@@ -301,11 +332,8 @@ export const tauri = {
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
   suggestPublishVersion: (packId: string) =>
     invoke<string>("suggest_publish_version", { packId }),
-  previewModrinthMod: (
-    packId: string,
-    identifier: string,
-    category: ManifestArtifactCategory = "mods",
-  ) => invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
+  previewModrinthMod: (packId: string, identifier: string, category?: ManifestArtifactCategory) =>
+    invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
   addModrinthMod: (
     packId: string,
     category: ManifestArtifactCategory,
@@ -316,20 +344,17 @@ export const tauri = {
   deleteInstanceMod: (
     packId: string,
     filename: string,
-    category: ManifestArtifactCategory = "mods",
+    category?: ManifestArtifactCategory,
     instanceName?: string,
   ) => invoke<void>("delete_instance_mod", { packId, filename, category, instanceName }),
-  unpublishedArtifactStatuses: (
-    packId: string,
-    category: ManifestArtifactCategory,
-    instanceName?: string,
-  ) => invoke<ModStatus[]>("unpublished_artifact_statuses", { packId, category, instanceName }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>
     invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
   previewOptionsSync: (packId: string, instanceName?: string) =>
     invoke<OptionsSyncPreview>("preview_options_sync", { packId, instanceName }),
+  previewShaderSettingsSync: (packId: string, instanceName?: string) =>
+    invoke<ShaderSettingsPreview>("preview_shader_settings_sync", { packId, instanceName }),
   setOptionsSyncIgnored: (packId: string, key: string, ignored: boolean, instanceName?: string) =>
     invoke<string[]>("set_options_sync_ignored", { packId, key, ignored, instanceName }),
   applyInstancePublish: (packId: string, instanceName?: string, version?: string) =>

@@ -1,12 +1,12 @@
 [package]
-name = "gisketch_s_modpack_syncer"
-version = "0.9.1"
-description = "gisketch//s_modpack_syncer Minecraft modpack syncer + Prism launcher wrapper"
+name = "modsync"
+version = "0.1.0"
+description = "Minecraft modpack syncer + Prism launcher wrapper"
 authors = ["gisketch"]
 edition = "2021"
 
 [lib]
-name = "gisketch_s_modpack_syncer_lib"
+name = "modsync_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -21,7 +21,6 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-os = "2"
 tauri-plugin-log = "2"
-tauri-plugin-updater = "2"
 
 # Async + HTTP
 tokio = { version = "1", features = ["full"] }

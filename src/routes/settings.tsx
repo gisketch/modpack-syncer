@@ -19,8 +19,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { useAppUpdate } from "@/hooks/use-app-update";
-import { useAppVersion } from "@/hooks/use-app-version";
 import { formatError } from "@/lib/format-error";
 import { type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
 import { useAppStore } from "@/stores/app-store";
@@ -28,8 +26,6 @@ import { useNav } from "@/stores/nav-store";
 
 export function SettingsRoute() {
   const go = useNav((s) => s.go);
-  const appUpdate = useAppUpdate();
-  const appVersion = useAppVersion();
   const adminModeByPack = useAppStore((s) => s.adminModeByPack);
   const setPackAdminMode = useAppStore((s) => s.setPackAdminMode);
   const qc = useQueryClient();
@@ -49,11 +45,6 @@ export function SettingsRoute() {
   const prismSettings = useQuery({
     queryKey: ["prism-settings"],
     queryFn: () => tauri.getPrismSettings(),
-    retry: false,
-  });
-  const launchDefaults = useQuery({
-    queryKey: ["launch-defaults"],
-    queryFn: () => tauri.getLaunchDefaults(),
     retry: false,
   });
   const packs = useQuery({
@@ -151,18 +142,6 @@ export function SettingsRoute() {
       toast.error("Launcher install failed", { description: message });
     },
   });
-  const saveLaunchDefaults = useMutation({
-    mutationFn: (showConsole: boolean) => tauri.setLaunchDefaults({ showConsole }),
-    onSuccess: async (defaults) => {
-      await qc.invalidateQueries({ queryKey: ["launch-defaults"] });
-      toast.success("Launch defaults saved", {
-        description: defaults.showConsole ? "New packs open console by default" : "New packs keep console window off by default",
-      });
-    },
-    onError: (error) => {
-      toast.error("Launch defaults save failed", { description: formatError(error) });
-    },
-  });
 
   const showPrismInstallProgress = installManagedPrism.isPending;
   const launcherOverrideActive = !!prismSettings.data?.binaryPath || !!prismSettings.data?.dataDir;
@@ -250,19 +229,6 @@ export function SettingsRoute() {
     installManagedPrism.mutate();
   }
 
-  async function handleCheckForUpdates() {
-    const result = await appUpdate.updateQuery.refetch();
-    if (result.error) {
-      toast.error("Update check failed", { description: formatError(result.error) });
-      return;
-    }
-    if (result.data) {
-      toast.success("Update available", { description: `gisketch//s_modpack_syncer v${result.data.version}` });
-      return;
-    }
-    toast.success("gisketch//s_modpack_syncer up to date");
-  }
-
   return (
     <div className="flex flex-col gap-6 p-8">
       <header className="flex flex-col gap-1">
@@ -294,28 +260,6 @@ export function SettingsRoute() {
             ) : (
               <p className="text-xs text-[--text-low]">No packs tracked yet.</p>
             )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>LAUNCH DEFAULTS</CardTitle>
-          <CardDescription>Fallback launch behavior for packs without a saved launch profile yet</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between gap-4 border-b border-line-soft/20 pb-4 last:border-b-0 last:pb-0">
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-[--text-high]">SHOW CONSOLE BY DEFAULT</p>
-              <p className="text-xs text-[--text-low]">
-                New pack launch profiles start with modsync console window enabled. Saved pack-specific choices still win.
-              </p>
-            </div>
-            <Switch
-              checked={launchDefaults.data?.showConsole ?? false}
-              disabled={launchDefaults.isLoading || saveLaunchDefaults.isPending}
-              onCheckedChange={(checked) => saveLaunchDefaults.mutate(checked)}
-            />
           </div>
         </CardContent>
       </Card>
@@ -434,7 +378,7 @@ export function SettingsRoute() {
                 </span>
               </div>
               <p className="text-[--text-low]">
-                Managed install saves portable launcher inside gisketch//s_modpack_syncer data dir, verifies GitHub SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with <code>--offline</code>.
+                Managed install saves portable launcher inside modsync data dir, verifies GitHub SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with <code>--offline</code>.
               </p>
             </div>
 
@@ -491,69 +435,12 @@ export function SettingsRoute() {
           <CardTitle className="flex items-center gap-2">
             <Info className="h-4 w-4" /> ABOUT
           </CardTitle>
-          <CardDescription className="tabular-nums">gisketch//s_modpack_syncer v{appVersion.data ?? "..."}</CardDescription>
+          <CardDescription>modsync v0.1.0</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-[--text-low]">
             Minecraft modpack syncer + Prism Launcher wrapper.
           </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Download className="h-4 w-4" /> APP UPDATE
-          </CardTitle>
-          <CardDescription>
-            {appUpdate.canInstall
-              ? "Windows builds check latest GitHub release and can install in-app."
-              : "Check latest GitHub release here. In-app install stays disabled on this OS."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-4">
-            <div className="grid gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs tabular-nums">
-              <div className="flex items-center justify-between gap-3">
-                <span className="cp-tactical-label text-[--text-low]">PLATFORM</span>
-                <span className="text-[--text-high]">{appUpdate.platformQuery.data?.toUpperCase() ?? "..."}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="cp-tactical-label text-[--text-low]">CURRENT</span>
-                <span className="text-[--text-high]">v{appVersion.data ?? "..."}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="cp-tactical-label text-[--text-low]">LATEST</span>
-                <span className="text-[--text-high]">
-                  {appUpdate.updateQuery.data ? `v${appUpdate.updateQuery.data.version}` : "CURRENT"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="cp-tactical-label text-[--text-low]">STATUS</span>
-                <span className="text-[--text-high]">
-                  {appUpdate.updateQuery.isFetching
-                    ? "CHECKING"
-                    : appUpdate.updateQuery.data
-                      ? appUpdate.canInstall
-                        ? "UPDATE READY"
-                        : "CHECK ONLY"
-                      : "UP TO DATE"}
-                </span>
-              </div>
-              {!appUpdate.canInstall ? (
-                <p className="text-text-low">
-                  Linux view stays for diagnostics. Download + install still manual on this OS.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={handleCheckForUpdates} disabled={appUpdate.updateQuery.isFetching}>
-                {appUpdate.updateQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                CHECK FOR UPDATES
-              </Button>
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -581,7 +468,7 @@ export function SettingsRoute() {
           <DialogHeader>
             <DialogTitle>EDIT LAUNCHER SETTINGS</DialogTitle>
             <DialogDescription>
-              Point gisketch//s_modpack_syncer at managed companion launcher or custom Prism-compatible binary/data dir, then set global offline username.
+              Point modsync at managed companion launcher or custom Prism-compatible binary/data dir, then set global offline username.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
@@ -635,7 +522,7 @@ export function SettingsRoute() {
             <DialogDescription>
               {showPrismInstallProgress
                 ? "Downloading managed PrismLauncher-Cracked now."
-                : "Install portable PrismLauncher-Cracked into gisketch//s_modpack_syncer data dir and auto-wire launcher settings."}
+                : "Install portable PrismLauncher-Cracked into modsync data dir and auto-wire launcher settings."}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
@@ -683,7 +570,7 @@ export function SettingsRoute() {
                     <span className="font-mono text-xs text-text-low">PORTABLE INSTALL</span>
                   </div>
                   <p className="text-sm text-text-low">
-                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256 digest, unpack into gisketch//s_modpack_syncer data dir, then save binary + data paths automatically.
+                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256 digest, unpack into modsync data dir, then save binary + data paths automatically.
                   </p>
                 </button>
                 <div className="border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs text-text-low">

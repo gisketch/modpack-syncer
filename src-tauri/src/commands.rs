@@ -33,6 +33,7 @@ pub enum PublishCategory {
     Mods,
     Resourcepacks,
     Shaderpacks,
+    ShaderSettings,
     Config,
     Kubejs,
     Root,
@@ -80,6 +81,14 @@ pub struct PublishPushReport {
     pub method: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManifestArtifactCategory {
+    Mods,
+    Resourcepacks,
+    Shaderpacks,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OptionsSyncCategory {
@@ -117,16 +126,45 @@ pub struct OptionsSyncPreview {
     pub ignored_keys: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ManifestArtifactCategory {
-    Mods,
-    Resourcepacks,
-    Shaderpacks,
+pub enum ShaderSettingsStatus {
+    MissingPackConfig,
+    Matched,
+    Mismatch,
+    DisabledLocal,
+    MissingPreset,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShaderSettingsPreview {
+    pub status: ShaderSettingsStatus,
+    pub has_pack_iris_file: bool,
+    pub has_instance_iris_file: bool,
+    pub pack_shader_pack: Option<String>,
+    pub local_shader_pack: Option<String>,
+    pub pack_shaders_enabled: bool,
+    pub local_shaders_enabled: bool,
+    pub pack_preset_path: Option<String>,
+    pub local_preset_path: Option<String>,
+    pub iris_diff_count: usize,
+    pub preset_diff_count: usize,
+    pub iris_changes: Vec<ShaderSettingsChange>,
+    pub preset_changes: Vec<ShaderSettingsChange>,
+    pub requires_decision: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShaderSettingsChange {
+    pub key: String,
+    pub pack_value: Option<String>,
+    pub instance_value: Option<String>,
+    pub action: PublishAction,
 }
 
 pub type LaunchProfile = prism::LaunchProfile;
-pub type LaunchDefaults = prism::LaunchDefaults;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
 pub type JavaInstallProgress = prism::JavaInstallProgress;
 pub type ManagedPrismInstall = prism::ManagedPrismInstall;
@@ -366,41 +404,6 @@ pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> 
 }
 
 #[tauri::command]
-pub async fn get_launch_defaults() -> Result<LaunchDefaults, CommandError> {
-    tokio::task::spawn_blocking(prism::get_launch_defaults)
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn set_launch_defaults(defaults: LaunchDefaults) -> Result<LaunchDefaults, CommandError> {
-    tokio::task::spawn_blocking(move || prism::save_launch_defaults(defaults))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn get_app_storage_settings() -> Result<paths::AppStorageSettings, CommandError> {
-    tokio::task::spawn_blocking(paths::get_app_storage_settings)
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
-pub async fn set_app_storage_settings(
-    override_data_dir: Option<String>,
-) -> Result<paths::AppStorageSettings, CommandError> {
-    let override_data_dir = override_data_dir.and_then(normalize_optional_path);
-    tokio::task::spawn_blocking(move || paths::set_app_storage_settings(override_data_dir, true))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))?
-        .map_err(CommandError::from)
-}
-
-#[tauri::command]
 pub async fn set_prism_settings(
     binary_path: Option<String>,
     data_dir: Option<String>,
@@ -609,6 +612,7 @@ pub async fn sync_instance(
     app: tauri::AppHandle,
     pack_id: String,
     instance_name: Option<String>,
+    sync_shader_settings: Option<bool>,
 ) -> Result<SyncInstanceReport, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
@@ -619,7 +623,7 @@ pub async fn sync_instance(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
-    let remote_artifacts = m
+    let remote_mods = m
         .mods
         .iter()
         .chain(m.resourcepacks.iter())
@@ -628,7 +632,7 @@ pub async fn sync_instance(
         .cloned()
         .collect::<Vec<_>>();
 
-    let fetch_report = download::fetch_all_with_progress(remote_artifacts, {
+    let fetch_report = download::fetch_all_with_progress(remote_mods, {
         let app = app.clone();
         let pack_id = pack_id.clone();
         move |progress| {
@@ -691,6 +695,7 @@ pub async fn sync_instance(
     let pack_dir_clone = pack_dir.clone();
     let manifest_clone = m.clone();
     let inst_name_clone = inst_name.clone();
+    let apply_shader_settings = sync_shader_settings.unwrap_or(false);
     let inst_report = tokio::task::spawn_blocking(move || {
         let report = prism::write_instance(
             &inst_name_clone,
@@ -702,6 +707,9 @@ pub async fn sync_instance(
             Some(&launch_profile),
         )?;
         apply_options_sync(&pack_dir_clone.join("options.txt"), &inst_name_clone)?;
+        if apply_shader_settings {
+            apply_shader_settings_sync(&pack_dir_clone, &inst_name_clone)?;
+        }
         Ok::<_, CommandError>(report)
     })
     .await
@@ -771,16 +779,13 @@ pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> 
 pub async fn launch_pack(pack_id: String, instance_name: Option<String>) -> Result<(), CommandError> {
     let launch_profile = prism::load_launch_profile(&pack_id)?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-
-    let apply_instance_name = instance_name.clone();
-    let apply_launch_profile = launch_profile.clone();
-    tokio::task::spawn_blocking(move || prism::apply_launch_profile(&apply_instance_name, &apply_launch_profile))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))??;
-
-    tokio::task::spawn_blocking(move || prism::launch(&instance_name))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))??;
+    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        prism::apply_launch_profile(&instance_name, &launch_profile)?;
+        prism::launch(&instance_name)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(())
 }
 
@@ -815,29 +820,21 @@ pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandE
 pub async fn preview_modrinth_mod(
     pack_id: String,
     identifier: String,
-    category: Option<ManifestArtifactCategory>,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
     let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&manifest_path))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))??;
-    resolve_modrinth_preview(
-        &manifest,
-        &identifier,
-        category.unwrap_or(ManifestArtifactCategory::Mods),
-    )
-    .await
+    resolve_modrinth_preview(&manifest, &identifier).await
 }
 
 #[tauri::command]
 pub async fn add_modrinth_mod(
     pack_id: String,
-    category: Option<ManifestArtifactCategory>,
     project_id: String,
     version_id: String,
     side: Option<String>,
 ) -> Result<manifest::Entry, CommandError> {
-    let category = category.unwrap_or(ManifestArtifactCategory::Mods);
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
     let manifest = tokio::task::spawn_blocking({
@@ -847,7 +844,7 @@ pub async fn add_modrinth_mod(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
-    let preview = resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id, category).await?;
+    let preview = resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id).await?;
     let chosen_side = side
         .as_deref()
         .map(parse_manifest_side)
@@ -870,15 +867,14 @@ pub async fn add_modrinth_mod(
     };
     let cached_path = download::fetch_entry(&next_entry).await?;
     let instance_name = format!("modsync-{pack_id}");
-    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
+    let mods_dir = prism::instance_mods_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
 
     tokio::task::spawn_blocking(move || -> Result<manifest::Entry, CommandError> {
-        std::fs::create_dir_all(&artifact_dir)?;
-        copy_local_file(&cached_path, &artifact_dir.join(&next_entry.filename))?;
+        std::fs::create_dir_all(&mods_dir)?;
+        copy_local_file(&cached_path, &mods_dir.join(&next_entry.filename))?;
 
-        let mut state = read_unpublished_modrinth_state(&artifact_dir)?;
+        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
         state.retain(|entry| entry.filename != next_entry.filename);
         state.push(UnpublishedModrinthState {
             filename: next_entry.filename.clone(),
@@ -892,7 +888,7 @@ pub async fn add_modrinth_mod(
             side: next_entry.side,
         });
         state.sort_by(|left, right| left.filename.cmp(&right.filename));
-        write_unpublished_modrinth_state(&artifact_dir, &state)?;
+        write_unpublished_modrinth_state(&mods_dir, &state)?;
         Ok(next_entry)
     })
     .await
@@ -906,19 +902,16 @@ pub async fn delete_instance_mod(
     category: Option<ManifestArtifactCategory>,
     instance_name: Option<String>,
 ) -> Result<(), CommandError> {
-    let category = category.unwrap_or(ManifestArtifactCategory::Mods);
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
-        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
+    let mods_dir = instance_artifact_dir(&instance_name, category.unwrap_or(ManifestArtifactCategory::Mods))?;
     tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
-        let path = artifact_dir.join(&filename);
+        let path = mods_dir.join(&filename);
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
-        let mut state = read_unpublished_modrinth_state(&artifact_dir)?;
+        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
         state.retain(|entry| entry.filename != filename);
-        write_unpublished_modrinth_state(&artifact_dir, &state)?;
+        write_unpublished_modrinth_state(&mods_dir, &state)?;
         Ok(())
     })
     .await
@@ -926,31 +919,60 @@ pub async fn delete_instance_mod(
 }
 
 #[tauri::command]
-pub async fn unpublished_artifact_statuses(
+pub async fn preview_options_sync(
     pack_id: String,
-    category: ManifestArtifactCategory,
     instance_name: Option<String>,
-) -> Result<Vec<ModStatus>, CommandError> {
+) -> Result<OptionsSyncPreview, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
+    let instance_root = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
 
-    tokio::task::spawn_blocking(move || -> Result<Vec<ModStatus>, CommandError> {
-        let mut out = read_unpublished_modrinth_state(&artifact_dir)?
-            .into_iter()
-            .map(|entry| ModStatus {
-                id: Some(entry.slug),
-                filename: entry.filename,
-                size: Some(entry.size),
-                status: "unpublished",
-            })
-            .collect::<Vec<_>>();
-        out.sort_by(|left, right| left.filename.cmp(&right.filename));
-        Ok(out)
+    tokio::task::spawn_blocking(move || {
+        build_options_sync_preview(&pack_dir.join("options.txt"), &instance_root.join("options.txt"))
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn set_options_sync_ignored(
+    pack_id: String,
+    key: String,
+    ignored: bool,
+    instance_name: Option<String>,
+) -> Result<Vec<String>, CommandError> {
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_root = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || {
+        let mut ignored_keys = read_options_ignore_set(&instance_root)?;
+        if ignored {
+            ignored_keys.insert(key);
+        } else {
+            ignored_keys.remove(&key);
+        }
+        write_options_ignore_set(&instance_root, &ignored_keys)?;
+        Ok(ignored_keys.into_iter().collect())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn preview_shader_settings_sync(
+    pack_id: String,
+    instance_name: Option<String>,
+) -> Result<ShaderSettingsPreview, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_root = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || build_shader_settings_preview(&pack_dir, &instance_root))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
 }
 
 #[tauri::command]
@@ -996,6 +1018,10 @@ pub async fn scan_instance_publish(
             &instance_dir_for_scan.join("config"),
             &pack_dir.join("configs"),
         )?);
+        items.extend(scan_shader_settings_publish(
+            &instance_dir_for_scan,
+            &pack_dir,
+        )?);
         items.extend(scan_tree_dir(
             PublishCategory::Kubejs,
             &instance_dir_for_scan.join("kubejs"),
@@ -1016,48 +1042,6 @@ pub async fn scan_instance_publish(
             instance_dir: instance_dir_for_scan.display().to_string(),
             items,
         })
-    })
-    .await
-    .map_err(|e| CommandError::Other(e.to_string()))?
-}
-
-#[tauri::command]
-pub async fn preview_options_sync(
-    pack_id: String,
-    instance_name: Option<String>,
-) -> Result<OptionsSyncPreview, CommandError> {
-    let pack_dir = paths::packs_dir()?.join(&pack_id);
-    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    let instance_dir = prism::instance_minecraft_dir(&instance_name)
-        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-
-    tokio::task::spawn_blocking(move || {
-        build_options_sync_preview(&pack_dir.join("options.txt"), &instance_dir.join("options.txt"))
-    })
-    .await
-    .map_err(|e| CommandError::Other(e.to_string()))?
-}
-
-#[tauri::command]
-pub async fn set_options_sync_ignored(
-    pack_id: String,
-    key: String,
-    ignored: bool,
-    instance_name: Option<String>,
-) -> Result<Vec<String>, CommandError> {
-    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    let instance_dir = prism::instance_minecraft_dir(&instance_name)
-        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-
-    tokio::task::spawn_blocking(move || {
-        let mut ignored_keys = read_options_ignore_set(&instance_dir)?;
-        if ignored {
-            ignored_keys.insert(key);
-        } else {
-            ignored_keys.remove(&key);
-        }
-        write_options_ignore_set(&instance_dir, &ignored_keys)?;
-        Ok(ignored_keys.into_iter().collect())
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
@@ -1122,11 +1106,7 @@ pub async fn apply_instance_publish(
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let instance_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let unpublished_mods = read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
-    let unpublished_resourcepacks =
-        read_unpublished_modrinth_state(&instance_dir.join("resourcepacks"))?;
-    let unpublished_shaderpacks =
-        read_unpublished_modrinth_state(&instance_dir.join("shaderpacks"))?;
+    let unpublished_modrinth = read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
 
     tokio::task::spawn_blocking(move || -> Result<PublishApplyReport, CommandError> {
         let mut manifest = manifest;
@@ -1145,7 +1125,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("mods"),
             "mods",
             &mut manifest.mods,
-            Some(&unpublished_mods),
+            Some(&unpublished_modrinth),
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1154,7 +1134,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("resourcepacks"),
             "resourcepacks",
             &mut manifest.resourcepacks,
-            Some(&unpublished_resourcepacks),
+            None,
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1163,7 +1143,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("shaderpacks"),
             "shaderpacks",
             &mut manifest.shaderpacks,
-            Some(&unpublished_shaderpacks),
+            None,
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1171,6 +1151,12 @@ pub async fn apply_instance_publish(
         apply_tree_dir(
             &instance_dir.join("config"),
             &pack_dir.join("configs"),
+            &mut repo_files_written,
+            &mut repo_files_removed,
+        )?;
+        apply_shader_settings_publish(
+            &instance_dir,
+            &pack_dir,
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1373,6 +1359,9 @@ fn scan_artifact_dir(
             .and_then(|name| name.to_str())
             .ok_or_else(|| CommandError::Other("invalid unicode filename".to_string()))?
             .to_string();
+        if should_skip_artifact_publish(&category, &filename) {
+            continue;
+        }
         let sha1 = cache::file_sha1_hex(&path)?;
         let size = path.metadata()?.len();
         let (action, source) = match baseline.get(&filename) {
@@ -1394,6 +1383,9 @@ fn scan_artifact_dir(
     }
 
     for entry in entries {
+        if should_skip_artifact_publish(&category, &entry.filename) {
+            continue;
+        }
         if !seen.contains(&entry.filename) {
             out.push(PublishScanItem {
                 category: category.clone(),
@@ -1416,8 +1408,14 @@ fn scan_tree_dir(
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     use std::collections::{HashMap, HashSet};
 
-    let instance = list_relative_regular_files(instance_dir)?;
-    let repo = list_relative_regular_files(repo_dir)?;
+    let instance = list_relative_regular_files(instance_dir)?
+        .into_iter()
+        .filter(|(rel, _)| !should_skip_tree_publish(&category, rel))
+        .collect::<Vec<_>>();
+    let repo = list_relative_regular_files(repo_dir)?
+        .into_iter()
+        .filter(|(rel, _)| !should_skip_tree_publish(&category, rel))
+        .collect::<Vec<_>>();
     let repo_map = repo.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -1503,227 +1501,6 @@ fn scan_root_files(
         }
     }
     Ok(out)
-}
-
-fn build_options_sync_preview(
-    pack_path: &std::path::Path,
-    instance_path: &std::path::Path,
-) -> Result<OptionsSyncPreview, CommandError> {
-    let has_pack_file = pack_path.exists();
-    let has_instance_file = instance_path.exists();
-    let pack_map = read_options_map(pack_path)?;
-    let instance_map = read_options_map(instance_path)?;
-    let ignored_set = read_options_ignore_set(
-        instance_path
-            .parent()
-            .ok_or_else(|| CommandError::Other("invalid options.txt path".to_string()))?,
-    )?;
-
-    let mut keybind_changes = Vec::new();
-    let mut video_changes = Vec::new();
-    let mut other_changes = Vec::new();
-
-    let mut all_keys = pack_map
-        .keys()
-        .chain(instance_map.keys())
-        .cloned()
-        .collect::<Vec<_>>();
-    all_keys.sort();
-    all_keys.dedup();
-
-    for key in all_keys {
-        let pack_value = pack_map.get(&key);
-        let instance_value = instance_map.get(&key);
-
-        if pack_value == instance_value {
-            continue;
-        }
-        let ignored = ignored_set.contains(&key);
-
-        let change = OptionsSyncChange {
-            category: classify_option_key(&key),
-            key,
-            pack_value: pack_value.cloned(),
-            instance_value: instance_value.cloned(),
-            action: match (pack_value, instance_value) {
-                (Some(_), Some(_)) => PublishAction::Update,
-                (Some(_), None) => PublishAction::Remove,
-                (None, Some(_)) => PublishAction::Add,
-                (None, None) => continue,
-            },
-            ignored,
-        };
-
-        match change.category {
-            OptionsSyncCategory::Keybinds => keybind_changes.push(change),
-            OptionsSyncCategory::Video => video_changes.push(change),
-            OptionsSyncCategory::Other => other_changes.push(change),
-        }
-    }
-
-    let groups = vec![
-        OptionsSyncGroup {
-            category: OptionsSyncCategory::Keybinds,
-            label: "KEYBINDS".to_string(),
-            description: "Changed key mappings from pack preset.".to_string(),
-            changes: keybind_changes,
-        },
-        OptionsSyncGroup {
-            category: OptionsSyncCategory::Video,
-            label: "VIDEO SETTINGS".to_string(),
-            description: "Display, visual, and active resource-pack related settings.".to_string(),
-            changes: video_changes,
-        },
-        OptionsSyncGroup {
-            category: OptionsSyncCategory::Other,
-            label: "ALL OTHER OPTIONS".to_string(),
-            description: "Safe remaining option keys after dangerous exclusions.".to_string(),
-            changes: other_changes,
-        },
-    ];
-
-    Ok(OptionsSyncPreview {
-        has_pack_file,
-        has_instance_file,
-        groups,
-        ignored_keys: ignored_set.into_iter().collect(),
-    })
-}
-
-fn read_options_ignore_set(instance_root: &std::path::Path) -> Result<BTreeSet<String>, CommandError> {
-    let path = options_ignore_path(instance_root);
-    if !path.exists() {
-        return Ok(BTreeSet::new());
-    }
-
-    let bytes = std::fs::read(path)?;
-    let mut keys = serde_json::from_slice::<Vec<String>>(&bytes)
-        .map_err(|e| CommandError::Other(format!("failed to read ignored options: {e}")))?;
-    keys.sort();
-    keys.dedup();
-    Ok(keys.into_iter().collect())
-}
-
-fn write_options_ignore_set(
-    instance_root: &std::path::Path,
-    ignored_keys: &BTreeSet<String>,
-) -> Result<(), CommandError> {
-    let path = options_ignore_path(instance_root);
-    let payload = ignored_keys.iter().cloned().collect::<Vec<_>>();
-    std::fs::write(path, serde_json::to_vec_pretty(&payload).map_err(|e| CommandError::Other(e.to_string()))?)?;
-    Ok(())
-}
-
-fn options_ignore_path(instance_root: &std::path::Path) -> std::path::PathBuf {
-    instance_root.join(".modsync-options-ignore.json")
-}
-
-fn apply_options_sync(pack_options_path: &std::path::Path, instance_name: &str) -> Result<(), CommandError> {
-    if !pack_options_path.exists() {
-        return Ok(());
-    }
-
-    let instance_root = prism::instance_minecraft_dir(instance_name)
-        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let instance_options_path = instance_root.join("options.txt");
-    let pack_map = read_options_map(pack_options_path)?;
-    let instance_map = read_options_map(&instance_options_path)?;
-    let ignored_set = read_options_ignore_set(&instance_root)?;
-
-    let mut merged = instance_map.clone();
-    for key in pack_map.keys().chain(instance_map.keys()).cloned().collect::<BTreeSet<_>>() {
-        if ignored_set.contains(&key) {
-            continue;
-        }
-        match pack_map.get(&key) {
-            Some(value) => {
-                merged.insert(key, value.clone());
-            }
-            None => {
-                merged.remove(&key);
-            }
-        }
-    }
-
-    write_options_map(&instance_options_path, &merged)
-}
-
-fn write_options_map(
-    path: &std::path::Path,
-    entries: &BTreeMap<String, String>,
-) -> Result<(), CommandError> {
-    let mut out = String::new();
-    for (key, value) in entries {
-        out.push_str(key);
-        out.push(':');
-        out.push_str(value);
-        out.push('\n');
-    }
-    std::fs::write(path, out)?;
-    Ok(())
-}
-
-fn read_options_map(path: &std::path::Path) -> Result<BTreeMap<String, String>, CommandError> {
-    if !path.exists() {
-        return Ok(BTreeMap::new());
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let mut out = BTreeMap::new();
-    for line in content.lines() {
-        if let Some((key, value)) = line.split_once(':') {
-            out.insert(key.trim().to_string(), value.trim().to_string());
-        }
-    }
-    Ok(out)
-}
-
-fn classify_option_key(key: &str) -> OptionsSyncCategory {
-    if key.starts_with("key_") {
-        return OptionsSyncCategory::Keybinds;
-    }
-    if is_video_option_key(key) {
-        return OptionsSyncCategory::Video;
-    }
-    OptionsSyncCategory::Other
-}
-
-fn is_video_option_key(key: &str) -> bool {
-    matches!(
-        key,
-        "ao"
-            | "attackIndicator"
-            | "biomeBlendRadius"
-            | "bobView"
-            | "chunkBuilderMode"
-            | "cloudStatus"
-            | "darkMojangStudiosBackground"
-            | "darknessEffectScale"
-            | "enableVsync"
-            | "entityDistanceScaling"
-            | "entityShadows"
-            | "fov"
-            | "fovEffectScale"
-            | "fullscreen"
-            | "gamma"
-            | "glintSpeed"
-            | "glintStrength"
-            | "graphicsMode"
-            | "guiScale"
-            | "hideLightningFlashes"
-            | "highContrast"
-            | "incompatibleResourcePacks"
-            | "maxFps"
-            | "menuBackgroundBlurriness"
-            | "mipmapLevels"
-            | "notificationDisplayTime"
-            | "particles"
-            | "prioritizeChunkUpdates"
-            | "renderDistance"
-            | "resourcePacks"
-            | "screenEffectScale"
-            | "simulationDistance"
-    )
 }
 
 fn list_regular_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, CommandError> {
@@ -1839,7 +1616,14 @@ fn apply_artifact_dir(
 ) -> Result<(), CommandError> {
     use std::collections::{HashMap, HashSet};
 
-    let instance_files = list_regular_files(instance_dir)?;
+    let instance_files = list_regular_files(instance_dir)?
+        .into_iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| !should_skip_artifact_publish_prefix(repo_prefix, name))
+        })
+        .collect::<Vec<_>>();
     let mut existing_by_filename = entries
         .iter()
         .cloned()
@@ -1956,8 +1740,14 @@ fn apply_tree_dir(
 ) -> Result<(), CommandError> {
     use std::collections::{HashMap, HashSet};
 
-    let instance_files = list_relative_regular_files(instance_dir)?;
-    let repo_files = list_relative_regular_files(repo_dir)?;
+    let instance_files = list_relative_regular_files(instance_dir)?
+        .into_iter()
+        .filter(|(rel, _)| !should_skip_tree_publish_prefix(repo_dir, rel))
+        .collect::<Vec<_>>();
+    let repo_files = list_relative_regular_files(repo_dir)?
+        .into_iter()
+        .filter(|(rel, _)| !should_skip_tree_publish_prefix(repo_dir, rel))
+        .collect::<Vec<_>>();
     let repo_map = repo_files.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
 
@@ -1997,6 +1787,557 @@ fn apply_root_files(
         }
     }
     Ok(())
+}
+
+fn should_skip_artifact_publish(category: &PublishCategory, filename: &str) -> bool {
+    matches!(category, PublishCategory::Shaderpacks) && filename.ends_with(".txt")
+}
+
+fn should_skip_artifact_publish_prefix(repo_prefix: &str, filename: &str) -> bool {
+    repo_prefix == "shaderpacks" && filename.ends_with(".txt")
+}
+
+fn should_skip_tree_publish(category: &PublishCategory, relative_path: &str) -> bool {
+    matches!(category, PublishCategory::Config) && relative_path == "iris.properties"
+}
+
+fn should_skip_tree_publish_prefix(repo_dir: &std::path::Path, relative_path: &str) -> bool {
+    repo_dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| name == "configs" && relative_path == "iris.properties")
+}
+
+fn scan_shader_settings_publish(
+    instance_root: &std::path::Path,
+    repo_root: &std::path::Path,
+) -> Result<Vec<PublishScanItem>, CommandError> {
+    let mut items = scan_root_files_with_category(
+        PublishCategory::ShaderSettings,
+        &instance_root.join("config"),
+        &repo_root.join("configs"),
+        &["iris.properties"],
+    )?;
+
+    let instance_shader_dir = instance_root.join("shaderpacks");
+    let repo_shader_dir = repo_root.join("shaderpacks");
+    let mut shader_items = scan_tree_dir_filtered(
+        PublishCategory::ShaderSettings,
+        &instance_shader_dir,
+        &repo_shader_dir,
+        |rel| rel.ends_with(".txt"),
+    )?;
+    items.append(&mut shader_items);
+    Ok(items)
+}
+
+fn apply_shader_settings_publish(
+    instance_root: &std::path::Path,
+    repo_root: &std::path::Path,
+    repo_files_written: &mut usize,
+    repo_files_removed: &mut usize,
+) -> Result<(), CommandError> {
+    apply_root_files(
+        &instance_root.join("config"),
+        &repo_root.join("configs"),
+        &["iris.properties"],
+        repo_files_written,
+        repo_files_removed,
+    )?;
+    apply_tree_dir_filtered(
+        &instance_root.join("shaderpacks"),
+        &repo_root.join("shaderpacks"),
+        repo_files_written,
+        repo_files_removed,
+        |rel| rel.ends_with(".txt"),
+    )
+}
+
+fn scan_root_files_with_category(
+    category: PublishCategory,
+    instance_root: &std::path::Path,
+    repo_root: &std::path::Path,
+    whitelist: &[&str],
+) -> Result<Vec<PublishScanItem>, CommandError> {
+    let mut out = Vec::new();
+    for rel in whitelist {
+        let instance_path = instance_root.join(rel);
+        let repo_path = repo_root.join(rel);
+        match (instance_path.exists(), repo_path.exists()) {
+            (true, true) => {
+                let instance_sha1 = cache::file_sha1_hex(&instance_path)?;
+                let repo_sha1 = cache::file_sha1_hex(&repo_path)?;
+                out.push(PublishScanItem {
+                    category: category.clone(),
+                    relative_path: (*rel).to_string(),
+                    size: Some(instance_path.metadata()?.len()),
+                    sha1: Some(instance_sha1.clone()),
+                    action: if repo_sha1 == instance_sha1 {
+                        PublishAction::Unchanged
+                    } else {
+                        PublishAction::Update
+                    },
+                    source: Some("repo-tree".to_string()),
+                });
+            }
+            (true, false) => out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: (*rel).to_string(),
+                size: Some(instance_path.metadata()?.len()),
+                sha1: Some(cache::file_sha1_hex(&instance_path)?),
+                action: PublishAction::Add,
+                source: Some("repo-tree".to_string()),
+            }),
+            (false, true) => out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: (*rel).to_string(),
+                size: Some(repo_path.metadata()?.len()),
+                sha1: Some(cache::file_sha1_hex(&repo_path)?),
+                action: PublishAction::Remove,
+                source: Some("repo-tree".to_string()),
+            }),
+            (false, false) => {}
+        }
+    }
+    Ok(out)
+}
+
+fn scan_tree_dir_filtered<F>(
+    category: PublishCategory,
+    instance_dir: &std::path::Path,
+    repo_dir: &std::path::Path,
+    include: F,
+) -> Result<Vec<PublishScanItem>, CommandError>
+where
+    F: Fn(&str) -> bool,
+{
+    use std::collections::{HashMap, HashSet};
+
+    let instance = list_relative_regular_files(instance_dir)?
+        .into_iter()
+        .filter(|(rel, _)| include(rel))
+        .collect::<Vec<_>>();
+    let repo = list_relative_regular_files(repo_dir)?
+        .into_iter()
+        .filter(|(rel, _)| include(rel))
+        .collect::<Vec<_>>();
+    let repo_map = repo.into_iter().collect::<HashMap<_, _>>();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+
+    for (rel, path) in instance {
+        let sha1 = cache::file_sha1_hex(&path)?;
+        let size = path.metadata()?.len();
+        let action = match repo_map.get(&rel) {
+            Some(repo_path) if cache::file_sha1_hex(repo_path)? == sha1 => PublishAction::Unchanged,
+            Some(_) => PublishAction::Update,
+            None => PublishAction::Add,
+        };
+        seen.insert(rel.clone());
+        out.push(PublishScanItem {
+            category: category.clone(),
+            relative_path: rel,
+            size: Some(size),
+            sha1: Some(sha1),
+            action,
+            source: Some("repo-tree".to_string()),
+        });
+    }
+
+    for (rel, repo_path) in repo_map {
+        if !seen.contains(&rel) {
+            out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: rel,
+                size: Some(repo_path.metadata()?.len()),
+                sha1: Some(cache::file_sha1_hex(&repo_path)?),
+                action: PublishAction::Remove,
+                source: Some("repo-tree".to_string()),
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+fn apply_tree_dir_filtered<F>(
+    instance_dir: &std::path::Path,
+    repo_dir: &std::path::Path,
+    repo_files_written: &mut usize,
+    repo_files_removed: &mut usize,
+    include: F,
+) -> Result<(), CommandError>
+where
+    F: Fn(&str) -> bool,
+{
+    use std::collections::{HashMap, HashSet};
+
+    let instance_files = list_relative_regular_files(instance_dir)?
+        .into_iter()
+        .filter(|(rel, _)| include(rel))
+        .collect::<Vec<_>>();
+    let repo_files = list_relative_regular_files(repo_dir)?
+        .into_iter()
+        .filter(|(rel, _)| include(rel))
+        .collect::<Vec<_>>();
+    let repo_map = repo_files.into_iter().collect::<HashMap<_, _>>();
+    let mut seen = HashSet::new();
+
+    for (rel, path) in instance_files {
+        seen.insert(rel.clone());
+        copy_file_to_repo(&path, &repo_dir.join(&rel))?;
+        *repo_files_written += 1;
+    }
+
+    for (rel, path) in repo_map {
+        if seen.contains(&rel) {
+            continue;
+        }
+        if remove_path_if_exists(&path)? {
+            *repo_files_removed += 1;
+        }
+    }
+
+    Ok(())
+}
+
+fn build_options_sync_preview(
+    pack_path: &std::path::Path,
+    instance_path: &std::path::Path,
+) -> Result<OptionsSyncPreview, CommandError> {
+    let has_pack_file = pack_path.exists();
+    let has_instance_file = instance_path.exists();
+    let pack_map = read_options_map(pack_path)?;
+    let instance_map = read_options_map(instance_path)?;
+    let ignored_set = read_options_ignore_set(
+        instance_path
+            .parent()
+            .ok_or_else(|| CommandError::Other("invalid options path".to_string()))?,
+    )?;
+
+    let mut keybinds = Vec::new();
+    let mut video = Vec::new();
+    let mut other = Vec::new();
+    let keys = pack_map
+        .keys()
+        .chain(instance_map.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    for key in keys {
+        let pack_value = pack_map.get(&key);
+        let instance_value = instance_map.get(&key);
+        if pack_value == instance_value {
+            continue;
+        }
+        let change = OptionsSyncChange {
+            category: classify_option_key(&key),
+            key: key.clone(),
+            pack_value: pack_value.cloned(),
+            instance_value: instance_value.cloned(),
+            action: match (pack_value, instance_value) {
+                (Some(_), Some(_)) => PublishAction::Update,
+                (Some(_), None) => PublishAction::Remove,
+                (None, Some(_)) => PublishAction::Add,
+                (None, None) => continue,
+            },
+            ignored: ignored_set.contains(&key),
+        };
+
+        match change.category {
+            OptionsSyncCategory::Keybinds => keybinds.push(change),
+            OptionsSyncCategory::Video => video.push(change),
+            OptionsSyncCategory::Other => other.push(change),
+        }
+    }
+
+    Ok(OptionsSyncPreview {
+        has_pack_file,
+        has_instance_file,
+        groups: vec![
+            OptionsSyncGroup {
+                category: OptionsSyncCategory::Keybinds,
+                label: "KEYBINDS".to_string(),
+                description: "Changed key mappings from options preset.".to_string(),
+                changes: keybinds,
+            },
+            OptionsSyncGroup {
+                category: OptionsSyncCategory::Video,
+                label: "VIDEO SETTINGS".to_string(),
+                description: "Changed visual and rendering settings.".to_string(),
+                changes: video,
+            },
+            OptionsSyncGroup {
+                category: OptionsSyncCategory::Other,
+                label: "ALL OTHER OPTIONS".to_string(),
+                description: "Safe remaining changed options.".to_string(),
+                changes: other,
+            },
+        ],
+        ignored_keys: ignored_set.into_iter().collect(),
+    })
+}
+
+fn build_shader_settings_preview(
+    pack_dir: &std::path::Path,
+    instance_root: &std::path::Path,
+) -> Result<ShaderSettingsPreview, CommandError> {
+    let pack_iris_path = pack_dir.join("configs/iris.properties");
+    let instance_iris_path = instance_root.join("config/iris.properties");
+    let has_pack_iris_file = pack_iris_path.exists();
+    let has_instance_iris_file = instance_iris_path.exists();
+    let pack_iris = read_properties_map(&pack_iris_path)?;
+    let instance_iris = read_properties_map(&instance_iris_path)?;
+    let pack_shader_pack = pack_iris.get("shaderPack").cloned();
+    let local_shader_pack = instance_iris.get("shaderPack").cloned();
+    let pack_shaders_enabled = parse_bool_property(pack_iris.get("enableShaders"));
+    let local_shaders_enabled = parse_bool_property(instance_iris.get("enableShaders"));
+    let pack_preset = pack_shader_pack
+        .as_ref()
+        .map(|name| pack_dir.join("shaderpacks").join(format!("{name}.txt")));
+    let local_preset = local_shader_pack
+        .as_ref()
+        .map(|name| instance_root.join("shaderpacks").join(format!("{name}.txt")));
+
+    let pack_preset_map = match pack_preset.as_ref() {
+        Some(path) => read_properties_map(path)?,
+        None => BTreeMap::new(),
+    };
+    let local_preset_map = match local_preset.as_ref() {
+        Some(path) => read_properties_map(path)?,
+        None => BTreeMap::new(),
+    };
+
+    let status = if !has_pack_iris_file {
+        ShaderSettingsStatus::MissingPackConfig
+    } else if !local_shaders_enabled {
+        ShaderSettingsStatus::DisabledLocal
+    } else if pack_shader_pack != local_shader_pack {
+        ShaderSettingsStatus::Mismatch
+    } else if !pack_preset.as_ref().is_some_and(|path| path.exists()) {
+        ShaderSettingsStatus::MissingPreset
+    } else {
+        ShaderSettingsStatus::Matched
+    };
+
+    let iris_changes = build_property_changes(&pack_iris, &instance_iris);
+    let preset_changes = build_property_changes(&pack_preset_map, &local_preset_map);
+    let iris_diff_count = iris_changes.len();
+    let preset_diff_count = preset_changes.len();
+
+    Ok(ShaderSettingsPreview {
+        status,
+        has_pack_iris_file,
+        has_instance_iris_file,
+        pack_shader_pack,
+        local_shader_pack,
+        pack_shaders_enabled,
+        local_shaders_enabled,
+        pack_preset_path: pack_preset.filter(|path| path.exists()).map(|path| path.display().to_string()),
+        local_preset_path: local_preset.filter(|path| path.exists()).map(|path| path.display().to_string()),
+        iris_diff_count,
+        preset_diff_count,
+        iris_changes,
+        preset_changes,
+        requires_decision: has_pack_iris_file && (iris_diff_count > 0 || preset_diff_count > 0 || !local_shaders_enabled || status_matches_requires_decision(&status)),
+    })
+}
+
+fn status_matches_requires_decision(status: &ShaderSettingsStatus) -> bool {
+    matches!(status, ShaderSettingsStatus::Mismatch | ShaderSettingsStatus::DisabledLocal | ShaderSettingsStatus::MissingPreset)
+}
+
+fn apply_options_sync(pack_options_path: &std::path::Path, instance_name: &str) -> Result<(), CommandError> {
+    if !pack_options_path.exists() {
+        return Ok(());
+    }
+    let instance_root = prism::instance_minecraft_dir(instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let instance_options_path = instance_root.join("options.txt");
+    let pack_map = read_options_map(pack_options_path)?;
+    let mut merged = read_options_map(&instance_options_path)?;
+    let ignored_set = read_options_ignore_set(&instance_root)?;
+
+    for key in pack_map.keys().chain(merged.keys()).cloned().collect::<BTreeSet<_>>() {
+        if ignored_set.contains(&key) {
+            continue;
+        }
+        match pack_map.get(&key) {
+            Some(value) => {
+                merged.insert(key, value.clone());
+            }
+            None => {
+                merged.remove(&key);
+            }
+        }
+    }
+
+    write_options_map(&instance_options_path, &merged)
+}
+
+fn apply_shader_settings_sync(pack_dir: &std::path::Path, instance_name: &str) -> Result<(), CommandError> {
+    let instance_root = prism::instance_minecraft_dir(instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let pack_iris_path = pack_dir.join("configs/iris.properties");
+    if !pack_iris_path.exists() {
+        return Ok(());
+    }
+    let instance_config_dir = instance_root.join("config");
+    std::fs::create_dir_all(&instance_config_dir)?;
+    std::fs::copy(&pack_iris_path, instance_config_dir.join("iris.properties"))?;
+
+    let pack_iris = read_properties_map(&pack_iris_path)?;
+    if let Some(shader_pack) = pack_iris.get("shaderPack") {
+        let pack_preset_path = pack_dir.join("shaderpacks").join(format!("{shader_pack}.txt"));
+        if pack_preset_path.exists() {
+            let instance_shader_dir = instance_root.join("shaderpacks");
+            std::fs::create_dir_all(&instance_shader_dir)?;
+            std::fs::copy(pack_preset_path, instance_shader_dir.join(format!("{shader_pack}.txt")))?;
+        }
+    }
+    Ok(())
+}
+
+fn read_options_ignore_set(instance_root: &std::path::Path) -> Result<BTreeSet<String>, CommandError> {
+    let path = instance_root.join(".modsync-options-ignore.json");
+    if !path.exists() {
+        return Ok(BTreeSet::new());
+    }
+    let bytes = std::fs::read(path)?;
+    let values = serde_json::from_slice::<Vec<String>>(&bytes)
+        .map_err(|error| CommandError::Other(format!("failed to read options ignore file: {error}")))?;
+    Ok(values.into_iter().collect())
+}
+
+fn write_options_ignore_set(instance_root: &std::path::Path, ignored_keys: &BTreeSet<String>) -> Result<(), CommandError> {
+    let path = instance_root.join(".modsync-options-ignore.json");
+    let payload = ignored_keys.iter().cloned().collect::<Vec<_>>();
+    let bytes = serde_json::to_vec_pretty(&payload).map_err(|error| CommandError::Other(error.to_string()))?;
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+fn read_options_map(path: &std::path::Path) -> Result<BTreeMap<String, String>, CommandError> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let mut out = BTreeMap::new();
+    for line in content.lines() {
+        if let Some((key, value)) = line.split_once(':') {
+            out.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn write_options_map(path: &std::path::Path, entries: &BTreeMap<String, String>) -> Result<(), CommandError> {
+    let mut content = String::new();
+    for (key, value) in entries {
+        content.push_str(key);
+        content.push(':');
+        content.push_str(value);
+        content.push('\n');
+    }
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn read_properties_map(path: &std::path::Path) -> Result<BTreeMap<String, String>, CommandError> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let mut out = BTreeMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=') {
+            out.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn build_property_changes(
+    pack_map: &BTreeMap<String, String>,
+    instance_map: &BTreeMap<String, String>,
+) -> Vec<ShaderSettingsChange> {
+    pack_map
+        .keys()
+        .chain(instance_map.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|key| {
+            let pack_value = pack_map.get(&key).cloned();
+            let instance_value = instance_map.get(&key).cloned();
+            if pack_value == instance_value {
+                return None;
+            }
+            Some(ShaderSettingsChange {
+                key,
+                action: match (&pack_value, &instance_value) {
+                    (Some(_), Some(_)) => PublishAction::Update,
+                    (Some(_), None) => PublishAction::Remove,
+                    (None, Some(_)) => PublishAction::Add,
+                    (None, None) => return None,
+                },
+                pack_value,
+                instance_value,
+            })
+        })
+        .collect()
+}
+
+fn classify_option_key(key: &str) -> OptionsSyncCategory {
+    if key.starts_with("key_") {
+        return OptionsSyncCategory::Keybinds;
+    }
+    if is_video_option_key(key) {
+        return OptionsSyncCategory::Video;
+    }
+    OptionsSyncCategory::Other
+}
+
+fn is_video_option_key(key: &str) -> bool {
+    matches!(
+        key,
+        "ao"
+            | "biomeBlendRadius"
+            | "bobView"
+            | "cloudStatus"
+            | "enableVsync"
+            | "entityDistanceScaling"
+            | "entityShadows"
+            | "fov"
+            | "fullscreen"
+            | "gamma"
+            | "graphicsMode"
+            | "guiScale"
+            | "maxFps"
+            | "mipmapLevels"
+            | "particles"
+            | "renderDistance"
+            | "resourcePacks"
+            | "simulationDistance"
+    )
+}
+
+fn parse_bool_property(value: Option<&String>) -> bool {
+    value.is_some_and(|value| value.eq_ignore_ascii_case("true"))
+}
+
+fn instance_artifact_dir(instance_name: &str, category: ManifestArtifactCategory) -> Result<std::path::PathBuf, CommandError> {
+    let instance_root = prism::instance_minecraft_dir(instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    Ok(match category {
+        ManifestArtifactCategory::Mods => instance_root.join("mods"),
+        ManifestArtifactCategory::Resourcepacks => instance_root.join("resourcepacks"),
+        ManifestArtifactCategory::Shaderpacks => instance_root.join("shaderpacks"),
+    })
 }
 
 fn copy_file_to_repo(src: &std::path::Path, dst: &std::path::Path) -> Result<(), CommandError> {
@@ -2257,6 +2598,9 @@ fn changelog_tree_category(path: &str) -> Option<PublishCategory> {
     if path == "options.txt" {
         return Some(PublishCategory::Root);
     }
+    if path == "configs/iris.properties" || (path.starts_with("shaderpacks/") && path.ends_with(".txt")) {
+        return Some(PublishCategory::ShaderSettings);
+    }
     if path.starts_with("configs/") {
         return Some(PublishCategory::Config);
     }
@@ -2311,9 +2655,10 @@ fn category_rank(category: &PublishCategory) -> u8 {
         PublishCategory::Mods => 0,
         PublishCategory::Resourcepacks => 1,
         PublishCategory::Shaderpacks => 2,
-        PublishCategory::Config => 3,
-        PublishCategory::Kubejs => 4,
-        PublishCategory::Root => 5,
+        PublishCategory::ShaderSettings => 3,
+        PublishCategory::Config => 4,
+        PublishCategory::Kubejs => 5,
+        PublishCategory::Root => 6,
     }
 }
 
@@ -2331,8 +2676,9 @@ fn category_from_rank(rank: u8) -> PublishCategory {
         0 => PublishCategory::Mods,
         1 => PublishCategory::Resourcepacks,
         2 => PublishCategory::Shaderpacks,
-        3 => PublishCategory::Config,
-        4 => PublishCategory::Kubejs,
+        3 => PublishCategory::ShaderSettings,
+        4 => PublishCategory::Config,
+        5 => PublishCategory::Kubejs,
         _ => PublishCategory::Root,
     }
 }
@@ -2360,9 +2706,9 @@ fn next_publish_version(current_version: &str) -> String {
 }
 
 fn read_unpublished_modrinth_state(
-    artifact_dir: &std::path::Path,
+    mods_dir: &std::path::Path,
 ) -> Result<Vec<UnpublishedModrinthState>, CommandError> {
-    let path = artifact_dir.join(".modsync-unpublished-modrinth.json");
+    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -2371,10 +2717,10 @@ fn read_unpublished_modrinth_state(
 }
 
 fn write_unpublished_modrinth_state(
-    artifact_dir: &std::path::Path,
+    mods_dir: &std::path::Path,
     state: &[UnpublishedModrinthState],
 ) -> Result<(), CommandError> {
-    let path = artifact_dir.join(".modsync-unpublished-modrinth.json");
+    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
     let bytes = serde_json::to_vec_pretty(state).map_err(anyhow::Error::from)?;
     std::fs::write(path, bytes)?;
     Ok(())
@@ -2394,36 +2740,27 @@ fn copy_local_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(), C
 async fn resolve_modrinth_preview(
     manifest: &manifest::Manifest,
     identifier: &str,
-    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let project_id = normalize_modrinth_identifier(identifier)?;
     let project = fetch_modrinth_project(&project_id).await?;
-    let version = fetch_latest_modrinth_version(
-        &project.id,
-        &manifest.pack.mc_version,
-        manifest.pack.loader,
-        category,
-    )
-    .await?;
-    build_modrinth_preview(manifest, project, version, category)
+    let version = fetch_latest_modrinth_version(&project.id, &manifest.pack.mc_version, manifest.pack.loader).await?;
+    build_modrinth_preview(manifest, project, version)
 }
 
 async fn resolve_modrinth_preview_from_ids(
     manifest: &manifest::Manifest,
     project_id: &str,
     version_id: &str,
-    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let project = fetch_modrinth_project(project_id).await?;
     let version = fetch_modrinth_version(version_id).await?;
-    build_modrinth_preview(manifest, project, version, category)
+    build_modrinth_preview(manifest, project, version)
 }
 
 fn build_modrinth_preview(
     manifest: &manifest::Manifest,
     project: ModrinthProjectApi,
     version: ModrinthVersionApi,
-    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let file = version
         .files
@@ -2433,7 +2770,7 @@ fn build_modrinth_preview(
         .or_else(|| version.files.first().cloned())
         .ok_or_else(|| CommandError::Other("Modrinth version has no downloadable files".to_string()))?;
     let suggested_side = suggested_manifest_side(&project.client_side, &project.server_side);
-    let already_tracked = manifest_artifact_entries(manifest, category).iter().any(|entry| {
+    let already_tracked = manifest.mods.iter().any(|entry| {
         entry.project_id.as_deref() == Some(project.id.as_str())
             || entry.id == project.slug
             || entry.filename == file.filename
@@ -2475,20 +2812,14 @@ async fn fetch_latest_modrinth_version(
     project_id: &str,
     mc_version: &str,
     loader: manifest::Loader,
-    category: ManifestArtifactCategory,
 ) -> Result<ModrinthVersionApi, CommandError> {
-    let client = reqwest::Client::new();
-    let request = client
+    let versions = reqwest::Client::new()
         .get(format!("https://api.modrinth.com/v2/project/{project_id}/version"))
         .header(reqwest::header::USER_AGENT, "modsync/0.1 (https://github.com/gisketch/modsync)")
-        .query(&[("game_versions", format!("[\"{mc_version}\"]"))]);
-    let request = if category == ManifestArtifactCategory::Mods {
-        request.query(&[("loaders", format!("[\"{}\"]", modrinth_loader(loader)))])
-    } else {
-        request
-    };
-
-    let versions = request
+        .query(&[
+            ("game_versions", format!("[\"{mc_version}\"]")),
+            ("loaders", format!("[\"{}\"]", modrinth_loader(loader))),
+        ])
         .send()
         .await
         .map_err(|error| CommandError::Other(error.to_string()))?
@@ -2545,25 +2876,6 @@ fn modrinth_loader(loader: manifest::Loader) -> &'static str {
         manifest::Loader::Fabric => "fabric",
         manifest::Loader::Forge => "forge",
         manifest::Loader::Quilt => "quilt",
-    }
-}
-
-fn artifact_dir_name(category: ManifestArtifactCategory) -> &'static str {
-    match category {
-        ManifestArtifactCategory::Mods => "mods",
-        ManifestArtifactCategory::Resourcepacks => "resourcepacks",
-        ManifestArtifactCategory::Shaderpacks => "shaderpacks",
-    }
-}
-
-fn manifest_artifact_entries<'a>(
-    manifest: &'a manifest::Manifest,
-    category: ManifestArtifactCategory,
-) -> &'a [manifest::Entry] {
-    match category {
-        ManifestArtifactCategory::Mods => manifest.mods.as_slice(),
-        ManifestArtifactCategory::Resourcepacks => manifest.resourcepacks.as_slice(),
-        ManifestArtifactCategory::Shaderpacks => manifest.shaderpacks.as_slice(),
     }
 }
 
