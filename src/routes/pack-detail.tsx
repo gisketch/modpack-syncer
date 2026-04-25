@@ -69,6 +69,7 @@ import {
   type LaunchProfile,
   type ManifestArtifactCategory,
   type ModStatusValue,
+  NO_OPTION_PRESET_ID,
   PACK_DEFAULT_PRESET_ID,
   type PublishScanReport,
   type SyncInstanceReport,
@@ -84,9 +85,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const qc = useQueryClient();
   const adminMode = useAppStore((s) => s.adminModeByPack[packId] ?? false);
   const lastSyncedCommit = useAppStore((s) => s.lastSyncedCommitByPack[packId] ?? null);
-  const selectedOptionPresetId = useAppStore(
+  const rawSelectedOptionPresetId = useAppStore(
     (s) => s.selectedOptionPresetByPack[packId] ?? PACK_DEFAULT_PRESET_ID,
   );
+  const selectedOptionPresetId =
+    rawSelectedOptionPresetId === NO_OPTION_PRESET_ID
+      ? PACK_DEFAULT_PRESET_ID
+      : rawSelectedOptionPresetId;
   const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
   const setSelectedOptionPreset = useAppStore((s) => s.setSelectedOptionPreset);
 
