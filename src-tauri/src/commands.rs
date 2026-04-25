@@ -80,6 +80,14 @@ pub struct PublishPushReport {
     pub method: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManifestArtifactCategory {
+    Mods,
+    Resourcepacks,
+    Shaderpacks,
+}
+
 pub type LaunchProfile = prism::LaunchProfile;
 pub type LaunchDefaults = prism::LaunchDefaults;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
@@ -766,21 +774,29 @@ pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandE
 pub async fn preview_modrinth_mod(
     pack_id: String,
     identifier: String,
+    category: Option<ManifestArtifactCategory>,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
     let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&manifest_path))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))??;
-    resolve_modrinth_preview(&manifest, &identifier).await
+    resolve_modrinth_preview(
+        &manifest,
+        &identifier,
+        category.unwrap_or(ManifestArtifactCategory::Mods),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn add_modrinth_mod(
     pack_id: String,
+    category: Option<ManifestArtifactCategory>,
     project_id: String,
     version_id: String,
     side: Option<String>,
 ) -> Result<manifest::Entry, CommandError> {
+    let category = category.unwrap_or(ManifestArtifactCategory::Mods);
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
     let manifest = tokio::task::spawn_blocking({
@@ -790,7 +806,7 @@ pub async fn add_modrinth_mod(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
-    let preview = resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id).await?;
+    let preview = resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id, category).await?;
     let chosen_side = side
         .as_deref()
         .map(parse_manifest_side)
@@ -813,14 +829,15 @@ pub async fn add_modrinth_mod(
     };
     let cached_path = download::fetch_entry(&next_entry).await?;
     let instance_name = format!("modsync-{pack_id}");
-    let mods_dir = prism::instance_mods_dir(&instance_name)
+    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
 
     tokio::task::spawn_blocking(move || -> Result<manifest::Entry, CommandError> {
-        std::fs::create_dir_all(&mods_dir)?;
-        copy_local_file(&cached_path, &mods_dir.join(&next_entry.filename))?;
+        std::fs::create_dir_all(&artifact_dir)?;
+        copy_local_file(&cached_path, &artifact_dir.join(&next_entry.filename))?;
 
-        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
+        let mut state = read_unpublished_modrinth_state(&artifact_dir)?;
         state.retain(|entry| entry.filename != next_entry.filename);
         state.push(UnpublishedModrinthState {
             filename: next_entry.filename.clone(),
@@ -834,7 +851,7 @@ pub async fn add_modrinth_mod(
             side: next_entry.side,
         });
         state.sort_by(|left, right| left.filename.cmp(&right.filename));
-        write_unpublished_modrinth_state(&mods_dir, &state)?;
+        write_unpublished_modrinth_state(&artifact_dir, &state)?;
         Ok(next_entry)
     })
     .await
@@ -845,20 +862,51 @@ pub async fn add_modrinth_mod(
 pub async fn delete_instance_mod(
     pack_id: String,
     filename: String,
+    category: Option<ManifestArtifactCategory>,
     instance_name: Option<String>,
 ) -> Result<(), CommandError> {
+    let category = category.unwrap_or(ManifestArtifactCategory::Mods);
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    let mods_dir = prism::instance_mods_dir(&instance_name)
+    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
     tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
-        let path = mods_dir.join(&filename);
+        let path = artifact_dir.join(&filename);
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
-        let mut state = read_unpublished_modrinth_state(&mods_dir)?;
+        let mut state = read_unpublished_modrinth_state(&artifact_dir)?;
         state.retain(|entry| entry.filename != filename);
-        write_unpublished_modrinth_state(&mods_dir, &state)?;
+        write_unpublished_modrinth_state(&artifact_dir, &state)?;
         Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn unpublished_artifact_statuses(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    instance_name: Option<String>,
+) -> Result<Vec<ModStatus>, CommandError> {
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let artifact_dir = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let artifact_dir = artifact_dir.join(artifact_dir_name(category));
+
+    tokio::task::spawn_blocking(move || -> Result<Vec<ModStatus>, CommandError> {
+        let mut out = read_unpublished_modrinth_state(&artifact_dir)?
+            .into_iter()
+            .map(|entry| ModStatus {
+                id: Some(entry.slug),
+                filename: entry.filename,
+                size: Some(entry.size),
+                status: "unpublished",
+            })
+            .collect::<Vec<_>>();
+        out.sort_by(|left, right| left.filename.cmp(&right.filename));
+        Ok(out)
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
@@ -991,7 +1039,11 @@ pub async fn apply_instance_publish(
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let instance_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
-    let unpublished_modrinth = read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
+    let unpublished_mods = read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
+    let unpublished_resourcepacks =
+        read_unpublished_modrinth_state(&instance_dir.join("resourcepacks"))?;
+    let unpublished_shaderpacks =
+        read_unpublished_modrinth_state(&instance_dir.join("shaderpacks"))?;
 
     tokio::task::spawn_blocking(move || -> Result<PublishApplyReport, CommandError> {
         let mut manifest = manifest;
@@ -1010,7 +1062,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("mods"),
             "mods",
             &mut manifest.mods,
-            Some(&unpublished_modrinth),
+            Some(&unpublished_mods),
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1019,7 +1071,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("resourcepacks"),
             "resourcepacks",
             &mut manifest.resourcepacks,
-            None,
+            Some(&unpublished_resourcepacks),
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -1028,7 +1080,7 @@ pub async fn apply_instance_publish(
             &pack_dir.join("shaderpacks"),
             "shaderpacks",
             &mut manifest.shaderpacks,
-            None,
+            Some(&unpublished_shaderpacks),
             &mut repo_files_written,
             &mut repo_files_removed,
         )?;
@@ -2004,9 +2056,9 @@ fn next_publish_version(current_version: &str) -> String {
 }
 
 fn read_unpublished_modrinth_state(
-    mods_dir: &std::path::Path,
+    artifact_dir: &std::path::Path,
 ) -> Result<Vec<UnpublishedModrinthState>, CommandError> {
-    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
+    let path = artifact_dir.join(".modsync-unpublished-modrinth.json");
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -2015,10 +2067,10 @@ fn read_unpublished_modrinth_state(
 }
 
 fn write_unpublished_modrinth_state(
-    mods_dir: &std::path::Path,
+    artifact_dir: &std::path::Path,
     state: &[UnpublishedModrinthState],
 ) -> Result<(), CommandError> {
-    let path = mods_dir.join(".modsync-unpublished-modrinth.json");
+    let path = artifact_dir.join(".modsync-unpublished-modrinth.json");
     let bytes = serde_json::to_vec_pretty(state).map_err(anyhow::Error::from)?;
     std::fs::write(path, bytes)?;
     Ok(())
@@ -2038,27 +2090,36 @@ fn copy_local_file(src: &std::path::Path, dst: &std::path::Path) -> Result<(), C
 async fn resolve_modrinth_preview(
     manifest: &manifest::Manifest,
     identifier: &str,
+    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let project_id = normalize_modrinth_identifier(identifier)?;
     let project = fetch_modrinth_project(&project_id).await?;
-    let version = fetch_latest_modrinth_version(&project.id, &manifest.pack.mc_version, manifest.pack.loader).await?;
-    build_modrinth_preview(manifest, project, version)
+    let version = fetch_latest_modrinth_version(
+        &project.id,
+        &manifest.pack.mc_version,
+        manifest.pack.loader,
+        category,
+    )
+    .await?;
+    build_modrinth_preview(manifest, project, version, category)
 }
 
 async fn resolve_modrinth_preview_from_ids(
     manifest: &manifest::Manifest,
     project_id: &str,
     version_id: &str,
+    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let project = fetch_modrinth_project(project_id).await?;
     let version = fetch_modrinth_version(version_id).await?;
-    build_modrinth_preview(manifest, project, version)
+    build_modrinth_preview(manifest, project, version, category)
 }
 
 fn build_modrinth_preview(
     manifest: &manifest::Manifest,
     project: ModrinthProjectApi,
     version: ModrinthVersionApi,
+    category: ManifestArtifactCategory,
 ) -> Result<ModrinthAddPreview, CommandError> {
     let file = version
         .files
@@ -2068,7 +2129,7 @@ fn build_modrinth_preview(
         .or_else(|| version.files.first().cloned())
         .ok_or_else(|| CommandError::Other("Modrinth version has no downloadable files".to_string()))?;
     let suggested_side = suggested_manifest_side(&project.client_side, &project.server_side);
-    let already_tracked = manifest.mods.iter().any(|entry| {
+    let already_tracked = manifest_artifact_entries(manifest, category).iter().any(|entry| {
         entry.project_id.as_deref() == Some(project.id.as_str())
             || entry.id == project.slug
             || entry.filename == file.filename
@@ -2110,14 +2171,20 @@ async fn fetch_latest_modrinth_version(
     project_id: &str,
     mc_version: &str,
     loader: manifest::Loader,
+    category: ManifestArtifactCategory,
 ) -> Result<ModrinthVersionApi, CommandError> {
-    let versions = reqwest::Client::new()
+    let client = reqwest::Client::new();
+    let request = client
         .get(format!("https://api.modrinth.com/v2/project/{project_id}/version"))
         .header(reqwest::header::USER_AGENT, "modsync/0.1 (https://github.com/gisketch/modsync)")
-        .query(&[
-            ("game_versions", format!("[\"{mc_version}\"]")),
-            ("loaders", format!("[\"{}\"]", modrinth_loader(loader))),
-        ])
+        .query(&[("game_versions", format!("[\"{mc_version}\"]"))]);
+    let request = if category == ManifestArtifactCategory::Mods {
+        request.query(&[("loaders", format!("[\"{}\"]", modrinth_loader(loader)))])
+    } else {
+        request
+    };
+
+    let versions = request
         .send()
         .await
         .map_err(|error| CommandError::Other(error.to_string()))?
@@ -2174,6 +2241,25 @@ fn modrinth_loader(loader: manifest::Loader) -> &'static str {
         manifest::Loader::Fabric => "fabric",
         manifest::Loader::Forge => "forge",
         manifest::Loader::Quilt => "quilt",
+    }
+}
+
+fn artifact_dir_name(category: ManifestArtifactCategory) -> &'static str {
+    match category {
+        ManifestArtifactCategory::Mods => "mods",
+        ManifestArtifactCategory::Resourcepacks => "resourcepacks",
+        ManifestArtifactCategory::Shaderpacks => "shaderpacks",
+    }
+}
+
+fn manifest_artifact_entries<'a>(
+    manifest: &'a manifest::Manifest,
+    category: ManifestArtifactCategory,
+) -> &'a [manifest::Entry] {
+    match category {
+        ManifestArtifactCategory::Mods => manifest.mods.as_slice(),
+        ManifestArtifactCategory::Resourcepacks => manifest.resourcepacks.as_slice(),
+        ManifestArtifactCategory::Shaderpacks => manifest.shaderpacks.as_slice(),
     }
 }
 

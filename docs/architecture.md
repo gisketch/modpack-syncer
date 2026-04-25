@@ -97,9 +97,9 @@ gisketch/modsync-pack/
 User → App: add pack URL (github.com/gisketch/modsync-pack)
 App  → GitHub: libgit2 clone to app data dir
 App  → manifest.json: parse
-App  → Modrinth/CF: parallel download mod jars (reqwest + tokio)
-App  → SHA verify every jar
-App  → Prism instances/: write .minecraft/ (mods, configs, kubejs, …)
+App  → Modrinth/CF: parallel download mods/resourcepacks/shaderpacks (reqwest + tokio)
+App  → SHA verify every artifact
+App  → Prism instances/: write .minecraft/ (mods, resourcepacks, shaderpacks, configs, kubejs, …)
 App  → User: "Ready, launch?"
 ```
 
@@ -115,7 +115,7 @@ User: Apply → app deletes/downloads delta → commit SHA bump in SQLite
 ```
 Author: opens instance in app → "Scan for changes"
 App: diffs Prism instance vs manifest
-App: fetches new mod metadata from Modrinth/CF APIs by filename/hash match
+App: preserves staged Modrinth metadata for mods/resourcepacks/shaderpacks + repo-source files for local-only content
 UI: shows proposed manifest update
 Author: edits CHANGELOG → click "Publish v0.3.1"
 App:

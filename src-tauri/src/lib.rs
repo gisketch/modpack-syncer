@@ -63,6 +63,7 @@ pub fn run() {
             commands::preview_modrinth_mod,
             commands::add_modrinth_mod,
             commands::delete_instance_mod,
+            commands::unpublished_artifact_statuses,
             commands::mod_statuses,
             commands::scan_instance_publish,
             commands::apply_instance_publish,

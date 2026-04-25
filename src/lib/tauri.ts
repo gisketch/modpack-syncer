@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type Loader = "neoforge" | "fabric" | "forge" | "quilt";
 export type ModSource = "modrinth" | "curseforge" | "url" | "repo";
 export type Side = "client" | "server" | "both";
+export type ManifestArtifactCategory = "mods" | "resourcepacks" | "shaderpacks";
 
 export type ManifestEntry = {
   id: string;
@@ -275,12 +276,29 @@ export const tauri = {
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
   suggestPublishVersion: (packId: string) =>
     invoke<string>("suggest_publish_version", { packId }),
-  previewModrinthMod: (packId: string, identifier: string) =>
-    invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier }),
-  addModrinthMod: (packId: string, projectId: string, versionId: string, side?: Side) =>
-    invoke<ManifestEntry>("add_modrinth_mod", { packId, projectId, versionId, side }),
-  deleteInstanceMod: (packId: string, filename: string, instanceName?: string) =>
-    invoke<void>("delete_instance_mod", { packId, filename, instanceName }),
+  previewModrinthMod: (
+    packId: string,
+    identifier: string,
+    category: ManifestArtifactCategory = "mods",
+  ) => invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
+  addModrinthMod: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    projectId: string,
+    versionId: string,
+    side?: Side,
+  ) => invoke<ManifestEntry>("add_modrinth_mod", { packId, category, projectId, versionId, side }),
+  deleteInstanceMod: (
+    packId: string,
+    filename: string,
+    category: ManifestArtifactCategory = "mods",
+    instanceName?: string,
+  ) => invoke<void>("delete_instance_mod", { packId, filename, category, instanceName }),
+  unpublishedArtifactStatuses: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    instanceName?: string,
+  ) => invoke<ModStatus[]>("unpublished_artifact_statuses", { packId, category, instanceName }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>

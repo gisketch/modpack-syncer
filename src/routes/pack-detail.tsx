@@ -60,6 +60,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -72,6 +73,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
+  type ManifestArtifactCategory,
   type ManifestEntry,
   type JavaInstallProgressEvent,
   type LaunchProfile,
@@ -131,7 +133,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(null);
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [addModsOpen, setAddModsOpen] = useState(false);
+  const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
+  const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -181,6 +184,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     enabled: !!manifest.data,
     retry: false,
   });
+  const artifactPublishScan = useQuery({
+    queryKey: ["artifact-publish-scan", packId],
+    queryFn: () => tauri.scanInstancePublish(packId),
+    enabled: adminMode && !!manifest.data && !!instanceDir.data,
+    retry: false,
+  });
   const changelog = useQuery({
     queryKey: ["pack-changelog", packId, lastSyncedCommit],
     queryFn: () => tauri.packChangelog(packId, 12),
@@ -199,6 +208,24 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const deletedMods = (statuses.data ?? []).filter((s) => s.status === "deleted");
   const unpublishedMods = (statuses.data ?? [])
     .filter((s) => s.status === "unpublished")
+    .sort((left, right) => left.filename.localeCompare(right.filename));
+  const unpublishedResourcepacks = (artifactPublishScan.data?.items ?? [])
+    .filter((item) => item.category === "resourcepacks" && item.action === "add")
+    .map((item) => ({
+      id: null,
+      filename: item.relativePath,
+      size: item.size ?? null,
+      status: "unpublished" as const,
+    }))
+    .sort((left, right) => left.filename.localeCompare(right.filename));
+  const unpublishedShaderpacks = (artifactPublishScan.data?.items ?? [])
+    .filter((item) => item.category === "shaderpacks" && item.action === "add")
+    .map((item) => ({
+      id: null,
+      filename: item.relativePath,
+      size: item.size ?? null,
+      status: "unpublished" as const,
+    }))
     .sort((left, right) => left.filename.localeCompare(right.filename));
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) => s.status === "missing" || s.status === "outdated",
@@ -238,7 +265,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setSelectedJavaChoiceId(javaChoices[0].id);
   }, [javaChoices, selectedJavaChoiceId]);
 
-  const modrinthMap = useModrinthProjects(manifest.data?.mods ?? []);
+  const modrinthMap = useModrinthProjects(
+    manifest.data
+      ? [...manifest.data.mods, ...manifest.data.resourcepacks, ...manifest.data.shaderpacks]
+      : [],
+  );
   const activeChangelogEntry = changelog.data?.[activeChangelogIndex] ?? null;
   const progressEntry = progress?.filename
     ? (manifest.data?.mods.find((m) => m.filename === progress.filename) ?? null)
@@ -378,11 +409,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Publish scan failed", { description: formatError(e) });
     },
   });
-  const deleteInstanceMod = useMutation({
-    mutationFn: (filename: string) => tauri.deleteInstanceMod(packId, filename),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
-      toast.success("Local mod deleted");
+  const deleteInstanceArtifact = useMutation({
+    mutationFn: ({ filename, category }: { filename: string; category: ManifestArtifactCategory }) =>
+      tauri.deleteInstanceMod(packId, filename, category),
+    onSuccess: async (_, variables) => {
+      if (variables.category === "mods") {
+        await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
+      } else {
+        await qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] });
+      }
+      toast.success(`Local ${describeArtifactCategory(variables.category).singular.toLowerCase()} deleted`);
     },
     onError: (error) => {
       toast.error("Delete failed", { description: formatError(error) });
@@ -485,6 +521,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       return;
     }
     sync.mutate();
+  }
+
+  function handleOpenAddEntry(category: ManifestArtifactCategory) {
+    setAddEntryCategory(category);
+    setAddEntryDialogOpen(true);
   }
 
   async function handleOpenInstanceFolder() {
@@ -690,7 +731,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 </CardDescription>
               </div>
               {adminMode ? (
-                <Button variant="outline" onClick={() => setAddModsOpen(true)}>
+                <Button variant="outline" onClick={() => handleOpenAddEntry("mods")}>
                   <Plus /> ADD MODS
                 </Button>
               ) : null}
@@ -715,8 +756,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       key={`unpublished:${mod.filename}`}
                       mod={mod}
                       adminMode={adminMode}
-                      deleting={deleteInstanceMod.isPending}
-                      onDelete={() => deleteInstanceMod.mutate(mod.filename)}
+                      deleting={deleteInstanceArtifact.isPending}
+                      onDelete={() => deleteInstanceArtifact.mutate({ filename: mod.filename, category: "mods" })}
                     />
                   ))}
                   {manifest.data.mods.map((m) => (
@@ -747,6 +788,156 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </Card>
       )}
 
+      {manifest.data && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-2">
+                <CardTitle>
+                  <Download className="inline size-4" /> RESOURCEPACKS
+                </CardTitle>
+                <CardDescription>
+                  {manifest.data.resourcepacks.length} entries tracked by manifest
+                  {unpublishedResourcepacks.length > 0
+                    ? ` · ${unpublishedResourcepacks.length} staged locally`
+                    : ""}
+                </CardDescription>
+              </div>
+              {adminMode ? (
+                <Button variant="outline" onClick={() => handleOpenAddEntry("resourcepacks")}>
+                  <Plus /> ADD RESOURCEPACK
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="max-h-[320px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10" />
+                    <TableHead>NAME</TableHead>
+                    <TableHead>SOURCE</TableHead>
+                    <TableHead>SIDE</TableHead>
+                    <TableHead>STATUS</TableHead>
+                    <TableHead className="text-right">SIZE</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {unpublishedResourcepacks.map((entry) => (
+                    <UnpublishedModRow
+                      key={`unpublished-resourcepack:${entry.filename}`}
+                      mod={entry}
+                      adminMode={adminMode}
+                      deleting={deleteInstanceArtifact.isPending}
+                      onDelete={() =>
+                        deleteInstanceArtifact.mutate({
+                          filename: entry.filename,
+                          category: "resourcepacks",
+                        })
+                      }
+                    />
+                  ))}
+                  {manifest.data.resourcepacks.map((entry) => (
+                    <ModRow
+                      key={entry.id}
+                      entry={entry}
+                      icon={
+                        entry.source === "modrinth" && entry.projectId
+                          ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
+                          : null
+                      }
+                      title={
+                        entry.source === "modrinth" && entry.projectId
+                          ? (modrinthMap.get(entry.projectId)?.title ?? null)
+                          : null
+                      }
+                      status={null}
+                      loading={false}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
+      {manifest.data && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-2">
+                <CardTitle>
+                  <Download className="inline size-4" /> SHADERPACKS
+                </CardTitle>
+                <CardDescription>
+                  {manifest.data.shaderpacks.length} entries tracked by manifest
+                  {unpublishedShaderpacks.length > 0
+                    ? ` · ${unpublishedShaderpacks.length} staged locally`
+                    : ""}
+                </CardDescription>
+              </div>
+              {adminMode ? (
+                <Button variant="outline" onClick={() => handleOpenAddEntry("shaderpacks")}>
+                  <Plus /> ADD SHADERPACK
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="max-h-[320px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10" />
+                    <TableHead>NAME</TableHead>
+                    <TableHead>SOURCE</TableHead>
+                    <TableHead>SIDE</TableHead>
+                    <TableHead>STATUS</TableHead>
+                    <TableHead className="text-right">SIZE</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {unpublishedShaderpacks.map((entry) => (
+                    <UnpublishedModRow
+                      key={`unpublished-shaderpack:${entry.filename}`}
+                      mod={entry}
+                      adminMode={adminMode}
+                      deleting={deleteInstanceArtifact.isPending}
+                      onDelete={() =>
+                        deleteInstanceArtifact.mutate({
+                          filename: entry.filename,
+                          category: "shaderpacks",
+                        })
+                      }
+                    />
+                  ))}
+                  {manifest.data.shaderpacks.map((entry) => (
+                    <ModRow
+                      key={entry.id}
+                      entry={entry}
+                      icon={
+                        entry.source === "modrinth" && entry.projectId
+                          ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
+                          : null
+                      }
+                      title={
+                        entry.source === "modrinth" && entry.projectId
+                          ? (modrinthMap.get(entry.projectId)?.title ?? null)
+                          : null
+                      }
+                      status={null}
+                      loading={false}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
+
       <SyncDialog
         open={syncOpen}
         onClose={() => setSyncOpen(false)}
@@ -756,7 +947,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={report}
       />
 
-      <AddModDialog open={addModsOpen} onClose={() => setAddModsOpen(false)} packId={packId} />
+      <AddModDialog
+        open={addEntryDialogOpen}
+        onClose={() => setAddEntryDialogOpen(false)}
+        packId={packId}
+        category={addEntryCategory}
+      />
 
       <Dialog open={changelogOpen} onOpenChange={setChangelogOpen}>
         <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
@@ -1331,6 +1527,8 @@ function PublishPreviewPage({
   const counts = summarizePublishReport(report);
   const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
   const hasChanges = changedItems.length > 0;
+  const publishTabs = buildPublishTabs(changedItems);
+  const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
   const publishVersion = useQuery({
     queryKey: ["suggest-publish-version", packId],
     queryFn: () => tauri.suggestPublishVersion(packId),
@@ -1444,44 +1642,77 @@ function PublishPreviewPage({
           <Card>
             <CardHeader>
               <CardTitle>CHANGES</CardTitle>
-              <CardDescription>Only added, updated, removed entries shown</CardDescription>
+              <CardDescription>Only added, updated, removed entries shown. Grouped by publish area.</CardDescription>
             </CardHeader>
             <CardContent>
               {hasChanges ? (
-                <ScrollArea className="h-[calc(100vh-23rem)]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>CATEGORY</TableHead>
-                        <TableHead>PATH</TableHead>
-                        <TableHead>ACTION</TableHead>
-                        <TableHead>SOURCE</TableHead>
-                        <TableHead className="text-right">SIZE</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {changedItems.map((item) => (
-                        <TableRow key={`${item.category}:${item.relativePath}:${item.action}`}>
-                          <TableCell>
-                            <Badge variant="outline">{labelCategory(item.category)}</Badge>
-                          </TableCell>
-                          <TableCell className="font-mono text-[10px] text-text-low">
-                            {item.relativePath}
-                          </TableCell>
-                          <TableCell>
-                            <PublishActionChip action={item.action} />
-                          </TableCell>
-                          <TableCell className="text-xs text-text-low">
-                            {item.source ?? "instance-local"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono text-xs text-text-low">
-                            {typeof item.size === "number" ? formatBytes(item.size) : "--"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
+                <Tabs defaultValue={defaultTab} className="gap-5">
+                  <TabsList className="flex-wrap border-b-0 gap-2">
+                    {publishTabs.map((tab) => (
+                      <TabsTrigger
+                        key={tab.id}
+                        value={tab.id}
+                        className="min-h-10 min-w-10 rounded-[1.1rem] border border-line-soft/20 px-3 py-2 data-active:border-brand-core/40 data-active:border-t-2"
+                      >
+                        <span>{tab.label}</span>
+                        <span className="font-mono text-[10px] tabular-nums text-text-low">{tab.count}</span>
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {publishTabs.map((tab) => (
+                    <TabsContent key={tab.id} value={tab.id} className="outline-none">
+                      <div className="mb-4 flex items-center justify-between gap-3 rounded-[1.25rem] border border-line-soft/20 bg-surface-sunken/55 px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{tab.label}</span>
+                          <span className="text-xs text-text-low [text-wrap:pretty]">{tab.description}</span>
+                        </div>
+                        <div className="text-right font-mono text-xs tabular-nums text-text-low">
+                          {tab.count} {tab.count === 1 ? "change" : "changes"}
+                        </div>
+                      </div>
+                      {tab.items.length > 0 ? (
+                        <ScrollArea className="h-[calc(100vh-27rem)]">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>CATEGORY</TableHead>
+                                <TableHead>PATH</TableHead>
+                                <TableHead>ACTION</TableHead>
+                                <TableHead>SOURCE</TableHead>
+                                <TableHead className="text-right">SIZE</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {tab.items.map((item) => (
+                                <TableRow key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}>
+                                  <TableCell>
+                                    <Badge variant="outline">{labelCategory(item.category, item.relativePath)}</Badge>
+                                  </TableCell>
+                                  <TableCell className="font-mono text-[10px] text-text-low">
+                                    {item.relativePath}
+                                  </TableCell>
+                                  <TableCell>
+                                    <PublishActionChip action={item.action} />
+                                  </TableCell>
+                                  <TableCell className="text-xs text-text-low">
+                                    {item.source ?? "instance-local"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
+                                    {typeof item.size === "number" ? formatBytes(item.size) : "--"}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      ) : (
+                        <div className="rounded-[1.25rem] border border-dashed border-line-soft/25 bg-surface-sunken/35 px-4 py-8 text-center text-sm text-text-low">
+                          No changed files in {tab.label.toLowerCase()}.
+                        </div>
+                      )}
+                    </TabsContent>
+                  ))}
+                </Tabs>
               ) : (
                 <p className="text-sm text-text-low">No changed files to publish.</p>
               )}
@@ -1497,28 +1728,37 @@ function AddModDialog({
   open,
   onClose,
   packId,
+  category,
 }: {
   open: boolean;
   onClose: () => void;
   packId: string;
+  category: ManifestArtifactCategory;
 }) {
   const qc = useQueryClient();
   const [input, setInput] = useState("");
   const [selectedSide, setSelectedSide] = useState<"client" | "server" | "both">("client");
+  const artifactLabel = describeArtifactCategory(category);
   const preview = useMutation({
-    mutationFn: (identifier: string) => tauri.previewModrinthMod(packId, identifier),
+    mutationFn: (identifier: string) => tauri.previewModrinthMod(packId, identifier, category),
     onSuccess: (data) => setSelectedSide(data.suggestedSide),
   });
   const addMod = useMutation({
     mutationFn: (payload: { projectId: string; versionId: string; side: "client" | "server" | "both" }) =>
-      tauri.addModrinthMod(packId, payload.projectId, payload.versionId, payload.side),
+      tauri.addModrinthMod(packId, category, payload.projectId, payload.versionId, payload.side),
     onSuccess: async (entry) => {
-      await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
-      toast.success("Mod staged", { description: entry.filename });
+      if (category === "mods") {
+        await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
+      } else {
+        await qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] });
+      }
+      toast.success(`${artifactLabel.singular} staged`, { description: entry.filename });
       handleClose();
     },
     onError: (error) => {
-      toast.error("Add mod failed", { description: formatError(error) });
+      toast.error(`Add ${artifactLabel.singular.toLowerCase()} failed`, {
+        description: formatError(error),
+      });
     },
   });
 
@@ -1534,9 +1774,9 @@ function AddModDialog({
     <Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
       <DialogContent className="max-w-2xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>ADD MODRINTH MOD</DialogTitle>
+          <DialogTitle>ADD MODRINTH {artifactLabel.heading}</DialogTitle>
           <DialogDescription>
-            Paste Modrinth link, slug, or project id. Mod downloads into instance first and stays unpublished until publish.
+            Paste Modrinth link, slug, or project id. {artifactLabel.singular} downloads into instance first and stays unpublished until publish.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-6 p-6">
@@ -1547,7 +1787,7 @@ function AddModDialog({
                 id="modrinth-link"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="https://modrinth.com/mod/... or slug"
+                placeholder={artifactLabel.placeholder}
               />
               <Button
                 variant="outline"
@@ -1567,7 +1807,7 @@ function AddModDialog({
             <ResolvedModPreview preview={preview.data} selectedSide={selectedSide} onSideChange={setSelectedSide} />
           ) : (
             <div className="border border-line-soft/20 bg-surface-sunken px-4 py-6 text-sm text-text-low">
-              Resolve Modrinth project first.
+              Resolve Modrinth {artifactLabel.singular.toLowerCase()} first.
             </div>
           )}
         </DialogBody>
@@ -1791,6 +2031,32 @@ function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function describeArtifactCategory(category: ManifestArtifactCategory) {
+  if (category === "resourcepacks") {
+    return {
+      singular: "Resourcepack",
+      heading: "RESOURCEPACK",
+      placeholder: "https://modrinth.com/resourcepack/... or slug",
+    };
+  }
+  if (category === "shaderpacks") {
+    return {
+      singular: "Shaderpack",
+      heading: "SHADERPACK",
+      placeholder: "https://modrinth.com/shader/... or slug",
+    };
+  }
+  return {
+    singular: "Mod",
+    heading: "MOD",
+    placeholder: "https://modrinth.com/mod/... or slug",
+  };
+}
+
+function entryDisplayName(filename: string) {
+  return filename.replace(/\.(jar|zip)$/i, "");
+}
+
 function ModRow({
   entry,
   icon,
@@ -1804,7 +2070,7 @@ function ModRow({
   status: ModStatusValue | null;
   loading: boolean;
 }) {
-  const displayName = title ?? entry.filename.replace(/\.jar$/i, "");
+  const displayName = title ?? entryDisplayName(entry.filename);
   return (
     <TableRow>
       <TableCell>
@@ -1841,7 +2107,7 @@ function ModRow({
 
 
 function DeletedModRow({ mod }: { mod: ModStatus }) {
-  const displayName = mod.filename.replace(/\.jar$/i, "");
+  const displayName = entryDisplayName(mod.filename);
   return (
     <TableRow className="opacity-45">
       <TableCell>
@@ -1880,7 +2146,7 @@ function UnpublishedModRow({
   deleting: boolean;
   onDelete: () => void;
 }) {
-  const displayName = mod.filename.replace(/\.jar$/i, "");
+  const displayName = entryDisplayName(mod.filename);
   const warningMode = !adminMode;
   return (
     <TableRow className={cn(warningMode ? "bg-signal-alert/8" : "bg-signal-warn/6")}>
@@ -1993,6 +2259,66 @@ function PublishActionChip({ action }: { action: PublishAction }) {
           : "text-text-low";
 
   return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{action}</span>;
+}
+
+type PublishTabDefinition = {
+  id: "mods" | "shaderpacks" | "resourcepacks" | "configs" | "options" | "others";
+  label: string;
+  description: string;
+  items: PublishScanReport["items"];
+  count: number;
+};
+
+function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefinition[] {
+  const tabs: Array<Omit<PublishTabDefinition, "items" | "count"> & { match: (item: PublishScanReport["items"][number]) => boolean }> = [
+    {
+      id: "mods",
+      label: "MODS",
+      description: "Jar artifacts tracked in manifest mods list.",
+      match: (item) => item.category === "mods",
+    },
+    {
+      id: "shaderpacks",
+      label: "SHADERPACKS",
+      description: "Shader archives staged for manifest shaderpacks list.",
+      match: (item) => item.category === "shaderpacks",
+    },
+    {
+      id: "resourcepacks",
+      label: "RESOURCEPACKS",
+      description: "Resource pack archives staged for manifest resourcepacks list.",
+      match: (item) => item.category === "resourcepacks",
+    },
+    {
+      id: "configs",
+      label: "CONFIGS",
+      description: "Tracked config tree changes from instance config folder.",
+      match: (item) => item.category === "config",
+    },
+    {
+      id: "options",
+      label: "OPTIONS",
+      description: "Root options files like options.txt intended for preset sync.",
+      match: (item) => item.category === "root" && item.relativePath === "options.txt",
+    },
+    {
+      id: "others",
+      label: "OTHERS",
+      description: "KubeJS + remaining root-level tracked files.",
+      match: (item) => item.category === "kubejs" || (item.category === "root" && item.relativePath !== "options.txt"),
+    },
+  ];
+
+  return tabs.map((tab) => {
+    const tabItems = items.filter(tab.match);
+    return {
+      id: tab.id,
+      label: tab.label,
+      description: tab.description,
+      items: tabItems,
+      count: tabItems.length,
+    };
+  });
 }
 
 function summarizePublishReport(report: PublishScanReport | null) {
@@ -2168,7 +2494,13 @@ function changelogActionMeta(action: PackChangelogItem["action"]) {
   };
 }
 
-function labelCategory(category: PublishCategory) {
+function labelCategory(category: PublishCategory, relativePath?: string) {
+  if (category === "root" && relativePath === "options.txt") {
+    return "OPTIONS";
+  }
+  if (category === "root") {
+    return "ROOT";
+  }
   return category.toUpperCase();
 }
 
