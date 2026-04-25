@@ -81,6 +81,7 @@ pub struct PublishPushReport {
 }
 
 pub type LaunchProfile = prism::LaunchProfile;
+pub type LaunchDefaults = prism::LaunchDefaults;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
 pub type JavaInstallProgress = prism::JavaInstallProgress;
 pub type ManagedPrismInstall = prism::ManagedPrismInstall;
@@ -314,6 +315,22 @@ pub async fn verify_publish_ssh() -> Result<PublishSshStatus, CommandError> {
 #[tauri::command]
 pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> {
     tokio::task::spawn_blocking(prism::get_settings)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_launch_defaults() -> Result<LaunchDefaults, CommandError> {
+    tokio::task::spawn_blocking(prism::get_launch_defaults)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_launch_defaults(defaults: LaunchDefaults) -> Result<LaunchDefaults, CommandError> {
+    tokio::task::spawn_blocking(move || prism::save_launch_defaults(defaults))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))?
         .map_err(CommandError::from)
@@ -705,13 +722,16 @@ pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> 
 pub async fn launch_pack(pack_id: String, instance_name: Option<String>) -> Result<(), CommandError> {
     let launch_profile = prism::load_launch_profile(&pack_id)?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
-    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
-        prism::apply_launch_profile(&instance_name, &launch_profile)?;
-        prism::launch(&instance_name)?;
-        Ok(())
-    })
-    .await
-    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    let apply_instance_name = instance_name.clone();
+    let apply_launch_profile = launch_profile.clone();
+    tokio::task::spawn_blocking(move || prism::apply_launch_profile(&apply_instance_name, &apply_launch_profile))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    tokio::task::spawn_blocking(move || prism::launch(&instance_name))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(())
 }
 

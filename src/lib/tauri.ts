@@ -172,6 +172,11 @@ export type LaunchProfile = {
   javaPath?: string | null;
   extraJvmArgs: string;
   autoJava: boolean;
+  showConsole: boolean;
+};
+
+export type LaunchDefaults = {
+  showConsole: boolean;
 };
 
 export type InstanceWriteReport = {
@@ -246,6 +251,9 @@ export const tauri = {
   getPrismSettings: () => invoke<PrismSettings>("get_prism_settings"),
   setPrismSettings: (binaryPath?: string | null, dataDir?: string | null, offlineUsername?: string | null) =>
     invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
+  getLaunchDefaults: () => invoke<LaunchDefaults>("get_launch_defaults"),
+  setLaunchDefaults: (defaults: LaunchDefaults) =>
+    invoke<LaunchDefaults>("set_launch_defaults", { defaults }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),

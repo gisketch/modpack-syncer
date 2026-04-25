@@ -36,8 +36,8 @@ export function App() {
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-[--surface-base] text-[--text-high]">
         <TitleBar />
         <RootGate />
-        <Toaster />
       </div>
+      <Toaster />
     </QueryClientProvider>
   );
 }

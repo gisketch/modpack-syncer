@@ -63,6 +63,15 @@ pub struct LaunchProfile {
     pub java_path: Option<String>,
     pub extra_jvm_args: String,
     pub auto_java: bool,
+    #[serde(default)]
+    pub show_console: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchDefaults {
+    #[serde(default)]
+    pub show_console: bool,
 }
 
 impl Default for LaunchProfile {
@@ -73,6 +82,7 @@ impl Default for LaunchProfile {
             java_path: None,
             extra_jvm_args: String::new(),
             auto_java: true,
+            show_console: false,
         }
     }
 }
@@ -183,6 +193,23 @@ pub fn save_settings(settings: PrismSettings) -> Result<PrismSettings, PrismErro
     Ok(settings)
 }
 
+pub fn get_launch_defaults() -> Result<LaunchDefaults, PrismError> {
+    let path = paths::launch_defaults_path()?;
+    if !path.exists() {
+        return Ok(LaunchDefaults::default());
+    }
+    let bytes = std::fs::read(path)?;
+    let defaults = serde_json::from_slice::<LaunchDefaults>(&bytes).map_err(anyhow::Error::from)?;
+    Ok(defaults)
+}
+
+pub fn save_launch_defaults(defaults: LaunchDefaults) -> Result<LaunchDefaults, PrismError> {
+    let path = paths::launch_defaults_path()?;
+    let bytes = serde_json::to_vec_pretty(&defaults).map_err(anyhow::Error::from)?;
+    std::fs::write(path, bytes)?;
+    Ok(defaults)
+}
+
 pub fn load_launch_profile(pack_id: &str) -> Result<LaunchProfile, PrismError> {
     let path = paths::launch_profile_path(pack_id)?;
     if !path.exists() {
@@ -219,15 +246,21 @@ pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
 }
 
 fn default_launch_profile() -> Result<LaunchProfile, PrismError> {
+    let defaults = get_launch_defaults().unwrap_or_default();
+
     if let Some(java_path) = preferred_managed_java_path()? {
         return Ok(LaunchProfile {
             java_path: Some(java_path),
             auto_java: false,
+            show_console: defaults.show_console,
             ..LaunchProfile::default()
         });
     }
 
-    Ok(LaunchProfile::default())
+    Ok(LaunchProfile {
+        show_console: defaults.show_console,
+        ..LaunchProfile::default()
+    })
 }
 
 fn preferred_managed_java_path() -> Result<Option<String>, PrismError> {
@@ -818,6 +851,16 @@ fn apply_launch_profile_to_cfg(settings: &mut BTreeMap<String, String>, profile:
         settings.insert("AutomaticJava".to_string(), "false".to_string());
         settings.insert("OverrideJavaLocation".to_string(), "false".to_string());
         settings.remove("JavaPath");
+    }
+
+    if profile.show_console {
+        settings.insert("OverrideConsole".to_string(), "true".to_string());
+        settings.insert("ShowConsole".to_string(), "true".to_string());
+        settings.insert("ShowConsoleOnError".to_string(), "true".to_string());
+    } else {
+        settings.insert("OverrideConsole".to_string(), "false".to_string());
+        settings.remove("ShowConsole");
+        settings.remove("ShowConsoleOnError");
     }
 }
 

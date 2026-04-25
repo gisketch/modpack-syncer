@@ -43,6 +43,8 @@ pub fn run() {
             commands::set_app_storage_settings,
             commands::get_prism_settings,
             commands::set_prism_settings,
+            commands::get_launch_defaults,
+            commands::set_launch_defaults,
             commands::fetch_mods,
             commands::detect_prism,
             commands::get_prism_account_status,

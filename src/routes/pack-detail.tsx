@@ -59,6 +59,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -1181,6 +1182,15 @@ function LaunchSetupPanel({
                 className="min-h-24 font-mono text-xs"
               />
               <p className="text-xs text-text-low">Do not put `-Xmx` / `-Xms` here. Memory slider owns those.</p>
+            </div>
+
+            <div className="flex min-h-10 items-center justify-between gap-4 border border-line-soft/20 bg-surface-sunken/60 px-4 py-3">
+              <Label htmlFor="show-console">SHOW CONSOLE</Label>
+              <Switch
+                checked={profile.showConsole}
+                onCheckedChange={(checked) => onChange({ ...profile, showConsole: checked })}
+                aria-label="Show modsync console window on launch"
+              />
             </div>
           </div>
 

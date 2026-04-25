@@ -51,6 +51,11 @@ export function SettingsRoute() {
     queryFn: () => tauri.getPrismSettings(),
     retry: false,
   });
+  const launchDefaults = useQuery({
+    queryKey: ["launch-defaults"],
+    queryFn: () => tauri.getLaunchDefaults(),
+    retry: false,
+  });
   const packs = useQuery({
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
@@ -144,6 +149,18 @@ export function SettingsRoute() {
       const message = formatError(error);
       setPrismInstallLogs((current) => [...current, `error :: ${message}`]);
       toast.error("Launcher install failed", { description: message });
+    },
+  });
+  const saveLaunchDefaults = useMutation({
+    mutationFn: (showConsole: boolean) => tauri.setLaunchDefaults({ showConsole }),
+    onSuccess: async (defaults) => {
+      await qc.invalidateQueries({ queryKey: ["launch-defaults"] });
+      toast.success("Launch defaults saved", {
+        description: defaults.showConsole ? "New packs open console by default" : "New packs keep console window off by default",
+      });
+    },
+    onError: (error) => {
+      toast.error("Launch defaults save failed", { description: formatError(error) });
     },
   });
 
@@ -277,6 +294,28 @@ export function SettingsRoute() {
             ) : (
               <p className="text-xs text-[--text-low]">No packs tracked yet.</p>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>LAUNCH DEFAULTS</CardTitle>
+          <CardDescription>Fallback launch behavior for packs without a saved launch profile yet</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between gap-4 border-b border-line-soft/20 pb-4 last:border-b-0 last:pb-0">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-[--text-high]">SHOW CONSOLE BY DEFAULT</p>
+              <p className="text-xs text-[--text-low]">
+                New pack launch profiles start with modsync console window enabled. Saved pack-specific choices still win.
+              </p>
+            </div>
+            <Switch
+              checked={launchDefaults.data?.showConsole ?? false}
+              disabled={launchDefaults.isLoading || saveLaunchDefaults.isPending}
+              onCheckedChange={(checked) => saveLaunchDefaults.mutate(checked)}
+            />
           </div>
         </CardContent>
       </Card>

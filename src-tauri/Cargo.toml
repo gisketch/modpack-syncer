@@ -1,6 +1,6 @@
 [package]
 name = "gisketch_s_modpack_syncer"
-version = "0.9.0"
+version = "0.9.1"
 description = "gisketch//s_modpack_syncer Minecraft modpack syncer + Prism launcher wrapper"
 authors = ["gisketch"]
 edition = "2021"
