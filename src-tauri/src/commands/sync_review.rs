@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::prism;
 
@@ -10,7 +10,7 @@ use super::option_presets::{
 };
 use super::{CommandError, PublishAction};
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OptionsSyncCategory {
     Keybinds,
@@ -279,6 +279,7 @@ pub fn apply_options_sync(
     pack_options_path: &Path,
     instance_name: &str,
     selection: &OptionPresetSelection,
+    enabled_categories: &[OptionsSyncCategory],
 ) -> Result<(), CommandError> {
     if matches!(selection, OptionPresetSelection::None) {
         return Ok(());
@@ -301,6 +302,9 @@ pub fn apply_options_sync(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
+        if !enabled_categories.contains(&classify_option_key(&key)) {
+            continue;
+        }
         if ignored_set.contains(&key) {
             continue;
         }

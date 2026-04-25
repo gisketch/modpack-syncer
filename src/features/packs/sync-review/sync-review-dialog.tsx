@@ -20,7 +20,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { OptionPresetSummary, OptionsSyncPreview, ShaderSettingsPreview } from "@/lib/tauri";
+import type {
+  OptionPresetSummary,
+  OptionsSyncCategory,
+  OptionsSyncPreview,
+  ShaderSettingsPreview,
+} from "@/lib/tauri";
 import { formatBytes } from "../artifact-status/artifact-status-rows";
 import { OptionsReviewStep } from "./options-review-step";
 import type { SyncCategorySummary, SyncReviewTab } from "./sync-artifact-preview";
@@ -50,6 +55,8 @@ type SyncReviewDialogProps = {
   optionPresets: OptionPresetSummary[];
   selectedOptionPresetId: string;
   onOptionPresetChange: (presetId: string) => void;
+  enabledOptionSyncCategories: OptionsSyncCategory[];
+  onOptionSyncCategoryChange: (category: OptionsSyncCategory, enabled: boolean) => void;
   syncPending: boolean;
   onClose: () => void;
   onNext: () => void;
@@ -78,6 +85,8 @@ export function SyncReviewDialog({
   optionPresets,
   selectedOptionPresetId,
   onOptionPresetChange,
+  enabledOptionSyncCategories,
+  onOptionSyncCategoryChange,
   syncPending,
   onClose,
   onNext,
@@ -125,6 +134,8 @@ export function SyncReviewDialog({
               optionPresets={optionPresets}
               selectedOptionPresetId={selectedOptionPresetId}
               onOptionPresetChange={onOptionPresetChange}
+              enabledOptionSyncCategories={enabledOptionSyncCategories}
+              onOptionSyncCategoryChange={onOptionSyncCategoryChange}
             />
           )}
         </DialogBody>

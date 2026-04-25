@@ -4,7 +4,8 @@ use tauri::Emitter;
 use super::option_presets::resolve_option_preset_selection;
 use super::sync_review::{
     apply_options_sync, apply_shader_settings_sync, build_options_sync_preview,
-    build_shader_settings_preview, set_options_ignored, OptionsSyncPreview, ShaderSettingsPreview,
+    build_shader_settings_preview, set_options_ignored, OptionsSyncCategory, OptionsSyncPreview,
+    ShaderSettingsPreview,
 };
 use super::CommandError;
 use crate::{cache, download, manifest, paths, prism};
@@ -35,6 +36,7 @@ pub async fn sync_instance(
     instance_name: Option<String>,
     sync_shader_settings: Option<bool>,
     option_preset_id: Option<String>,
+    option_sync_categories: Option<Vec<OptionsSyncCategory>>,
 ) -> Result<SyncInstanceReport, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
@@ -127,6 +129,8 @@ pub async fn sync_instance(
     let manifest_clone = manifest.clone();
     let instance_name_clone = instance_name.clone();
     let apply_shader_settings = sync_shader_settings.unwrap_or(false);
+    let enabled_option_categories =
+        option_sync_categories.unwrap_or_else(default_options_sync_categories);
     let option_preset_selection =
         resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     let inst_report = tokio::task::spawn_blocking(move || {
@@ -143,6 +147,7 @@ pub async fn sync_instance(
             &pack_dir_clone.join("options.txt"),
             &instance_name_clone,
             &option_preset_selection,
+            &enabled_option_categories,
         )?;
         if apply_shader_settings {
             apply_shader_settings_sync(
@@ -174,6 +179,14 @@ pub async fn sync_instance(
         fetch: fetch_report,
         instance: inst_report,
     })
+}
+
+fn default_options_sync_categories() -> Vec<OptionsSyncCategory> {
+    vec![
+        OptionsSyncCategory::Keybinds,
+        OptionsSyncCategory::Video,
+        OptionsSyncCategory::Other,
+    ]
 }
 
 #[tauri::command]

@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatError } from "@/lib/format-error";
 import {
   type OptionPresetSummary,
+  type OptionsSyncCategory,
   type OptionsSyncPreview,
   PACK_DEFAULT_PRESET_ID,
   type ShaderSettingsPreview,
@@ -49,6 +50,8 @@ type OptionsReviewStepProps = {
   optionPresets: OptionPresetSummary[];
   selectedOptionPresetId: string;
   onOptionPresetChange: (presetId: string) => void;
+  enabledOptionSyncCategories: OptionsSyncCategory[];
+  onOptionSyncCategoryChange: (category: OptionsSyncCategory, enabled: boolean) => void;
 };
 
 export function OptionsReviewStep({
@@ -66,6 +69,8 @@ export function OptionsReviewStep({
   optionPresets,
   selectedOptionPresetId,
   onOptionPresetChange,
+  enabledOptionSyncCategories,
+  onOptionSyncCategoryChange,
 }: OptionsReviewStepProps) {
   const [showIgnored, setShowIgnored] = useState(true);
   const hasShaderSettings = shaderLoading || !!shaderError || !!shaderPreview?.hasPackIrisFile;
@@ -200,6 +205,7 @@ export function OptionsReviewStep({
                 const visibleChanges = sortOptionsSyncChanges(group.changes).filter(
                   (change) => showIgnored || !change.ignored,
                 );
+                const syncCategoryEnabled = enabledOptionSyncCategories.includes(group.category);
 
                 return (
                   <TabsContent
@@ -214,10 +220,21 @@ export function OptionsReviewStep({
                         <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
                           <span>SHOW IGNORED</span>
                           <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                          <span>{syncCategoryLabel(group.category)}</span>
+                          <Switch
+                            checked={syncCategoryEnabled}
+                            onCheckedChange={(enabled) =>
+                              onOptionSyncCategoryChange(group.category, enabled)
+                            }
+                          />
                         </div>
                       </CardWindowBar>
                       <CardContent className="min-h-0 flex-1 p-0">
-                        {visibleChanges.length > 0 ? (
+                        {!syncCategoryEnabled ? (
+                          <div className="flex h-full min-h-[18rem] items-center justify-center px-4 py-8 text-center text-sm text-text-low">
+                            {syncCategoryDisabledLabel(group.category)}
+                          </div>
+                        ) : visibleChanges.length > 0 ? (
                           <ScrollArea className="h-full">
                             <Table>
                               <TableHeader>
@@ -368,6 +385,18 @@ function presetCountLabel(preset: OptionPresetSummary) {
   const count =
     preset.counts.video + preset.counts.keybinds + preset.counts.other + preset.counts.shader;
   return `${count} keys`;
+}
+
+function syncCategoryLabel(category: OptionsSyncCategory) {
+  if (category === "keybinds") return "SYNC KEYBINDS";
+  if (category === "video") return "SYNC VIDEO SETTINGS";
+  return "SYNC OTHER OPTIONS";
+}
+
+function syncCategoryDisabledLabel(category: OptionsSyncCategory) {
+  if (category === "keybinds") return "KEYBINDS SYNCING IS DISABLED.";
+  if (category === "video") return "VIDEO SETTINGS SYNCING IS DISABLED.";
+  return "OTHER OPTIONS SYNCING IS DISABLED.";
 }
 
 function ShaderSettingsTab({

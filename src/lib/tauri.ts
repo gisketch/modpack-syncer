@@ -354,12 +354,14 @@ export const tauri = {
     instanceName?: string,
     syncShaderSettings?: boolean,
     optionPresetId?: string,
+    optionSyncCategories?: OptionsSyncCategory[],
   ) =>
     invoke<SyncInstanceReport>("sync_instance", {
       packId,
       instanceName,
       syncShaderSettings,
       optionPresetId,
+      optionSyncCategories,
     }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   launchPack: (packId: string, instanceName?: string) =>

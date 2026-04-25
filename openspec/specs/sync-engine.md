@@ -25,6 +25,7 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 19. `IGNORE SHADER SETTINGS` MUST override the shader portion of a selected preset.
 20. The pack detail UI MUST consider an instance needing sync when the last synced pack commit differs from the current local pack head, even if current artifact files look unchanged.
 21. Local option file edits MUST be handled through options review and ignored-key controls, not treated as a global pack-update signal by themselves.
+22. Options review MUST let users enable or disable syncing for each options category (`keybinds`, `video`, `other`). Category sync MUST be enabled by default, and disabled categories MUST leave matching local option keys unchanged during sync.
 
 ## See
 

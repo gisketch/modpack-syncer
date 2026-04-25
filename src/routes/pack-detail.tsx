@@ -70,6 +70,7 @@ import {
   type ManifestArtifactCategory,
   type ModStatusValue,
   NO_OPTION_PRESET_ID,
+  type OptionsSyncCategory,
   PACK_DEFAULT_PRESET_ID,
   type PublishScanReport,
   type SyncInstanceReport,
@@ -81,6 +82,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useNav } from "@/stores/nav-store";
 
 const EMPTY_PUBLISH_IGNORE_PATTERNS: string[] = [];
+const DEFAULT_OPTION_SYNC_CATEGORIES: OptionsSyncCategory[] = ["keybinds", "video", "other"];
 
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
@@ -146,6 +148,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const [pendingShaderSync, setPendingShaderSync] = useState(false);
   const [pendingOptionPresetId, setPendingOptionPresetId] = useState(PACK_DEFAULT_PRESET_ID);
+  const [optionSyncCategories, setOptionSyncCategories] = useState<OptionsSyncCategory[]>(
+    DEFAULT_OPTION_SYNC_CATEGORIES,
+  );
+  const [pendingOptionSyncCategories, setPendingOptionSyncCategories] = useState<
+    OptionsSyncCategory[]
+  >(DEFAULT_OPTION_SYNC_CATEGORIES);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -393,10 +401,19 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     mutationFn: ({
       syncShaderSettings,
       optionPresetId,
+      optionSyncCategories,
     }: {
       syncShaderSettings: boolean;
       optionPresetId: string;
-    }) => tauri.syncInstance(packId, undefined, syncShaderSettings, optionPresetId),
+      optionSyncCategories: OptionsSyncCategory[];
+    }) =>
+      tauri.syncInstance(
+        packId,
+        undefined,
+        syncShaderSettings,
+        optionPresetId,
+        optionSyncCategories,
+      ),
     onMutate: () => {
       setSyncOpen(true);
       setProgress({
@@ -642,6 +659,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setShaderSyncDecision("undecided");
     setPendingShaderSync(false);
     setPendingOptionPresetId(selectedOptionPresetId);
+    setOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
+    setPendingOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
     setSyncReviewOpen(true);
   }
 
@@ -651,6 +670,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setShaderSyncDecision("undecided");
     setPendingShaderSync(false);
     setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
+    setOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
+    setPendingOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
   }
 
   function handleSyncReviewNext() {
@@ -664,6 +685,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     handleCloseSyncReview();
     setPendingShaderSync(applyShaderSettings);
     setPendingOptionPresetId(selectedOptionPresetId);
+    setPendingOptionSyncCategories(optionSyncCategories);
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
@@ -675,6 +697,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     sync.mutate({
       syncShaderSettings: applyShaderSettings,
       optionPresetId: selectedOptionPresetId,
+      optionSyncCategories,
+    });
+  }
+
+  function handleOptionSyncCategoryChange(category: OptionsSyncCategory, enabled: boolean) {
+    setOptionSyncCategories((current) => {
+      if (enabled) {
+        return current.includes(category) ? current : [...current, category];
+      }
+      return current.filter((item) => item !== category);
     });
   }
 
@@ -1146,6 +1178,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         optionPresets={optionPresets.data ?? []}
         selectedOptionPresetId={selectedOptionPresetId}
         onOptionPresetChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
+        enabledOptionSyncCategories={optionSyncCategories}
+        onOptionSyncCategoryChange={handleOptionSyncCategoryChange}
         syncPending={sync.isPending}
         onClose={handleCloseSyncReview}
         onNext={handleSyncReviewNext}
@@ -1191,11 +1225,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         <DialogContent className="max-w-xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>SYNC FIRST</DialogTitle>
-            <DialogDescription>
-              This pack has updates newer than the last synced version on this instance.
-            </DialogDescription>
           </DialogHeader>
-          <DialogBody className="p-6">
+          <DialogBody className="flex flex-col gap-4 p-6">
+            <p className="text-sm text-text-low [text-wrap:pretty]">
+              This pack has updates newer than the last synced version on this instance.
+            </p>
             <div className="grid gap-2 border border-line-soft/20 bg-surface-sunken/60 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
@@ -1415,6 +1449,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 sync.mutate({
                   syncShaderSettings: pendingShaderSync,
                   optionPresetId: pendingOptionPresetId,
+                  optionSyncCategories: pendingOptionSyncCategories,
                 });
               }}
             >
@@ -1452,6 +1487,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 sync.mutate({
                   syncShaderSettings: pendingShaderSync,
                   optionPresetId: pendingOptionPresetId,
+                  optionSyncCategories: pendingOptionSyncCategories,
                 });
               }}
             >
