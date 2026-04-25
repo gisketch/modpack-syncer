@@ -69,7 +69,7 @@ export function SyncDialog({
                   <Slider value={[completed]} max={total} disabled>
                     <SliderControl>
                       <SliderTrack>
-                        <SliderIndicator />
+                        <SliderIndicator className="transition-[width,transform] duration-500 ease-out" />
                       </SliderTrack>
                       <SliderThumb className="opacity-0" />
                     </SliderControl>

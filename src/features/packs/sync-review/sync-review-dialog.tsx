@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { AnimatePresence, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardStatus, CardWindowBar, CardWindowTab } from "@/components/ui/card";
 import {
@@ -10,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { motion } from "@/components/ui/motion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -93,6 +95,9 @@ export function SyncReviewDialog({
   onBack,
   onConfirm,
 }: SyncReviewDialogProps) {
+  const reduceMotion = useReducedMotion();
+  const stepContentKey = step === "artifacts" && artifactLoading ? "artifacts-loading" : step;
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
@@ -105,39 +110,58 @@ export function SyncReviewDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
-          {step === "artifacts" && artifactLoading ? (
-            <Card>
-              <CardContent className="flex items-center gap-3 p-5 text-sm text-text-low">
-                <Loader2 className="size-4 animate-spin text-brand-core" />
-                Building sync diff...
-              </CardContent>
-            </Card>
-          ) : step === "artifacts" ? (
-            <SyncArtifactReview
-              syncSummary={syncSummary}
-              syncReviewTabs={syncReviewTabs}
-              defaultTab={defaultTab}
-            />
-          ) : (
-            <OptionsReviewStep
-              hasTrackedOptionsFile={hasTrackedOptionsFile}
-              preview={optionsPreview}
-              loading={optionsLoading}
-              error={optionsError}
-              onToggleIgnore={onToggleIgnore}
-              togglingIgnore={togglingIgnore}
-              shaderPreview={shaderPreview}
-              shaderLoading={shaderLoading}
-              shaderError={shaderError}
-              shaderDecision={shaderDecision}
-              onShaderDecisionChange={onShaderDecisionChange}
-              optionPresets={optionPresets}
-              selectedOptionPresetId={selectedOptionPresetId}
-              onOptionPresetChange={onOptionPresetChange}
-              enabledOptionSyncCategories={enabledOptionSyncCategories}
-              onOptionSyncCategoryChange={onOptionSyncCategoryChange}
-            />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={stepContentKey}
+              className="flex min-h-0 flex-1 flex-col"
+              initial={
+                reduceMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, x: step === "options" ? 18 : -18, filter: "blur(2px)" }
+              }
+              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, x: 0, filter: "blur(0px)" }}
+              exit={
+                reduceMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, x: step === "options" ? -14 : 14, filter: "blur(2px)" }
+              }
+              transition={{ duration: reduceMotion ? 0.01 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {step === "artifacts" && artifactLoading ? (
+                <Card>
+                  <CardContent className="flex items-center gap-3 p-5 text-sm text-text-low">
+                    <Loader2 className="size-4 animate-spin text-brand-core" />
+                    Building sync diff...
+                  </CardContent>
+                </Card>
+              ) : step === "artifacts" ? (
+                <SyncArtifactReview
+                  syncSummary={syncSummary}
+                  syncReviewTabs={syncReviewTabs}
+                  defaultTab={defaultTab}
+                />
+              ) : (
+                <OptionsReviewStep
+                  hasTrackedOptionsFile={hasTrackedOptionsFile}
+                  preview={optionsPreview}
+                  loading={optionsLoading}
+                  error={optionsError}
+                  onToggleIgnore={onToggleIgnore}
+                  togglingIgnore={togglingIgnore}
+                  shaderPreview={shaderPreview}
+                  shaderLoading={shaderLoading}
+                  shaderError={shaderError}
+                  shaderDecision={shaderDecision}
+                  onShaderDecisionChange={onShaderDecisionChange}
+                  optionPresets={optionPresets}
+                  selectedOptionPresetId={selectedOptionPresetId}
+                  onOptionPresetChange={onOptionPresetChange}
+                  enabledOptionSyncCategories={enabledOptionSyncCategories}
+                  onOptionSyncCategoryChange={onOptionSyncCategoryChange}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
         </DialogBody>
         <DialogFooter className="px-6 py-4 sm:justify-between">
           {step === "artifacts" ? (

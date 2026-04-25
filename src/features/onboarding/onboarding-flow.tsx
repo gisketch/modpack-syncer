@@ -12,11 +12,13 @@ import {
   RotateCcw,
   User,
 } from "lucide-react";
+import { AnimatePresence, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardStatus, CardWindowBar, CardWindowTab } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { motion } from "@/components/ui/motion";
 import { formatError } from "@/lib/format-error";
 import { type JavaInstallProgressEvent, type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,7 @@ const ONBOARDING_STEPS: Array<{ id: OnboardingStep; label: string }> = [
 export function OnboardingRoute({ openedFromSettings = false }: { openedFromSettings?: boolean }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
+  const reduceMotion = useReducedMotion();
   const [step, setStep] = useState<OnboardingStep>("directory");
   const [stepInitialized, setStepInitialized] = useState(false);
   const [installDirectoryDraft, setInstallDirectoryDraft] = useState("");
@@ -299,136 +302,157 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
         <CardContent className="flex min-h-0 flex-1 flex-col gap-5 p-5 sm:p-6">
           <SegmentedProgress currentStep={step} />
           <div className="min-h-0 flex-1 overflow-hidden border border-line-soft/40 bg-surface-sunken/50 p-4 sm:p-5">
-            {step === "directory" ? (
-              <StepFrame
-                icon={<HardDrive className="size-5" />}
-                title="SET DEFAULT DIRECTORY"
-                status={directoryReady ? "READY" : "REQUIRED"}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={step}
+                className="h-full"
+                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 12, filter: "blur(2px)" }}
+                animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -10, filter: "blur(2px)" }}
+                transition={{ duration: reduceMotion ? 0.01 : 0.2, ease: [0.22, 1, 0.36, 1] }}
               >
-                <div className="grid gap-4">
-                  <StatusLine
-                    label="CURRENT"
-                    value={installDirectory.data?.effectiveDir ?? "CHECKING"}
-                    mono
-                  />
-                  <div className="grid gap-2">
-                    <span className="cp-tactical-label text-[10px] text-text-low">DIRECTORY</span>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        value={installDirectoryDraft}
-                        onChange={(event) => setInstallDirectoryDraft(event.target.value)}
-                        placeholder="/path/to/modsync"
-                        className="font-mono text-xs"
+                {step === "directory" ? (
+                  <StepFrame
+                    icon={<HardDrive className="size-5" />}
+                    title="SET DEFAULT DIRECTORY"
+                    status={directoryReady ? "READY" : "REQUIRED"}
+                  >
+                    <div className="grid gap-4">
+                      <StatusLine
+                        label="CURRENT"
+                        value={installDirectory.data?.effectiveDir ?? "CHECKING"}
+                        mono
                       />
+                      <div className="grid gap-2">
+                        <span className="cp-tactical-label text-[10px] text-text-low">
+                          DIRECTORY
+                        </span>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            value={installDirectoryDraft}
+                            onChange={(event) => setInstallDirectoryDraft(event.target.value)}
+                            placeholder="/path/to/modsync"
+                            className="font-mono text-xs"
+                          />
+                          <Button
+                            variant="secondary"
+                            onClick={() => void handleBrowseInstallDirectory()}
+                          >
+                            <FolderOpen className="size-4" /> BROWSE
+                          </Button>
+                        </div>
+                      </div>
+                      <StatusLine label="USES" value="LAUNCHER / JAVA / MODPACKS" />
+                    </div>
+                  </StepFrame>
+                ) : null}
+
+                {step === "java" ? (
+                  <StepFrame
+                    icon={<Download className="size-5" />}
+                    title="INSTALL JAVA"
+                    status={javaReady ? "READY" : "MISSING"}
+                  >
+                    <div className="grid gap-4">
+                      <StatusLine
+                        label="RUNTIME"
+                        value={
+                          javaReady
+                            ? "TEMURIN 21 READY"
+                            : managedJava.isLoading
+                              ? "CHECKING"
+                              : "NOT INSTALLED"
+                        }
+                      />
+                      {installJava.isPending ? (
+                        <ProgressPanel
+                          progress={javaInstallProgress?.progress ?? 0}
+                          stage={javaInstallProgress?.stage ?? "queued"}
+                          currentBytes={javaInstallProgress?.currentBytes ?? null}
+                          totalBytes={javaInstallProgress?.totalBytes ?? null}
+                          logs={javaInstallLogs}
+                        />
+                      ) : null}
                       <Button
-                        variant="secondary"
-                        onClick={() => void handleBrowseInstallDirectory()}
+                        onClick={() => installJava.mutate()}
+                        disabled={installJava.isPending || javaReady}
                       >
-                        <FolderOpen className="size-4" /> BROWSE
+                        {installJava.isPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <Download />
+                        )}
+                        {javaReady ? "JAVA READY" : "INSTALL JAVA"}
                       </Button>
                     </div>
-                  </div>
-                  <StatusLine label="USES" value="LAUNCHER / JAVA / MODPACKS" />
-                </div>
-              </StepFrame>
-            ) : null}
+                  </StepFrame>
+                ) : null}
 
-            {step === "java" ? (
-              <StepFrame
-                icon={<Download className="size-5" />}
-                title="INSTALL JAVA"
-                status={javaReady ? "READY" : "MISSING"}
-              >
-                <div className="grid gap-4">
-                  <StatusLine
-                    label="RUNTIME"
-                    value={
-                      javaReady
-                        ? "TEMURIN 21 READY"
-                        : managedJava.isLoading
-                          ? "CHECKING"
-                          : "NOT INSTALLED"
-                    }
-                  />
-                  {installJava.isPending ? (
-                    <ProgressPanel
-                      progress={javaInstallProgress?.progress ?? 0}
-                      stage={javaInstallProgress?.stage ?? "queued"}
-                      currentBytes={javaInstallProgress?.currentBytes ?? null}
-                      totalBytes={javaInstallProgress?.totalBytes ?? null}
-                      logs={javaInstallLogs}
-                    />
-                  ) : null}
-                  <Button
-                    onClick={() => installJava.mutate()}
-                    disabled={installJava.isPending || javaReady}
+                {step === "prism" ? (
+                  <StepFrame
+                    icon={<Package className="size-5" />}
+                    title="INSTALL PRISM"
+                    status={launcherReady ? "READY" : "MISSING"}
                   >
-                    {installJava.isPending ? <Loader2 className="animate-spin" /> : <Download />}
-                    {javaReady ? "JAVA READY" : "INSTALL JAVA"}
-                  </Button>
-                </div>
-              </StepFrame>
-            ) : null}
+                    <div className="grid gap-4">
+                      <StatusLine
+                        label="BINARY"
+                        value={prismSettings.data?.binaryPath || "NOT SET"}
+                        mono
+                      />
+                      <StatusLine
+                        label="DATA"
+                        value={prismSettings.data?.dataDir || "NOT SET"}
+                        mono
+                      />
+                      {installManagedPrism.isPending ? (
+                        <ProgressPanel
+                          progress={prismInstallProgress?.progress ?? 0}
+                          stage={prismInstallProgress?.stage ?? "queued"}
+                          currentBytes={prismInstallProgress?.currentBytes ?? null}
+                          totalBytes={prismInstallProgress?.totalBytes ?? null}
+                          logs={prismInstallLogs}
+                        />
+                      ) : null}
+                      <Button
+                        onClick={() => installManagedPrism.mutate()}
+                        disabled={installManagedPrism.isPending || launcherReady}
+                      >
+                        {installManagedPrism.isPending ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <Package />
+                        )}
+                        {launcherReady ? "PRISM READY" : "INSTALL PRISM"}
+                      </Button>
+                    </div>
+                  </StepFrame>
+                ) : null}
 
-            {step === "prism" ? (
-              <StepFrame
-                icon={<Package className="size-5" />}
-                title="INSTALL PRISM"
-                status={launcherReady ? "READY" : "MISSING"}
-              >
-                <div className="grid gap-4">
-                  <StatusLine
-                    label="BINARY"
-                    value={prismSettings.data?.binaryPath || "NOT SET"}
-                    mono
-                  />
-                  <StatusLine label="DATA" value={prismSettings.data?.dataDir || "NOT SET"} mono />
-                  {installManagedPrism.isPending ? (
-                    <ProgressPanel
-                      progress={prismInstallProgress?.progress ?? 0}
-                      stage={prismInstallProgress?.stage ?? "queued"}
-                      currentBytes={prismInstallProgress?.currentBytes ?? null}
-                      totalBytes={prismInstallProgress?.totalBytes ?? null}
-                      logs={prismInstallLogs}
-                    />
-                  ) : null}
-                  <Button
-                    onClick={() => installManagedPrism.mutate()}
-                    disabled={installManagedPrism.isPending || launcherReady}
+                {step === "username" ? (
+                  <StepFrame
+                    icon={<User className="size-5" />}
+                    title="USERNAME"
+                    status={usernameReady ? "READY" : "REQUIRED"}
                   >
-                    {installManagedPrism.isPending ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Package />
-                    )}
-                    {launcherReady ? "PRISM READY" : "INSTALL PRISM"}
-                  </Button>
-                </div>
-              </StepFrame>
-            ) : null}
-
-            {step === "username" ? (
-              <StepFrame
-                icon={<User className="size-5" />}
-                title="USERNAME"
-                status={usernameReady ? "READY" : "REQUIRED"}
-              >
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <span className="cp-tactical-label text-[10px] text-text-low">
-                      OFFLINE USERNAME
-                    </span>
-                    <Input
-                      value={offlineUsername}
-                      onChange={(event) => setOfflineUsername(event.target.value)}
-                      placeholder="Username"
-                      autoFocus
-                    />
-                  </div>
-                  <StatusLine label="NEXT" value="PACKS" />
-                </div>
-              </StepFrame>
-            ) : null}
+                    <div className="grid gap-4">
+                      <div className="grid gap-2">
+                        <span className="cp-tactical-label text-[10px] text-text-low">
+                          OFFLINE USERNAME
+                        </span>
+                        <Input
+                          value={offlineUsername}
+                          onChange={(event) => setOfflineUsername(event.target.value)}
+                          placeholder="Username"
+                          autoFocus
+                        />
+                      </div>
+                      <StatusLine label="NEXT" value="PACKS" />
+                    </div>
+                  </StepFrame>
+                ) : null}
+              </motion.div>
+            </AnimatePresence>
           </div>
           <div className="flex items-center justify-between gap-3">
             <Button variant="secondary" onClick={goBack} disabled={currentStepIndex === 0}>
@@ -553,7 +577,7 @@ function ProgressPanel({
       </div>
       <div className="h-2 overflow-hidden border border-line-soft/40 bg-surface-sunken">
         <div
-          className="h-full bg-brand-core transition-[width] duration-200"
+          className="h-full bg-brand-core transition-[width] duration-500 ease-out"
           style={{ width: `${Math.max(progress, 4)}%` }}
         />
       </div>

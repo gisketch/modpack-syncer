@@ -12,4 +12,6 @@ Add subtle app-wide motion using Motion for React: route transitions, page conte
 4. Dialog header/body/footer SHOULD stagger on open.
 5. Sidebar navigation entries SHOULD slide in subtly.
 6. Button press feedback SHOULD use `scale(0.96)`.
-7. Reduced-motion preference MUST be respected.
+7. Sync review and onboarding step changes SHOULD fade/slide instead of hard-swapping content.
+8. Java, Prism, and sync progress bars SHOULD ease width changes.
+9. Reduced-motion preference MUST be respected.
