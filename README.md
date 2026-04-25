@@ -1,20 +1,30 @@
-# gisketch//s_modpack_syncer
+# modsync
 
-Minecraft Java modpack syncer + Prism Launcher wrapper, built for **gisketch//s_modpack_syncer** with **Tauri 2 + React + TypeScript**.
+Minecraft Java modpack syncer + Prism Launcher wrapper, built with **Tauri 2 + React + TypeScript**.
 
-One binary that keeps you and your friends on the exact same mods, configs, KubeJS scripts, resource packs, and shader packs — pulled from a single source of truth (your Gitea repo) and launched through Prism.
+I made modsync for me and my friends so we can play custom Minecraft packs without passing files around or debugging who has the wrong config. Mods, configs, KubeJS scripts, resource packs, shader packs, profiles, and options live in one GitHub source of truth. The app pulls that into Prism and keeps everyone on the same version.
+
+The point is simple: one app for the packs we make now, and the packs we keep tweaking later. I like tuning things until they feel right, and modsync turns that work into something everyone can use without setup becoming homework.
 
 ## Status
 
-Early scaffold. See [docs/planned_features.md](docs/planned_features.md) for the roadmap and [docs/architecture.md](docs/architecture.md) for the design.
+Active private/friend-group tool. See [docs/planned_features.md](docs/planned_features.md) for the roadmap and [docs/architecture.md](docs/architecture.md) for the design.
 
 ## Stack
 
 - **App shell**: Tauri 2
 - **Frontend**: React 19, TypeScript, Vite, Tailwind v4, Zustand, TanStack Query
-- **Backend**: Rust (tokio, reqwest, git2, aws-sdk-s3, rusqlite)
+- **Backend**: Rust (tokio, reqwest, git2, rusqlite)
 - **Package manager**: Bun
-- **Launcher**: Prism Launcher (detected, not bundled)
+- **Launcher**: Prism Launcher wrapper/managed installer flow
+
+## What It Does
+
+- Clones pack repos from GitHub and treats them as the source of truth.
+- Syncs mods, resource packs, shader packs, configs, KubeJS, profiles, and options into Prism instances.
+- Verifies downloaded artifacts by SHA before writing them.
+- Lets pack admins publish local instance changes back into the repo preview-first.
+- Supports option presets, shader settings review, per-file publish ignore rules, and launch gating when packs are behind.
 
 ## Dev prerequisites
 

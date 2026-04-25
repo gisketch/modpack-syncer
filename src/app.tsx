@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Loader2, Package, Settings } from "lucide-react";
+import { Info, Loader2, Package, Settings } from "lucide-react";
 import { AnimatePresence } from "motion/react";
 import { useRef } from "react";
 import { TitleBar } from "@/components/title-bar";
@@ -18,6 +18,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { useAppVersion } from "@/hooks/use-app-version";
 import { tauri } from "@/lib/tauri";
+import { AboutRoute } from "@/routes/about";
 import { HomeRoute } from "@/routes/home";
 import { OnboardingRoute } from "@/routes/onboarding";
 import { PackDetailRoute } from "@/routes/pack-detail";
@@ -103,8 +104,14 @@ function Shell() {
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
   });
+  const prismSettings = useQuery({
+    queryKey: ["prism-settings"],
+    queryFn: () => tauri.getPrismSettings(),
+    retry: false,
+  });
 
   const onPacks = view.kind === "packs" || view.kind === "pack";
+  const sidebarName = prismSettings.data?.offlineUsername?.trim() || "MODSYNC";
   const routeKey = view.kind === "pack" ? `pack:${view.id}` : view.kind;
   const initialRouteKey = useRef(routeKey);
   const route =
@@ -114,6 +121,8 @@ function Shell() {
       <PackDetailRoute packId={view.id} />
     ) : view.kind === "settings" ? (
       <SettingsRoute />
+    ) : view.kind === "about" ? (
+      <AboutRoute />
     ) : (
       <OnboardingRoute openedFromSettings />
     );
@@ -126,8 +135,8 @@ function Shell() {
             <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
               :: NAVIGATION
             </span>
-            <span className="font-heading text-sm font-bold uppercase tracking-wider text-brand-core">
-              MODSYNC
+            <span className="truncate font-heading text-sm font-bold tracking-wider text-brand-core">
+              {sidebarName}
             </span>
           </div>
         </SidebarHeader>
@@ -176,6 +185,19 @@ function Shell() {
               <Settings className="size-4" />
             </SidebarItemIcon>
             SETTINGS
+          </SidebarItem>
+          <SidebarItem
+            href="#"
+            active={view.kind === "about"}
+            onClick={(e) => {
+              e.preventDefault();
+              go({ kind: "about" });
+            }}
+          >
+            <SidebarItemIcon>
+              <Info className="size-4" />
+            </SidebarItemIcon>
+            ABOUT
           </SidebarItem>
         </SidebarContent>
         <SidebarFooter>
