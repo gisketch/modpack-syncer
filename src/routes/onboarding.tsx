@@ -1,14 +1,23 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, Download, FolderGit2, Loader2, Package, RotateCcw, User } from "lucide-react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  Check,
+  ChevronRight,
+  Download,
+  FolderGit2,
+  Loader2,
+  Package,
+  RotateCcw,
+  User,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { formatError } from "@/lib/format-error";
 import { type JavaInstallProgressEvent, type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { useNav } from "@/stores/nav-store";
 
 export function OnboardingRoute({ openedFromSettings = false }: { openedFromSettings?: boolean }) {
@@ -19,9 +28,12 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [offlineUsername, setOfflineUsername] = useState("");
-  const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(null);
+  const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(
+    null,
+  );
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
-  const [prismInstallProgress, setPrismInstallProgress] = useState<PrismInstallProgressEvent | null>(null);
+  const [prismInstallProgress, setPrismInstallProgress] =
+    useState<PrismInstallProgressEvent | null>(null);
   const [prismInstallLogs, setPrismInstallLogs] = useState<string[]>([]);
 
   const packs = useQuery({
@@ -126,7 +138,9 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
         qc.invalidateQueries({ queryKey: ["prism"] }),
         qc.invalidateQueries({ queryKey: ["prism-settings"] }),
       ]);
-      toast.success("Launcher installed", { description: `${install.version} · ${install.assetName}` });
+      toast.success("Launcher installed", {
+        description: `${install.version} · ${install.assetName}`,
+      });
     },
     onError: (e) => toast.error("Launcher install failed", { description: formatError(e) }),
   });
@@ -167,7 +181,8 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
   }, []);
 
   const javaReady = !!managedJava.data;
-  const launcherReady = !!prismSettings.data?.binaryPath && !!prismSettings.data?.dataDir && !!prism.data;
+  const launcherReady =
+    !!prismSettings.data?.binaryPath && !!prismSettings.data?.dataDir && !!prism.data;
   const usernameReady = !!prismSettings.data?.offlineUsername?.trim();
   const packsReady = (packs.data?.length ?? 0) > 0;
   const stepStates = useMemo(
@@ -208,21 +223,33 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2 text-xs">
               <span className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]" />
-              <span className="cp-tactical-label text-[--brand-core]">:: ONBOARDING :: SYSTEM READY</span>
+              <span className="cp-tactical-label text-[--brand-core]">
+                :: ONBOARDING :: SYSTEM READY
+              </span>
             </div>
             <h1 className="text-3xl text-[--text-high] text-balance">Welcome to modsync</h1>
             <p className="max-w-3xl text-sm text-[--text-low] text-pretty">
-              Follow setup flow in order. Each step turns into brand box when finished. Last step clones first pack or returns to packs if setup already done.
+              Follow setup flow in order. Each step turns into brand box when finished. Last step
+              clones first pack or returns to packs if setup already done.
             </p>
           </div>
           {openedFromSettings ? (
             <Button
               variant="outline"
               onClick={() => clearOnboardingSettings.mutate()}
-              disabled={clearOnboardingSettings.isPending || installJava.isPending || installManagedPrism.isPending || saveUsername.isPending}
+              disabled={
+                clearOnboardingSettings.isPending ||
+                installJava.isPending ||
+                installManagedPrism.isPending ||
+                saveUsername.isPending
+              }
               className="min-h-10 shrink-0"
             >
-              {clearOnboardingSettings.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              {clearOnboardingSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
               CLEAR SETTINGS
             </Button>
           ) : null}
@@ -255,7 +282,9 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                             : "border-[--line-soft] bg-[--surface]",
                       )}
                     >
-                      <StepBox done={step.done}>{step.done ? <Check className="h-4 w-4" /> : index + 1}</StepBox>
+                      <StepBox done={step.done}>
+                        {step.done ? <Check className="h-4 w-4" /> : index + 1}
+                      </StepBox>
                       <div className="flex flex-1 items-center justify-between gap-2">
                         <span className="text-[--text-high]">{step.label}</span>
                         <span className="cp-tactical-label text-[10px] text-[--text-low]">
@@ -270,7 +299,12 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
           </Card>
 
           <div className="flex flex-col gap-4">
-            <div ref={(node) => { stepRefs.current[0] = node; }} className="scroll-mt-6">
+            <div
+              ref={(node) => {
+                stepRefs.current[0] = node;
+              }}
+              className="scroll-mt-6"
+            >
               <OnboardingStepCard
                 step={1}
                 title="INSTALL JAVA"
@@ -279,7 +313,10 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                 active={currentStep === 0}
               >
                 <div className="flex flex-col gap-3">
-                  <StatusLine label="STATUS" value={javaReady ? "READY" : managedJava.isLoading ? "CHECKING" : "MISSING"} />
+                  <StatusLine
+                    label="STATUS"
+                    value={javaReady ? "READY" : managedJava.isLoading ? "CHECKING" : "MISSING"}
+                  />
                   {installJava.isPending ? (
                     <ProgressPanel
                       progress={javaInstallProgress?.progress ?? 0}
@@ -290,18 +327,31 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                     />
                   ) : (
                     <p className="text-sm text-[--text-low] text-pretty">
-                      Uses same managed Adoptium installer as launch dialog. Installs into modsync data dir.
+                      Uses same managed Adoptium installer as launch dialog. Installs into modsync
+                      data dir.
                     </p>
                   )}
-                  <Button onClick={() => installJava.mutate()} disabled={installJava.isPending || javaReady}>
-                    {installJava.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  <Button
+                    onClick={() => installJava.mutate()}
+                    disabled={installJava.isPending || javaReady}
+                  >
+                    {installJava.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
                     {javaReady ? "JAVA READY" : "INSTALL JAVA"}
                   </Button>
                 </div>
               </OnboardingStepCard>
             </div>
 
-            <div ref={(node) => { stepRefs.current[1] = node; }} className="scroll-mt-6">
+            <div
+              ref={(node) => {
+                stepRefs.current[1] = node;
+              }}
+              className="scroll-mt-6"
+            >
               <OnboardingStepCard
                 step={2}
                 title="INSTALL PRISM LAUNCHER CRACKED"
@@ -310,7 +360,11 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                 active={currentStep === 1}
               >
                 <div className="flex flex-col gap-3">
-                  <StatusLine label="BINARY" value={prismSettings.data?.binaryPath || "NOT SET"} mono />
+                  <StatusLine
+                    label="BINARY"
+                    value={prismSettings.data?.binaryPath || "NOT SET"}
+                    mono
+                  />
                   <StatusLine label="DATA" value={prismSettings.data?.dataDir || "NOT SET"} mono />
                   {installManagedPrism.isPending ? (
                     <ProgressPanel
@@ -322,18 +376,31 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                     />
                   ) : (
                     <p className="text-sm text-[--text-low] text-pretty">
-                      Installs PrismLauncher-Cracked portable build, verifies GitHub SHA-256 digest, saves binary + data path automatically.
+                      Installs PrismLauncher-Cracked portable build, verifies GitHub SHA-256 digest,
+                      saves binary + data path automatically.
                     </p>
                   )}
-                  <Button onClick={() => installManagedPrism.mutate()} disabled={installManagedPrism.isPending || launcherReady}>
-                    {installManagedPrism.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+                  <Button
+                    onClick={() => installManagedPrism.mutate()}
+                    disabled={installManagedPrism.isPending || launcherReady}
+                  >
+                    {installManagedPrism.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Package className="h-4 w-4" />
+                    )}
                     {launcherReady ? "LAUNCHER READY" : "INSTALL LAUNCHER"}
                   </Button>
                 </div>
               </OnboardingStepCard>
             </div>
 
-            <div ref={(node) => { stepRefs.current[2] = node; }} className="scroll-mt-6">
+            <div
+              ref={(node) => {
+                stepRefs.current[2] = node;
+              }}
+              className="scroll-mt-6"
+            >
               <OnboardingStepCard
                 step={3}
                 title="SET USERNAME"
@@ -349,17 +416,30 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                     autoFocus={currentStep === 2}
                   />
                   <p className="text-sm text-[--text-low] text-pretty">
-                    Launch now rewrites Prism offline account selection before spawn, so stale launcher username no longer wins.
+                    Launch now rewrites Prism offline account selection before spawn, so stale
+                    launcher username no longer wins.
                   </p>
-                  <Button onClick={() => saveUsername.mutate(offlineUsername)} disabled={saveUsername.isPending || !offlineUsername.trim()}>
-                    {saveUsername.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <User className="h-4 w-4" />}
+                  <Button
+                    onClick={() => saveUsername.mutate(offlineUsername)}
+                    disabled={saveUsername.isPending || !offlineUsername.trim()}
+                  >
+                    {saveUsername.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <User className="h-4 w-4" />
+                    )}
                     SAVE USERNAME
                   </Button>
                 </div>
               </OnboardingStepCard>
             </div>
 
-            <div ref={(node) => { stepRefs.current[3] = node; }} className="scroll-mt-6">
+            <div
+              ref={(node) => {
+                stepRefs.current[3] = node;
+              }}
+              className="scroll-mt-6"
+            >
               <OnboardingStepCard
                 step={4}
                 title="GO TO PACKS"
@@ -376,7 +456,10 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                     }}
                   >
                     <div className="flex flex-col gap-1.5 text-sm">
-                      <label htmlFor="pack-url" className="cp-tactical-label text-[--text-low] text-[10px]">
+                      <label
+                        htmlFor="pack-url"
+                        className="cp-tactical-label text-[--text-low] text-[10px]"
+                      >
                         :: MODPACK URL
                       </label>
                       <Input
@@ -388,27 +471,52 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                       />
                     </div>
                     <p className="text-sm text-[--text-low] text-pretty">
-                      Welcome to modsync. Paste your modpack&apos;s GitHub URL to clone it. Your pack author shares this link with you.
+                      Welcome to modsync. Paste your modpack&apos;s GitHub URL to clone it. Your
+                      pack author shares this link with you.
                     </p>
                     <div className="flex items-center justify-between gap-3 border border-[--line-soft] bg-[--surface-sunken] px-3 py-2 text-xs">
                       <span className="flex items-center gap-2 text-[--text-low]">
                         <Package className="h-3.5 w-3.5" />
                         <span className="cp-tactical-label">PRISM LAUNCHER</span>
                       </span>
-                      <span className={cn("cp-tactical-label", launcherReady ? "text-[--signal-live]" : "text-[--signal-alert]")}>{launcherReady ? "READY" : "NOT READY"}</span>
+                      <span
+                        className={cn(
+                          "cp-tactical-label",
+                          launcherReady ? "text-[--signal-live]" : "text-[--signal-alert]",
+                        )}
+                      >
+                        {launcherReady ? "READY" : "NOT READY"}
+                      </span>
                     </div>
-                    <Button type="submit" size="lg" disabled={addPack.isPending || !url.trim() || !setupReadyForPack} className="w-full">
-                      {addPack.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderGit2 className="h-4 w-4" />}
+                    <Button
+                      type="submit"
+                      size="lg"
+                      disabled={addPack.isPending || !url.trim() || !setupReadyForPack}
+                      className="w-full"
+                    >
+                      {addPack.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <FolderGit2 className="h-4 w-4" />
+                      )}
                       CLONE PACK
                     </Button>
                     {!setupReadyForPack ? (
-                      <p className="cp-tactical-label text-[--text-low] text-xs">FINISH STEPS 1-3 BEFORE PACK INGEST</p>
+                      <p className="cp-tactical-label text-[--text-low] text-xs">
+                        FINISH STEPS 1-3 BEFORE PACK INGEST
+                      </p>
                     ) : null}
-                    {error ? <p className="cp-tactical-label text-[--signal-alert] text-xs">ERR :: {error}</p> : null}
+                    {error ? (
+                      <p className="cp-tactical-label text-[--signal-alert] text-xs">
+                        ERR :: {error}
+                      </p>
+                    ) : null}
                   </form>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    <p className="text-sm text-[--text-low] text-pretty">Setup complete. Packs already tracked: {packs.data?.length ?? 0}.</p>
+                    <p className="text-sm text-[--text-low] text-pretty">
+                      Setup complete. Packs already tracked: {packs.data?.length ?? 0}.
+                    </p>
                     <Button onClick={() => go({ kind: "packs" })}>
                       <ChevronRight className="h-4 w-4" /> GO TO PACKS
                     </Button>
@@ -439,7 +547,11 @@ function OnboardingStepCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card className={cn(done ? "border-[--brand-core]" : active ? "border-[--line-strong]" : "border-[--line-soft]")}>
+    <Card
+      className={cn(
+        done ? "border-[--brand-core]" : active ? "border-[--line-strong]" : "border-[--line-soft]",
+      )}
+    >
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -449,7 +561,9 @@ function OnboardingStepCard({
               <CardDescription>{description}</CardDescription>
             </div>
           </div>
-          <span className="cp-tactical-label text-[10px] text-[--text-low]">{done ? "READY" : active ? "CURRENT" : "WAITING"}</span>
+          <span className="cp-tactical-label text-[10px] text-[--text-low]">
+            {done ? "READY" : active ? "CURRENT" : "WAITING"}
+          </span>
         </div>
       </CardHeader>
       <CardContent>{children}</CardContent>
@@ -462,7 +576,9 @@ function StepBox({ done, children }: { done: boolean; children: React.ReactNode 
     <span
       className={cn(
         "flex h-8 w-8 shrink-0 items-center justify-center border text-xs font-semibold",
-        done ? "border-brand-core bg-brand-core text-text-on-brand" : "border-line-soft/30 text-text-low",
+        done
+          ? "border-brand-core bg-brand-core text-text-on-brand"
+          : "border-line-soft/30 text-text-low",
       )}
     >
       {children}
@@ -470,11 +586,21 @@ function StepBox({ done, children }: { done: boolean; children: React.ReactNode 
   );
 }
 
-function StatusLine({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function StatusLine({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between gap-3 border border-[--line-soft] bg-[--surface-sunken] px-3 py-2 text-xs">
       <span className="cp-tactical-label text-[--text-low]">{label}</span>
-      <span className={cn("max-w-[70%] truncate text-[--text-high]", mono && "font-mono")}>{value}</span>
+      <span className={cn("max-w-[70%] truncate text-[--text-high]", mono && "font-mono")}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -492,6 +618,8 @@ function ProgressPanel({
   totalBytes: number | null;
   logs: string[];
 }) {
+  const logOccurrences = new Map<string, number>();
+
   return (
     <div className="flex flex-col gap-3 border border-[--line-soft] bg-[--surface-sunken] p-4">
       <div className="flex items-center justify-between gap-3 text-xs text-[--text-low]">
@@ -499,14 +627,29 @@ function ProgressPanel({
         <span className="font-mono tabular-nums">{progress}%</span>
       </div>
       <div className="h-2 overflow-hidden border border-[--line-soft] bg-[--surface]">
-        <div className="h-full bg-brand-core transition-[width] duration-200" style={{ width: `${Math.max(progress, 4)}%` }} />
+        <div
+          className="h-full bg-brand-core transition-[width] duration-200"
+          style={{ width: `${Math.max(progress, 4)}%` }}
+        />
       </div>
       <div className="flex items-center justify-between gap-3 text-[11px] text-[--text-low] tabular-nums">
         <span>{stage.toUpperCase()}</span>
-        <span>{currentBytes != null ? `${formatByteCount(currentBytes)}${totalBytes != null ? ` / ${formatByteCount(totalBytes)}` : ""}` : ""}</span>
+        <span>
+          {currentBytes != null
+            ? `${formatByteCount(currentBytes)}${totalBytes != null ? ` / ${formatByteCount(totalBytes)}` : ""}`
+            : ""}
+        </span>
       </div>
       <div className="max-h-44 overflow-y-auto border border-[--line-soft] bg-black/30 p-3 font-mono text-[11px] text-[--text-low]">
-        {logs.length > 0 ? logs.map((line, index) => <div key={`${line}:${index}`}>{line}</div>) : <span>Waiting for install output...</span>}
+        {logs.length > 0 ? (
+          logs.map((line) => {
+            const occurrence = (logOccurrences.get(line) ?? 0) + 1;
+            logOccurrences.set(line, occurrence);
+            return <div key={`${line}:${occurrence}`}>{line}</div>;
+          })
+        ) : (
+          <span>Waiting for install output...</span>
+        )}
       </div>
     </div>
   );
@@ -520,5 +663,7 @@ function formatByteCount(value: number): string {
     size /= 1024;
     unitIndex += 1;
   }
-  return unitIndex === 0 ? `${Math.round(size)} ${units[unitIndex]}` : `${size.toFixed(1)} ${units[unitIndex]}`;
+  return unitIndex === 0
+    ? `${Math.round(size)} ${units[unitIndex]}`
+    : `${size.toFixed(1)} ${units[unitIndex]}`;
 }

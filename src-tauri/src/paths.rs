@@ -77,6 +77,12 @@ pub fn pack_id_from_url(url: &str) -> String {
         .unwrap_or("pack");
     stripped
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

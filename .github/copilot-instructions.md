@@ -22,6 +22,9 @@
 
 ## Non-negotiables
 
+- **Before coding, read `openspec/config.yaml` and relevant files in `openspec/specs/`.** OpenSpec is the source of truth for current behavior and project constraints.
+- **Keep OpenSpec current.** When behavior changes, update `openspec/specs/` in the same work session.
+
 - **SHA verification** is mandatory for every downloaded artifact. Never bypass it.
 - **Do not bundle Prism Launcher**. Detect an existing install; write instance folders only.
 - **Do not collect Microsoft credentials**. Prism handles MS auth.
@@ -30,6 +33,14 @@
 - **No mod jars in git.** Manifest references upstream CDNs (Modrinth / CurseForge); git holds only text (manifest, configs, kubejs, profiles).
 
 ## Conventions
+
+### Architecture
+
+- Use **Feature-Sliced Design** on the frontend. Keep route files in `src/routes/` thin; put feature UI, hooks, API adapters, and helpers in `src/features/<feature-name>/`.
+- Do not put feature-specific components in `src/components/`. Only global reusable primitives belong in `src/components/ui`, `src/lib`, or `src/hooks`.
+- Keep files focused. If a file grows past roughly 150-200 lines, extract feature components, hooks, or utilities.
+- Apply the same principle in Rust: keep Tauri command handlers thin and move domain logic into focused modules under `src-tauri/src/` or domain submodules. Avoid large catch-all command files.
+- Prefer merge/append refactors. Do not rewrite working behavior unless the spec or user request requires it.
 
 - Rust module files live flat under `src-tauri/src/` (`manifest.rs`, `git.rs`, …). Keep each module focused.
 - React routes → `src/routes/`, feature slices → `src/features/<domain>/`, reusable UI → `src/components/ui/`, zustand → `src/stores/`.

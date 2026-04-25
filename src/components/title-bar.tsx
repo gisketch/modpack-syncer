@@ -40,7 +40,8 @@ export function TitleBar() {
           className="h-1.5 w-1.5 bg-[--signal-live] shadow-[0_0_8px_var(--signal-live)]"
         />
         <span data-tauri-drag-region className="cp-tactical-label text-[--brand-core] text-xs">
-          GISKETCH//S_MODPACK_SYNCER :: v{appVersion.data ?? "..."}
+          {"GISKETCH//S_MODPACK_SYNCER :: v"}
+          {appVersion.data ?? "..."}
         </span>
       </div>
       <div className="flex h-full">

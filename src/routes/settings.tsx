@@ -1,9 +1,19 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { exeExtension } from "@tauri-apps/plugin-os";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Check, Download, FolderOpen, Info, Loader2, Package, RefreshCw, Search } from "lucide-react";
+import {
+  Boxes,
+  Check,
+  Download,
+  FolderOpen,
+  Info,
+  Loader2,
+  Package,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,7 +45,8 @@ export function SettingsRoute() {
   const [offlineUsername, setOfflineUsername] = useState("");
   const [launcherPathOpen, setLauncherPathOpen] = useState(false);
   const [prismInstallOpen, setPrismInstallOpen] = useState(false);
-  const [prismInstallProgress, setPrismInstallProgress] = useState<PrismInstallProgressEvent | null>(null);
+  const [prismInstallProgress, setPrismInstallProgress] =
+    useState<PrismInstallProgressEvent | null>(null);
   const [prismInstallLogs, setPrismInstallLogs] = useState<string[]>([]);
   const prism = useQuery({
     queryKey: ["prism"],
@@ -87,8 +98,13 @@ export function SettingsRoute() {
     onError: (e) => toast.error("Auth method save failed", { description: formatError(e) }),
   });
   const savePrismSettings = useMutation({
-    mutationFn: ({ binaryPath, dataDir }: { binaryPath?: string | null; dataDir?: string | null }) =>
-      tauri.setPrismSettings(binaryPath, dataDir, offlineUsername.trim() || null),
+    mutationFn: ({
+      binaryPath,
+      dataDir,
+    }: {
+      binaryPath?: string | null;
+      dataDir?: string | null;
+    }) => tauri.setPrismSettings(binaryPath, dataDir, offlineUsername.trim() || null),
     onSuccess: async (settings) => {
       setPrismBinaryPath(settings.binaryPath ?? "");
       setPrismDataDir(settings.dataDir ?? "");
@@ -167,7 +183,11 @@ export function SettingsRoute() {
     setPrismBinaryPath(prismSettings.data?.binaryPath ?? "");
     setPrismDataDir(prismSettings.data?.dataDir ?? "");
     setOfflineUsername(prismSettings.data?.offlineUsername ?? "");
-  }, [prismSettings.data?.binaryPath, prismSettings.data?.dataDir, prismSettings.data?.offlineUsername]);
+  }, [
+    prismSettings.data?.binaryPath,
+    prismSettings.data?.dataDir,
+    prismSettings.data?.offlineUsername,
+  ]);
 
   async function handleDownloadPrism() {
     try {
@@ -183,9 +203,7 @@ export function SettingsRoute() {
       const selected = await open({
         title: "Select Prism Launcher binary",
         defaultPath: prismBinaryPath || undefined,
-        filters: extension
-          ? [{ name: "Prism Launcher", extensions: [extension] }]
-          : undefined,
+        filters: extension ? [{ name: "Prism Launcher", extensions: [extension] }] : undefined,
       });
       if (typeof selected === "string") {
         setPrismBinaryPath(selected);
@@ -246,10 +264,15 @@ export function SettingsRoute() {
           <div className="flex flex-col gap-4">
             {packs.data?.length ? (
               packs.data.map((pack) => (
-                <div key={pack.id} className="flex items-center justify-between gap-4 border-b border-line-soft/20 pb-4 last:border-b-0 last:pb-0">
+                <div
+                  key={pack.id}
+                  className="flex items-center justify-between gap-4 border-b border-line-soft/20 pb-4 last:border-b-0 last:pb-0"
+                >
                   <div className="flex flex-col gap-1">
                     <p className="text-sm text-[--text-high]">{pack.id}</p>
-                    <p className="text-xs text-[--text-low]">Publish preview + push only for this pack.</p>
+                    <p className="text-xs text-[--text-low]">
+                      Publish preview + push only for this pack.
+                    </p>
                   </div>
                   <Switch
                     checked={adminModeByPack[pack.id] ?? false}
@@ -287,7 +310,8 @@ export function SettingsRoute() {
             </div>
             <div className="flex flex-col gap-2">
               <p className="text-xs text-text-low">
-                Active: {(auth.data?.method ?? "unset").toUpperCase()} · PAT {auth.data?.hasPat ? "PRESENT" : "MISSING"}
+                Active: {(auth.data?.method ?? "unset").toUpperCase()} · PAT{" "}
+                {auth.data?.hasPat ? "PRESENT" : "MISSING"}
               </p>
               {auth.data?.method === "ssh" && (
                 <div className="flex items-center gap-2 text-xs">
@@ -316,10 +340,17 @@ export function SettingsRoute() {
                   onChange={(e) => setPat(e.target.value)}
                   placeholder="github_pat_..."
                 />
-                <Button onClick={() => pat.trim() && savePat.mutate(pat.trim())} disabled={!pat.trim() || savePat.isPending}>
+                <Button
+                  onClick={() => pat.trim() && savePat.mutate(pat.trim())}
+                  disabled={!pat.trim() || savePat.isPending}
+                >
                   SAVE PAT
                 </Button>
-                <Button variant="secondary" onClick={() => clearPat.mutate()} disabled={clearPat.isPending}>
+                <Button
+                  variant="secondary"
+                  onClick={() => clearPat.mutate()}
+                  disabled={clearPat.isPending}
+                >
                   CLEAR
                 </Button>
               </div>
@@ -356,7 +387,11 @@ export function SettingsRoute() {
               <div className="flex items-center justify-between gap-3">
                 <span className="cp-tactical-label text-[--text-low]">MODE</span>
                 <span className="font-mono text-[--text-high]">
-                  {launcherOverrideActive ? "MANAGED / OVERRIDE" : prism.data ? "AUTO-DETECTED" : "UNSET"}
+                  {launcherOverrideActive
+                    ? "MANAGED / OVERRIDE"
+                    : prism.data
+                      ? "AUTO-DETECTED"
+                      : "UNSET"}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -378,19 +413,28 @@ export function SettingsRoute() {
                 </span>
               </div>
               <p className="text-[--text-low]">
-                Managed install saves portable launcher inside modsync data dir, verifies GitHub SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with <code>--offline</code>.
+                Managed install saves portable launcher inside modsync data dir, verifies GitHub
+                SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with{" "}
+                <code>--offline</code>.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
               <Button onClick={handleOpenPrismInstall} disabled={installManagedPrism.isPending}>
-                {installManagedPrism.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {installManagedPrism.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
                 INSTALL LAUNCHER
               </Button>
               <Button variant="secondary" onClick={handleOpenLauncherPathEditor}>
                 <Search className="h-4 w-4" /> EDIT LAUNCHER PATH
               </Button>
-              <Button variant="outline" onClick={() => qc.invalidateQueries({ queryKey: ["prism"] })}>
+              <Button
+                variant="outline"
+                onClick={() => qc.invalidateQueries({ queryKey: ["prism"] })}
+              >
                 <RefreshCw className="h-4 w-4" /> RE-SCAN
               </Button>
               <Button variant="outline" onClick={handleDownloadPrism}>
@@ -463,12 +507,16 @@ export function SettingsRoute() {
         </CardContent>
       </Card>
 
-      <Dialog open={launcherPathOpen} onOpenChange={(open) => !savePrismSettings.isPending && setLauncherPathOpen(open)}>
+      <Dialog
+        open={launcherPathOpen}
+        onOpenChange={(open) => !savePrismSettings.isPending && setLauncherPathOpen(open)}
+      >
         <DialogContent className="max-w-3xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>EDIT LAUNCHER SETTINGS</DialogTitle>
             <DialogDescription>
-              Point modsync at managed companion launcher or custom Prism-compatible binary/data dir, then set global offline username.
+              Point modsync at managed companion launcher or custom Prism-compatible binary/data
+              dir, then set global offline username.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
@@ -499,23 +547,35 @@ export function SettingsRoute() {
                 placeholder="Offline username used for cracked launcher"
               />
               <p className="text-xs text-[--text-low]">
-                Binary override always wins first. Data dir optional, but portable managed installs should keep binary + data together. Offline username applies on launch when set.
+                Binary override always wins first. Data dir optional, but portable managed installs
+                should keep binary + data together. Offline username applies on launch when set.
               </p>
             </div>
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={() => setLauncherPathOpen(false)} disabled={savePrismSettings.isPending}>
+            <Button
+              variant="secondary"
+              onClick={() => setLauncherPathOpen(false)}
+              disabled={savePrismSettings.isPending}
+            >
               CANCEL
             </Button>
             <Button onClick={handleSavePrismSettings} disabled={savePrismSettings.isPending}>
-              {savePrismSettings.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Boxes className="h-4 w-4" />}
+              {savePrismSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Boxes className="h-4 w-4" />
+              )}
               SAVE PATHS
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={prismInstallOpen} onOpenChange={(open) => !installManagedPrism.isPending && setPrismInstallOpen(open)}>
+      <Dialog
+        open={prismInstallOpen}
+        onOpenChange={(open) => !installManagedPrism.isPending && setPrismInstallOpen(open)}
+      >
         <DialogContent className="max-w-2xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>INSTALL LAUNCHER</DialogTitle>
@@ -549,9 +609,7 @@ export function SettingsRoute() {
                 <div className="max-h-56 overflow-y-auto border border-line-soft/20 bg-black/30 p-3 font-mono text-[11px] text-text-low">
                   {prismInstallLogs.length > 0 ? (
                     <div className="flex flex-col gap-1.5">
-                      {prismInstallLogs.map((line, index) => (
-                        <span key={`prism-install-log:${index}`}>{line}</span>
-                      ))}
+                      {renderPrismInstallLogs(prismInstallLogs)}
                     </div>
                   ) : (
                     <span>Waiting for install output...</span>
@@ -566,26 +624,44 @@ export function SettingsRoute() {
                   className="grid gap-2 border border-brand-core bg-brand-core/10 px-4 py-4 text-left transition-colors hover:bg-brand-core/15"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="font-heading text-sm text-text-high">Managed PrismLauncher-Cracked</span>
+                    <span className="font-heading text-sm text-text-high">
+                      Managed PrismLauncher-Cracked
+                    </span>
                     <span className="font-mono text-xs text-text-low">PORTABLE INSTALL</span>
                   </div>
                   <p className="text-sm text-text-low">
-                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256 digest, unpack into modsync data dir, then save binary + data paths automatically.
+                    Pull latest compatible release for current OS and CPU, verify GitHub SHA-256
+                    digest, unpack into modsync data dir, then save binary + data paths
+                    automatically.
                   </p>
                 </button>
                 <div className="border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs text-text-low">
-                  <p>CLI check done: fork supports <code>--launch</code>, <code>--dir</code>, and <code>--offline &lt;name&gt;</code>.</p>
-                  <p className="mt-2">Offline username wiring not built here yet. This step only handles best UX for installer + launcher path setup.</p>
+                  <p>
+                    CLI check done: fork supports <code>--launch</code>, <code>--dir</code>, and{" "}
+                    <code>--offline &lt;name&gt;</code>.
+                  </p>
+                  <p className="mt-2">
+                    Offline username wiring not built here yet. This step only handles best UX for
+                    installer + launcher path setup.
+                  </p>
                 </div>
               </div>
             )}
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={() => setPrismInstallOpen(false)} disabled={installManagedPrism.isPending}>
+            <Button
+              variant="secondary"
+              onClick={() => setPrismInstallOpen(false)}
+              disabled={installManagedPrism.isPending}
+            >
               CANCEL
             </Button>
             <Button onClick={handleInstallManagedPrism} disabled={installManagedPrism.isPending}>
-              {installManagedPrism.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {installManagedPrism.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
               INSTALL MANAGED LAUNCHER
             </Button>
           </DialogFooter>
@@ -593,6 +669,15 @@ export function SettingsRoute() {
       </Dialog>
     </div>
   );
+}
+
+function renderPrismInstallLogs(logs: string[]) {
+  const logOccurrences = new Map<string, number>();
+  return logs.map((line) => {
+    const occurrence = (logOccurrences.get(line) ?? 0) + 1;
+    logOccurrences.set(line, occurrence);
+    return <span key={`prism-install-log:${line}:${occurrence}`}>{line}</span>;
+  });
 }
 
 function formatByteCount(value: number): string {
@@ -603,5 +688,7 @@ function formatByteCount(value: number): string {
     size /= 1024;
     unitIndex += 1;
   }
-  return unitIndex === 0 ? `${Math.round(size)} ${units[unitIndex]}` : `${size.toFixed(1)} ${units[unitIndex]}`;
+  return unitIndex === 0
+    ? `${Math.round(size)} ${units[unitIndex]}`
+    : `${size.toFixed(1)} ${units[unitIndex]}`;
 }

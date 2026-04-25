@@ -1,0 +1,200 @@
+use serde::Serialize;
+use tauri::Emitter;
+
+use super::CommandError;
+use crate::prism;
+
+pub type LaunchProfile = prism::LaunchProfile;
+pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
+pub type JavaInstallProgress = prism::JavaInstallProgress;
+pub type ManagedPrismInstall = prism::ManagedPrismInstall;
+pub type PrismAccountStatus = prism::PrismAccountStatus;
+pub type PrismInstallProgress = prism::PrismInstallProgress;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JavaInstallProgressEvent {
+    pub pack_id: String,
+    pub stage: String,
+    pub progress: u8,
+    pub current_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub log_line: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrismInstallProgressEvent {
+    pub stage: String,
+    pub progress: u8,
+    pub current_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    pub log_line: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_prism_settings() -> Result<prism::PrismSettings, CommandError> {
+    tokio::task::spawn_blocking(prism::get_settings)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_prism_settings(
+    binary_path: Option<String>,
+    data_dir: Option<String>,
+    offline_username: Option<String>,
+) -> Result<prism::PrismSettings, CommandError> {
+    let settings = prism::PrismSettings {
+        binary_path: binary_path.and_then(normalize_optional_path),
+        data_dir: data_dir.and_then(normalize_optional_path),
+        offline_username: offline_username.and_then(normalize_optional_text),
+    };
+    tokio::task::spawn_blocking(move || prism::save_settings(settings))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn detect_prism() -> Result<Option<prism::PrismLocation>, CommandError> {
+    Ok(prism::location())
+}
+
+#[tauri::command]
+pub async fn get_prism_account_status() -> Result<PrismAccountStatus, CommandError> {
+    tokio::task::spawn_blocking(prism::read_account_status)
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_launch_profile(pack_id: String) -> Result<LaunchProfile, CommandError> {
+    tokio::task::spawn_blocking(move || prism::load_launch_profile(&pack_id))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn has_managed_java(major: u32) -> Result<bool, CommandError> {
+    tokio::task::spawn_blocking(move || prism::has_managed_java(major))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn clear_onboarding_settings(major: u32) -> Result<prism::PrismSettings, CommandError> {
+    tokio::task::spawn_blocking(move || prism::clear_onboarding_settings(major))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn set_launch_profile(
+    pack_id: String,
+    profile: LaunchProfile,
+) -> Result<LaunchProfile, CommandError> {
+    tokio::task::spawn_blocking(move || prism::save_launch_profile(&pack_id, &profile))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn install_adoptium_java(
+    app: tauri::AppHandle,
+    pack_id: String,
+    major: u32,
+    image_type: String,
+) -> Result<InstalledJavaRuntime, CommandError> {
+    prism::install_adoptium_java(major, &image_type, |progress: JavaInstallProgress| {
+        let _ = app.emit(
+            "java-install-progress",
+            JavaInstallProgressEvent {
+                pack_id: pack_id.clone(),
+                stage: progress.stage,
+                progress: progress.progress,
+                current_bytes: progress.current_bytes,
+                total_bytes: progress.total_bytes,
+                log_line: progress.log_line,
+            },
+        );
+    })
+    .await
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn install_managed_prism(
+    app: tauri::AppHandle,
+) -> Result<ManagedPrismInstall, CommandError> {
+    prism::install_managed_prism(|progress: PrismInstallProgress| {
+        let _ = app.emit(
+            "prism-install-progress",
+            PrismInstallProgressEvent {
+                stage: progress.stage,
+                progress: progress.progress,
+                current_bytes: progress.current_bytes,
+                total_bytes: progress.total_bytes,
+                log_line: progress.log_line,
+            },
+        );
+    })
+    .await
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> {
+    tokio::task::spawn_blocking(move || prism::launch(&instance_name))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn launch_pack(
+    pack_id: String,
+    instance_name: Option<String>,
+) -> Result<(), CommandError> {
+    let launch_profile = prism::load_launch_profile(&pack_id)?;
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        prism::apply_launch_profile(&instance_name, &launch_profile)?;
+        prism::launch(&instance_name)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_instance_minecraft_dir(
+    instance_name: String,
+) -> Result<Option<String>, CommandError> {
+    Ok(prism::instance_minecraft_dir(&instance_name).map(|path| path.display().to_string()))
+}
+
+fn normalize_optional_path(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_optional_text(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}

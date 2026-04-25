@@ -12,7 +12,10 @@ use sha2::Sha512;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 
-use crate::{cache, manifest::{Entry, Source}};
+use crate::{
+    cache,
+    manifest::{Entry, Source},
+};
 
 const MAX_PARALLEL: usize = 8;
 const USER_AGENT: &str = concat!("modsync/", env!("CARGO_PKG_VERSION"));

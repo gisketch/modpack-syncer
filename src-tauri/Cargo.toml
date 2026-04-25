@@ -21,6 +21,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-os = "2"
 tauri-plugin-log = "2"
+tauri-plugin-updater = "2"
 
 # Async + HTTP
 tokio = { version = "1", features = ["full"] }

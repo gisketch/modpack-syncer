@@ -192,14 +192,6 @@ export type PrismSettings = {
   offlineUsername?: string | null;
 };
 
-export type AppStorageSettings = {
-  defaultDataDir: string;
-  dataDir: string;
-  overrideDataDir?: string | null;
-  isDefault: boolean;
-  confirmed: boolean;
-};
-
 export type PrismAccountStatus = {
   state: string;
   displayName?: string | null;
@@ -231,10 +223,6 @@ export type LaunchProfile = {
   extraJvmArgs: string;
   autoJava: boolean;
   showConsole?: boolean;
-};
-
-export type LaunchDefaults = {
-  showConsole: boolean;
 };
 
 export type InstanceWriteReport = {
@@ -299,24 +287,22 @@ export const tauri = {
   getPublishAuthSettings: () => invoke<PublishAuthSettings>("get_publish_auth_settings"),
   setPublishAuthMethod: (method?: string | null) =>
     invoke<PublishAuthSettings>("set_publish_auth_method", { method }),
-  savePublishPat: (token: string) =>
-    invoke<PublishAuthSettings>("save_publish_pat", { token }),
+  savePublishPat: (token: string) => invoke<PublishAuthSettings>("save_publish_pat", { token }),
   clearPublishPat: () => invoke<PublishAuthSettings>("clear_publish_pat"),
   verifyPublishSsh: () => invoke<PublishSshStatus>("verify_publish_ssh"),
-  getAppStorageSettings: () => invoke<AppStorageSettings>("get_app_storage_settings"),
-  setAppStorageSettings: (overrideDataDir?: string | null) =>
-    invoke<AppStorageSettings>("set_app_storage_settings", { overrideDataDir }),
   getPrismSettings: () => invoke<PrismSettings>("get_prism_settings"),
-  setPrismSettings: (binaryPath?: string | null, dataDir?: string | null, offlineUsername?: string | null) =>
-    invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
-  getLaunchDefaults: () => invoke<LaunchDefaults>("get_launch_defaults"),
-  setLaunchDefaults: (defaults: LaunchDefaults) => invoke<LaunchDefaults>("set_launch_defaults", { defaults }),
+  setPrismSettings: (
+    binaryPath?: string | null,
+    dataDir?: string | null,
+    offlineUsername?: string | null,
+  ) => invoke<PrismSettings>("set_prism_settings", { binaryPath, dataDir, offlineUsername }),
   fetchMods: (packId: string) => invoke<FetchReport>("fetch_mods", { packId }),
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),
   getLaunchProfile: (packId: string) => invoke<LaunchProfile>("get_launch_profile", { packId }),
   hasManagedJava: (major: number) => invoke<boolean>("has_managed_java", { major }),
-  clearOnboardingSettings: (major: number) => invoke<PrismSettings>("clear_onboarding_settings", { major }),
+  clearOnboardingSettings: (major: number) =>
+    invoke<PrismSettings>("clear_onboarding_settings", { major }),
   setLaunchProfile: (packId: string, profile: LaunchProfile) =>
     invoke<LaunchProfile>("set_launch_profile", { packId, profile }),
   installAdoptiumJava: (packId: string, major: number, imageType: string) =>
@@ -325,13 +311,13 @@ export const tauri = {
   syncInstance: (packId: string, instanceName?: string, syncShaderSettings?: boolean) =>
     invoke<SyncInstanceReport>("sync_instance", { packId, instanceName, syncShaderSettings }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
-  launchPack: (packId: string, instanceName?: string) => invoke<void>("launch_pack", { packId, instanceName }),
+  launchPack: (packId: string, instanceName?: string) =>
+    invoke<void>("launch_pack", { packId, instanceName }),
   getInstanceMinecraftDir: (instanceName: string) =>
     invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
   packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
-  suggestPublishVersion: (packId: string) =>
-    invoke<string>("suggest_publish_version", { packId }),
+  suggestPublishVersion: (packId: string) => invoke<string>("suggest_publish_version", { packId }),
   previewModrinthMod: (packId: string, identifier: string, category?: ManifestArtifactCategory) =>
     invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
   addModrinthMod: (

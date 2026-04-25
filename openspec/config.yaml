@@ -40,6 +40,29 @@ source_of_truth:
   git_embedded: libgit2
   object_storage: none
   cdns: ["modrinth", "curseforge"]
+architecture:
+  source_of_truth:
+    specs: openspec/specs
+    config: openspec/config.yaml
+  frontend:
+    pattern: feature-sliced-design
+    routes: src/routes
+    features: src/features/<feature-name>
+    shared_ui: src/components/ui
+    shared_lib: src/lib
+    max_target_lines: 200
+    rules:
+      - Keep route files thin; move feature UI, hooks, and helpers under src/features/<feature-name>/.
+      - Keep only truly reusable primitives under src/components/ui, src/lib, and src/hooks.
+      - Split complex feature UI into focused components and colocated utilities.
+  backend:
+    pattern: feature-modules
+    root: src-tauri/src
+    max_target_lines: 300
+    rules:
+      - Keep Tauri command handlers thin and delegate domain logic to focused Rust modules.
+      - Group backend code by domain capability instead of dumping all behavior into commands.rs.
+      - Keep shared path, manifest, git, cache, and Prism utilities reusable but domain-neutral.
 paths:
   specs: openspec/specs
   changes: openspec/changes

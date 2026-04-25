@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use git2::{Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions};
+use git2::{
+    Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions,
+};
 
 pub enum PushAuth {
     Pat(String),
@@ -108,8 +110,15 @@ pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result
         let signature = repo
             .signature()
             .or_else(|_| Signature::now("modsync", "modsync@local"))?;
-        repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[&head])?
-            .to_string()
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &[&head],
+        )?
+        .to_string()
     } else {
         eprintln!("[modsync] publish push: no local changes, push current HEAD");
         head.id().to_string()
@@ -189,7 +198,9 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
             } else if allowed_types.is_username() {
                 Cred::username(username_from_url.unwrap_or("git"))
             } else {
-                Err(git2::Error::from_str("remote does not accept PAT credentials"))
+                Err(git2::Error::from_str(
+                    "remote does not accept PAT credentials",
+                ))
             }
         }
         PushAuth::Ssh => {
@@ -199,7 +210,9 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
             } else if allowed_types.is_username() {
                 Cred::username(username_from_url.unwrap_or("git"))
             } else {
-                Err(git2::Error::from_str("remote does not accept SSH agent credentials"))
+                Err(git2::Error::from_str(
+                    "remote does not accept SSH agent credentials",
+                ))
             }
         }
     });
@@ -209,27 +222,27 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
 
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     if use_ssh_transport {
-            let origin = repo.find_remote("origin")?;
-            let origin_url = origin
-                .url()
-                .map(str::to_owned)
-                .ok_or_else(|| git2::Error::from_str("origin remote missing url"))?;
-            let previous_pushurl = origin.pushurl().map(str::to_owned);
-            drop(origin);
+        let origin = repo.find_remote("origin")?;
+        let origin_url = origin
+            .url()
+            .map(str::to_owned)
+            .ok_or_else(|| git2::Error::from_str("origin remote missing url"))?;
+        let previous_pushurl = origin.pushurl().map(str::to_owned);
+        drop(origin);
 
         let push_url = ssh_push_url(&origin_url).unwrap_or(origin_url);
-            eprintln!("[modsync] publish push: SSH pushurl {push_url}");
-            repo.remote_set_pushurl("origin", Some(&push_url))?;
-            let result = {
-                let mut remote = repo.find_remote("origin")?;
-                eprintln!("[modsync] publish push: remote.push start");
-                remote.push(&[refspec], Some(&mut push_options))
-            };
-            repo.remote_set_pushurl("origin", previous_pushurl.as_deref())?;
-            result?;
+        eprintln!("[modsync] publish push: SSH pushurl {push_url}");
+        repo.remote_set_pushurl("origin", Some(&push_url))?;
+        let result = {
+            let mut remote = repo.find_remote("origin")?;
+            eprintln!("[modsync] publish push: remote.push start");
+            remote.push(&[refspec], Some(&mut push_options))
+        };
+        repo.remote_set_pushurl("origin", previous_pushurl.as_deref())?;
+        result?;
     } else {
         let mut remote = repo.find_remote("origin")?;
-            eprintln!("[modsync] publish push: HTTPS push via origin");
+        eprintln!("[modsync] publish push: HTTPS push via origin");
         remote.push(&[refspec], Some(&mut push_options))?;
     }
     Ok(())
@@ -280,5 +293,5 @@ fn ssh_push_url(origin_url: &str) -> Option<String> {
     if path.is_empty() {
         return None;
     }
-        Some(format!("ssh://git@{host}/{path}"))
+    Some(format!("ssh://git@{host}/{path}"))
 }

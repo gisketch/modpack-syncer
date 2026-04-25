@@ -1,98 +1,75 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { exeExtension } from "@tauri-apps/plugin-os";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  AlertTriangle,
-  ChevronLeft,
-  ChevronDown,
   ChevronRight,
-  Check,
   Download,
-  FolderOpen,
   FolderGit2,
-  Globe,
-  HardDrive,
-  Link2,
+  FolderOpen,
   Loader2,
-  MemoryStick,
   Package,
   Play,
   Plus,
-  Rocket,
   RefreshCw,
-  Settings2,
-  Trash2,
+  Rocket,
   UploadCloudIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { PackIcon } from "@/components/pack-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PackIcon } from "@/components/pack-icon";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardStatus,
-  CardTitle,
-  CardWindowBar,
-  CardWindowTab,
-} from "@/components/ui/card";
-import {
-  DialogBody,
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
+  buildArtifactStatusMap,
+  DeletedModRow,
+  ModRow,
+  UnpublishedModRow,
+} from "@/features/packs/artifact-status/artifact-status-rows";
+import { formatChangelogSummary } from "@/features/packs/changelog/changelog-card";
+import { ChangelogDialog } from "@/features/packs/changelog/changelog-dialog";
+import {
+  formatByteCount,
+  getJavaInstallChoices,
+  LaunchSetupPanel,
+} from "@/features/packs/launch-profile/launch-setup-panel";
+import {
+  AddModrinthEntryDialog,
+  describeArtifactCategory,
+} from "@/features/packs/modrinth-admin/add-modrinth-entry-dialog";
+import { PublishPreviewPage } from "@/features/packs/publish-preview/publish-preview-page";
+import {
+  buildSyncReviewTabs,
+  buildSyncSummary,
+} from "@/features/packs/sync-review/sync-artifact-preview";
+import { SyncDialog } from "@/features/packs/sync-review/sync-dialog";
+import { SyncReviewDialog } from "@/features/packs/sync-review/sync-review-dialog";
 import { formatError } from "@/lib/format-error";
 import { useModrinthProjects } from "@/lib/modrinth";
 import {
-  type ManifestArtifactCategory,
-  type ManifestEntry,
   type JavaInstallProgressEvent,
   type LaunchProfile,
-  type Loader,
-  type ModrinthAddPreview,
-  type PackChangelogEntry,
-  type PackChangelogItem,
-  type ModStatus,
+  type ManifestArtifactCategory,
   type ModStatusValue,
-  type OptionsSyncPreview,
-  type PublishAction,
-  type PublishCategory,
   type PublishScanReport,
-  type ShaderSettingsChange,
-  type ShaderSettingsPreview,
-  type SyncProgressEvent,
   type SyncInstanceReport,
+  type SyncProgressEvent,
   tauri,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -135,14 +112,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [launchProfileDraft, setLaunchProfileDraft] = useState<LaunchProfile | null>(null);
   const [javaInstallOpen, setJavaInstallOpen] = useState(false);
   const [selectedJavaChoiceId, setSelectedJavaChoiceId] = useState("temurin-21-jre");
-  const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(null);
+  const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(
+    null,
+  );
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
   const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "options">("artifacts");
-  const [shaderSyncDecision, setShaderSyncDecision] = useState<"undecided" | "sync" | "skip">("undecided");
+  const [shaderSyncDecision, setShaderSyncDecision] = useState<"undecided" | "sync" | "skip">(
+    "undecided",
+  );
   const [pendingShaderSync, setPendingShaderSync] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
@@ -265,14 +246,21 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     (s) => s.status === "missing" || s.status === "outdated",
   ).length;
   const resourcepackRiskCount = manifest.data
-    ? manifest.data.resourcepacks.filter((entry) => resourcepackStatusMap.get(entry.filename) !== "synced").length
+    ? manifest.data.resourcepacks.filter(
+        (entry) => resourcepackStatusMap.get(entry.filename) !== "synced",
+      ).length
     : 0;
   const shaderpackRiskCount = manifest.data
-    ? manifest.data.shaderpacks.filter((entry) => shaderpackStatusMap.get(entry.filename) !== "synced").length
+    ? manifest.data.shaderpacks.filter(
+        (entry) => shaderpackStatusMap.get(entry.filename) !== "synced",
+      ).length
     : 0;
   const stagedArtifactCount =
     unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
-  const javaChoices = getJavaInstallChoices(manifest.data?.pack.mcVersion, manifest.data?.pack.loader);
+  const javaChoices = getJavaInstallChoices(
+    manifest.data?.pack.mcVersion,
+    manifest.data?.pack.loader,
+  );
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
   const alreadySynced =
     !!manifest.data &&
@@ -296,10 +284,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     if (syncedIndex > 0) return syncedIndex;
     return entries.length;
   })();
+  const changelogResetKey = `${packId}:${changelog.data?.length ?? 0}:${lastSyncedCommit ?? ""}`;
 
   useEffect(() => {
+    void changelogResetKey;
     setActiveChangelogIndex(0);
-  }, [packId, changelog.data?.length, lastSyncedCommit]);
+  }, [changelogResetKey]);
 
   useEffect(() => {
     if (!launchProfile.data) return;
@@ -319,11 +309,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const activeChangelogEntry = changelog.data?.[activeChangelogIndex] ?? null;
   const progressEntry = progress?.filename
-    ? (
-        [...(manifest.data?.mods ?? []), ...(manifest.data?.resourcepacks ?? []), ...(manifest.data?.shaderpacks ?? [])].find(
-          (entry) => entry.filename === progress.filename,
-        ) ?? null
-      )
+    ? ([
+        ...(manifest.data?.mods ?? []),
+        ...(manifest.data?.resourcepacks ?? []),
+        ...(manifest.data?.shaderpacks ?? []),
+      ].find((entry) => entry.filename === progress.filename) ?? null)
     : null;
   const progressView = progress
     ? {
@@ -361,7 +351,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const sync = useMutation({
-    mutationFn: ({ syncShaderSettings }: { syncShaderSettings: boolean }) => tauri.syncInstance(packId, undefined, syncShaderSettings),
+    mutationFn: ({ syncShaderSettings }: { syncShaderSettings: boolean }) =>
+      tauri.syncInstance(packId, undefined, syncShaderSettings),
     onMutate: () => {
       setSyncOpen(true);
       setProgress({
@@ -470,8 +461,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
   });
   const deleteInstanceArtifact = useMutation({
-    mutationFn: ({ filename, category }: { filename: string; category: ManifestArtifactCategory }) =>
-      tauri.deleteInstanceMod(packId, filename, category),
+    mutationFn: ({
+      filename,
+      category,
+    }: {
+      filename: string;
+      category: ManifestArtifactCategory;
+    }) => tauri.deleteInstanceMod(packId, filename, category),
     onSuccess: async (_, variables) => {
       if (variables.category === "mods") {
         await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
@@ -480,7 +476,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       }
       await qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
       await qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] });
-      toast.success(`Local ${describeArtifactCategory(variables.category).singular.toLowerCase()} deleted`);
+      toast.success(
+        `Local ${describeArtifactCategory(variables.category).singular.toLowerCase()} deleted`,
+      );
     },
     onError: (error) => {
       toast.error("Delete failed", { description: formatError(error) });
@@ -671,7 +669,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             fallbackClassName="size-8"
           />
           <div className="flex min-w-0 flex-col gap-2">
-            <h1 className="text-3xl text-text-high [text-wrap:balance]">{manifest.data?.pack.name ?? packId}</h1>
+            <h1 className="text-3xl text-text-high [text-wrap:balance]">
+              {manifest.data?.pack.name ?? packId}
+            </h1>
             {manifest.data && (
               <div className="flex flex-wrap gap-2">
                 <Badge>v{manifest.data.pack.version}</Badge>
@@ -755,10 +755,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         <Alert>
           <AlertTitle>Sync report</AlertTitle>
           <AlertDescription>
-            Wrote {report.instance.mods_written} mods, {report.instance.resourcepacks_written} resourcepacks,
-            {" "}{report.instance.shaderpacks_written} shaderpacks, {report.instance.overrides_copied} overrides.
-            Cached {report.fetch.cached} / downloaded {report.fetch.downloaded} / total{" "}
-            {report.fetch.total}.
+            Wrote {report.instance.mods_written} mods, {report.instance.resourcepacks_written}{" "}
+            resourcepacks, {report.instance.shaderpacks_written} shaderpacks,{" "}
+            {report.instance.overrides_copied} overrides. Cached {report.fetch.cached} / downloaded{" "}
+            {report.fetch.downloaded} / total {report.fetch.total}.
             {report.fetch.failures.length > 0 && (
               <span className="block text-signal-alert">
                 {report.fetch.failures.length} failures
@@ -778,7 +778,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         )}
       >
         <div className="flex flex-col items-start gap-1">
-          <span className={cn("cp-tactical-label text-[10px]", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")}>
+          <span
+            className={cn(
+              "cp-tactical-label text-[10px]",
+              newUpdateCount > 0 ? "text-brand-core" : "text-text-low",
+            )}
+          >
             PACK UPDATES
           </span>
           <span className="text-sm text-text-low">View what changed since last sync</span>
@@ -800,7 +805,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           {changelog.isLoading ? (
             <Loader2 className="size-4 animate-spin text-brand-core" />
           ) : (
-            <ChevronRight className={cn("size-4", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")} />
+            <ChevronRight
+              className={cn("size-4", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")}
+            />
           )}
         </div>
       </Button>
@@ -845,7 +852,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       mod={mod}
                       adminMode={adminMode}
                       deleting={deleteInstanceArtifact.isPending}
-                      onDelete={() => deleteInstanceArtifact.mutate({ filename: mod.filename, category: "mods" })}
+                      onDelete={() =>
+                        deleteInstanceArtifact.mutate({ filename: mod.filename, category: "mods" })
+                      }
                     />
                   ))}
                   {manifest.data.mods.map((m) => (
@@ -1035,214 +1044,53 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={report}
       />
 
-      <Dialog open={syncReviewOpen} onOpenChange={(open) => !open && handleCloseSyncReview()}>
-        <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
-          <DialogHeader>
-            <DialogTitle>{syncReviewStep === "artifacts" ? "SYNC PREVIEW" : "OPTIONS REVIEW"}</DialogTitle>
-            <DialogDescription>
-              {syncReviewStep === "artifacts"
-                ? "Review mods, resourcepacks, and shaderpacks before writing Prism instance."
-                : "Review options categories before final sync confirm."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
-            {syncReviewStep === "artifacts" && (artifactPublishScan.isLoading || artifactPublishScan.isFetching) ? (
-              <Card>
-                <CardContent className="flex items-center gap-3 p-5 text-sm text-text-low">
-                  <Loader2 className="size-4 animate-spin text-brand-core" />
-                  Building sync diff...
-                </CardContent>
-              </Card>
-            ) : syncReviewStep === "artifacts" ? (
-              <>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {syncSummary.map((item) => (
-                    <SyncPreviewCard key={item.category} summary={item} />
-                  ))}
-                </div>
-                <Tabs defaultValue={syncReviewDefaultTab} className="min-h-0 gap-4">
-                  <TabsList className="flex-wrap gap-2">
-                    {syncReviewTabs.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id}>
-                        <span>{tab.label}</span>
-                        <span className="font-mono text-[10px] tabular-nums text-text-low">{tab.count}</span>
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {syncReviewTabs.map((tab) => (
-                    <TabsContent key={tab.id} value={tab.id} className="min-h-0 outline-none">
-                      <Card variant="window" className="min-h-0">
-                        <CardWindowBar>
-                          <CardWindowTab>{tab.label}</CardWindowTab>
-                          <CardStatus>{tab.count} CHANGES</CardStatus>
-                        </CardWindowBar>
-                        <CardContent className="min-h-0 p-0">
-                          {tab.items.length > 0 ? (
-                            <ScrollArea className="h-[26rem] px-4 py-4">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>ACTION</TableHead>
-                                    <TableHead>PATH</TableHead>
-                                    <TableHead>SOURCE</TableHead>
-                                    <TableHead className="text-right">SIZE</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {tab.items.map((item) => (
-                                    <TableRow key={`${tab.id}:${item.relativePath}:${item.action}`}>
-                                      <TableCell>
-                                        <SyncPlanActionChip action={item.action} />
-                                      </TableCell>
-                                      <TableCell className="font-mono text-[10px] text-text-low">
-                                        {item.relativePath}
-                                      </TableCell>
-                                      <TableCell className="text-xs text-text-low">
-                                        {item.source ?? "instance-local"}
-                                      </TableCell>
-                                      <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
-                                        {typeof item.size === "number" ? formatBytes(item.size) : "--"}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </ScrollArea>
-                          ) : (
-                            <div className="px-4 py-8 text-center text-sm text-text-low">No changes in {tab.label.toLowerCase()}.</div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  ))}
-                </Tabs>
-                <Card>
-                  <CardContent className="px-4 py-3 text-xs text-text-low">
-                    Sync adds missing pack files, updates changed managed files, deletes local-only managed extras in selected categories.
-                  </CardContent>
-                </Card>
-              </>
-            ) : (
-              <OptionsReviewStep
-                hasTrackedOptionsFile={hasTrackedOptionsFile}
-                preview={optionsSyncPreview.data}
-                loading={optionsSyncPreview.isLoading || optionsSyncPreview.isFetching}
-                error={optionsSyncPreview.error}
-                onToggleIgnore={(key, ignored) => setOptionsSyncIgnored.mutate({ key, ignored })}
-                togglingIgnore={setOptionsSyncIgnored.isPending}
-                shaderPreview={shaderSettingsPreview.data}
-                shaderLoading={shaderSettingsPreview.isLoading || shaderSettingsPreview.isFetching}
-                shaderError={shaderSettingsPreview.error}
-                shaderDecision={shaderSyncDecision}
-                onShaderDecisionChange={setShaderSyncDecision}
-              />
-            )}
-          </DialogBody>
-          <DialogFooter className="px-6 py-4 sm:justify-between">
-            {syncReviewStep === "artifacts" ? (
-              <>
-                <Button variant="secondary" onClick={handleCloseSyncReview}>
-                  CANCEL
-                </Button>
-                <Button
-                  onClick={handleSyncReviewNext}
-                  disabled={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
-                >
-                  NEXT <ChevronRight />
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="secondary" onClick={() => setSyncReviewStep("artifacts")}>
-                  <ChevronLeft /> BACK
-                </Button>
-                <Button
-                  onClick={handleConfirmSyncFromReview}
-                  disabled={sync.isPending || !!shaderSettingsPreview.data?.requiresDecision && shaderSyncDecision === "undecided"}
-                >
-                  {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                  CONTINUE TO SYNC
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SyncReviewDialog
+        open={syncReviewOpen}
+        step={syncReviewStep}
+        artifactLoading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
+        syncSummary={syncSummary}
+        syncReviewTabs={syncReviewTabs}
+        defaultTab={syncReviewDefaultTab}
+        hasTrackedOptionsFile={hasTrackedOptionsFile}
+        optionsPreview={optionsSyncPreview.data}
+        optionsLoading={optionsSyncPreview.isLoading || optionsSyncPreview.isFetching}
+        optionsError={optionsSyncPreview.error}
+        onToggleIgnore={(key, ignored) => setOptionsSyncIgnored.mutate({ key, ignored })}
+        togglingIgnore={setOptionsSyncIgnored.isPending}
+        shaderPreview={shaderSettingsPreview.data}
+        shaderLoading={shaderSettingsPreview.isLoading || shaderSettingsPreview.isFetching}
+        shaderError={shaderSettingsPreview.error}
+        shaderDecision={shaderSyncDecision}
+        onShaderDecisionChange={setShaderSyncDecision}
+        syncPending={sync.isPending}
+        onClose={handleCloseSyncReview}
+        onNext={handleSyncReviewNext}
+        onBack={() => setSyncReviewStep("artifacts")}
+        onConfirm={handleConfirmSyncFromReview}
+      />
 
-      <AddModDialog
+      <AddModrinthEntryDialog
         open={addEntryDialogOpen}
         onClose={() => setAddEntryDialogOpen(false)}
         packId={packId}
         category={addEntryCategory}
       />
 
-      <Dialog open={changelogOpen} onOpenChange={setChangelogOpen}>
-        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
-          <DialogHeader>
-            <DialogTitle>PACK UPDATES</DialogTitle>
-            <DialogDescription>Recent changes for this pack</DialogDescription>
-          </DialogHeader>
-          <DialogBody className="flex min-h-0 flex-col gap-4 overflow-hidden p-5 xl:p-6">
-            {changelog.isLoading ? (
-              <div className="flex items-center gap-3 py-4 text-text-low">
-                <Loader2 className="size-4 animate-spin text-brand-core" />
-                <span className="text-sm">Loading commit history</span>
-              </div>
-            ) : activeChangelogEntry ? (
-              <>
-                <div className="flex items-center justify-between gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => setActiveChangelogIndex((current) => Math.max(current - 1, 0))}
-                    disabled={activeChangelogIndex === 0}
-                  >
-                    <ChevronLeft /> NEWER
-                  </Button>
-                  <div className="flex flex-col items-center gap-1 text-center">
-                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                      {activeChangelogIndex + 1} / {changelog.data?.length ?? 0}
-                    </span>
-                    <span className="text-xs text-text-low">
-                      {activeChangelogIndex < newUpdateCount ? "NEW UPDATE" : "HISTORY"}
-                    </span>
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setActiveChangelogIndex((current) =>
-                        Math.min(current + 1, (changelog.data?.length ?? 1) - 1),
-                      )
-                    }
-                    disabled={activeChangelogIndex >= (changelog.data?.length ?? 1) - 1}
-                  >
-                    OLDER <ChevronRight />
-                  </Button>
-                </div>
-                <div className="min-h-0 flex-1 overflow-hidden">
-                  <ScrollArea className="h-full pr-4">
-                    <div className="min-h-[28rem] pb-1">
-                      <ChangelogCard
-                        entry={activeChangelogEntry}
-                        expanded
-                        highlighted={activeChangelogIndex < newUpdateCount}
-                        collapsible={false}
-                        className="min-h-[28rem]"
-                      />
-                    </div>
-                  </ScrollArea>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-text-low">No recent commits found.</p>
-            )}
-          </DialogBody>
-          <DialogFooter className="px-6 py-4">
-            <Button variant="secondary" onClick={() => setChangelogOpen(false)}>
-              CLOSE
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ChangelogDialog
+        open={changelogOpen}
+        onOpenChange={setChangelogOpen}
+        loading={changelog.isLoading}
+        entry={activeChangelogEntry ?? null}
+        entryIndex={activeChangelogIndex}
+        entryCount={changelog.data?.length ?? 0}
+        newUpdateCount={newUpdateCount}
+        onPrevious={() => setActiveChangelogIndex((current) => Math.max(current - 1, 0))}
+        onNext={() =>
+          setActiveChangelogIndex((current) =>
+            Math.min(current + 1, (changelog.data?.length ?? 1) - 1),
+          )
+        }
+      />
 
       <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
         <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
@@ -1284,7 +1132,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={javaInstallOpen} onOpenChange={(open) => !installJava.isPending && setJavaInstallOpen(open)}>
+      <Dialog
+        open={javaInstallOpen}
+        onOpenChange={(open) => !installJava.isPending && setJavaInstallOpen(open)}
+      >
         <DialogContent className="max-w-2xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>INSTALL JAVA</DialogTitle>
@@ -1318,8 +1169,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 <div className="max-h-56 overflow-y-auto border border-line-soft/20 bg-black/30 p-3 font-mono text-[11px] text-text-low">
                   {javaInstallLogs.length > 0 ? (
                     <div className="flex flex-col gap-1.5">
-                      {javaInstallLogs.map((line, index) => (
-                        <span key={`java-install-log:${index}`}>{line}</span>
+                      {javaInstallLogs.map((line) => (
+                        <span key={line}>{line}</span>
                       ))}
                     </div>
                   ) : (
@@ -1347,10 +1198,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            <span className="font-heading text-sm text-text-high">{choice.title}</span>
-                            {choice.recommended ? <Badge variant="default">RECOMMENDED</Badge> : null}
+                            <span className="font-heading text-sm text-text-high">
+                              {choice.title}
+                            </span>
+                            {choice.recommended ? (
+                              <Badge variant="default">RECOMMENDED</Badge>
+                            ) : null}
                           </div>
-                          <span className="font-mono text-xs text-text-low">JAVA {choice.major}</span>
+                          <span className="font-mono text-xs text-text-low">
+                            JAVA {choice.major}
+                          </span>
                         </div>
                         <p className="text-sm text-text-low">{choice.detail}</p>
                       </button>
@@ -1358,16 +1215,24 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   })}
                 </div>
                 <p className="mt-4 text-xs text-text-low">
-                  This downloads Temurin into gisketch//s_modpack_syncer app data and points launch profile at installed binary. Prism auto mode stays separate.
+                  This downloads Temurin into modsync app data and points launch profile at
+                  installed binary. Prism auto mode stays separate.
                 </p>
               </>
             )}
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={() => setJavaInstallOpen(false)} disabled={installJava.isPending}>
+            <Button
+              variant="secondary"
+              onClick={() => setJavaInstallOpen(false)}
+              disabled={installJava.isPending}
+            >
               CANCEL
             </Button>
-            <Button onClick={handleInstallJavaSubmit} disabled={installJava.isPending || !javaChoices.length}>
+            <Button
+              onClick={handleInstallJavaSubmit}
+              disabled={installJava.isPending || !javaChoices.length}
+            >
               {installJava.isPending ? <Loader2 className="animate-spin" /> : <Download />}
               INSTALL SELECTED JAVA
             </Button>
@@ -1380,14 +1245,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <DialogHeader>
             <DialogTitle>SYNC WILL DELETE UNPUBLISHED MODS</DialogTitle>
             <DialogDescription>
-              Sync keeps Prism instance 1:1 with source. Files below exist only in local mods folder and will be deleted.
+              Sync keeps Prism instance 1:1 with source. Files below exist only in local mods folder
+              and will be deleted.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
             <div className="flex flex-col gap-4 text-sm text-text-low">
               <div className="flex flex-col gap-2 border border-line-soft/30 bg-surface-sunken p-4">
                 {unpublishedMods.map((mod) => (
-                  <p key={`sync-delete:${mod.filename}`} className="font-mono text-xs text-signal-alert">
+                  <p
+                    key={`sync-delete:${mod.filename}`}
+                    className="font-mono text-xs text-signal-alert"
+                  >
                     {mod.filename}
                   </p>
                 ))}
@@ -1419,13 +1288,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <DialogHeader>
             <DialogTitle>INSTANCE ALREADY SYNCED</DialogTitle>
             <DialogDescription>
-              Manifest + Prism instance already match. Run sync again only if local state looks wrong and refresh needed.
+              Manifest + Prism instance already match. Run sync again only if local state looks
+              wrong and refresh needed.
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="p-6">
             <div className="flex flex-col gap-4 text-sm text-text-low">
               <div className="border border-line-soft/30 bg-surface-sunken p-4 font-mono text-[10px] uppercase tracking-[0.18em] text-text-low">
-                No missing mods. No outdated mods. No missing resourcepacks. No missing shaderpacks. No unpublished local files.
+                No missing mods. No outdated mods. No missing resourcepacks. No missing shaderpacks.
+                No unpublished local files.
               </div>
               <p>Continue for forced resync.</p>
             </div>
@@ -1449,1994 +1320,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
 }
 
-function LaunchSetupPanel({
-  packName,
-  profile,
-  packSynced,
-  launchRiskCount,
-  onChange,
-  onBrowseJavaPath,
-  onUsePrismAutoJava,
-  onOpenJavaInstall,
-}: {
-  packName: string;
-  profile: LaunchProfile;
-  packSynced: boolean;
-  launchRiskCount: number;
-  onChange: (profile: LaunchProfile) => void;
-  onBrowseJavaPath: () => void;
-  onUsePrismAutoJava: () => void;
-  onOpenJavaInstall: () => void;
-}) {
-  const sliderValue = [profile.maxMemoryMb];
-  const packValue = packSynced ? "SYNCED" : `${launchRiskCount} RISKS`;
-  const presets = [
-    { label: "LOW", detail: "4 GB / safe baseline", minMemoryMb: 2048, maxMemoryMb: 4096 },
-    { label: "MED", detail: "6 GB / default play", minMemoryMb: 3072, maxMemoryMb: 6144 },
-    { label: "HIGH", detail: "8 GB / heavy packs", minMemoryMb: 4096, maxMemoryMb: 8192 },
-  ];
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-          <CompactLaunchStat
-            icon={<Package className="size-3.5" />}
-            label="PACK"
-            value={packValue}
-            detail={packSynced ? packName : "Sync recommended"}
-            tone={packSynced ? "ok" : "warn"}
-          />
-          <CompactLaunchStat
-            icon={<HardDrive className="size-3.5" />}
-            label="JAVA"
-            value={profile.autoJava ? "AUTO" : profile.javaPath ? "CUSTOM" : "GLOBAL"}
-            detail={profile.autoJava ? "Prism auto Java" : profile.javaPath ?? "Prism global Java"}
-            tone={profile.autoJava || profile.javaPath ? "ok" : "warn"}
-          />
-          <CompactLaunchStat
-            icon={<MemoryStick className="size-3.5" />}
-            label="RAM"
-            value={`${Math.round(profile.maxMemoryMb / 1024)} GB`}
-            detail={`Min ${profile.minMemoryMb} MiB`}
-            tone="ok"
-          />
-        </CardContent>
-      </Card>
-
-      {!packSynced ? (
-        <div className="border border-signal-alert/35 bg-signal-alert/8 px-4 py-3 text-sm text-text-low">
-          <span className="font-heading text-[10px] uppercase tracking-[0.18em] text-signal-alert">Pack not fully synced</span>
-          <p className="mt-1 text-xs">{launchRiskCount} mod{launchRiskCount === 1 ? " is" : "s are"} missing or outdated. Launching may break pack.</p>
-        </div>
-      ) : null}
-
-      <Card variant="window">
-        <CardWindowBar>
-          <CardWindowTab>LAUNCH PROFILE</CardWindowTab>
-          <CardStatus>{profile.autoJava ? "Auto Java" : "Manual Java"}</CardStatus>
-        </CardWindowBar>
-        <CardContent className="grid gap-5 p-5 lg:grid-cols-[16rem_minmax(0,1.1fr)_minmax(20rem,0.95fr)] xl:gap-6 xl:p-6">
-          <div className="flex flex-col gap-3 border border-line-soft/20 bg-surface-sunken/60 p-4">
-            <div>
-              <Label>PRESETS</Label>
-              <p className="mt-1 text-xs text-text-low">Quick memory profiles for common pack sizes.</p>
-            </div>
-            <div className="grid gap-2">
-              {presets.map((preset) => {
-                const active = profile.maxMemoryMb === preset.maxMemoryMb && profile.minMemoryMb === preset.minMemoryMb;
-
-                return (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() =>
-                      onChange({
-                        ...profile,
-                        minMemoryMb: preset.minMemoryMb,
-                        maxMemoryMb: preset.maxMemoryMb,
-                      })
-                    }
-                    className={cn(
-                      "flex items-center justify-between border px-3 py-2 text-left transition-colors",
-                      active
-                        ? "border-brand-core bg-brand-core/10 text-brand-core"
-                        : "border-line-soft/20 bg-surface/70 text-text-high hover:border-brand-core/40 hover:bg-brand-core/5",
-                    )}
-                  >
-                    <div>
-                      <p className="text-xs font-semibold tracking-[0.18em]">{preset.label}</p>
-                      <p className="text-[11px] text-text-low">{preset.detail}</p>
-                    </div>
-                    <span className="font-mono text-xs">{Math.round(preset.maxMemoryMb / 1024)}G</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid gap-5">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label>MAX RAM</Label>
-                <span className="font-mono text-xs text-text-low">{profile.maxMemoryMb} MiB</span>
-              </div>
-              <Slider
-                value={sliderValue}
-                min={2048}
-                max={16384}
-                step={256}
-                onValueChange={(value) => {
-                  const nextValue = Array.isArray(value) ? value[0] : value;
-                  const maxMemoryMb = nextValue ?? profile.maxMemoryMb;
-                  onChange({
-                    ...profile,
-                    maxMemoryMb,
-                    minMemoryMb: Math.min(profile.minMemoryMb, maxMemoryMb),
-                  });
-                }}
-              >
-                <SliderControl>
-                  <SliderTrack>
-                    <SliderIndicator />
-                  </SliderTrack>
-                  <SliderThumb />
-                </SliderControl>
-              </Slider>
-              <p className="text-xs text-text-low">Launcher writes Prism `MaxMemAlloc` + `MinMemAlloc` overrides.</p>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <Label htmlFor="extra-jvm-args">EXTRA JVM ARGS</Label>
-              <Textarea
-                id="extra-jvm-args"
-                value={profile.extraJvmArgs}
-                onChange={(event) => onChange({ ...profile, extraJvmArgs: event.target.value })}
-                placeholder="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions"
-                className="min-h-24 font-mono text-xs"
-              />
-              <p className="text-xs text-text-low">Do not put `-Xmx` / `-Xms` here. Memory slider owns those.</p>
-            </div>
-
-            <div className="flex min-h-10 items-center justify-between gap-4 border border-line-soft/20 bg-surface-sunken/60 px-4 py-3">
-              <Label htmlFor="show-console">SHOW CONSOLE</Label>
-              <Switch
-                checked={profile.showConsole}
-                onCheckedChange={(checked) => onChange({ ...profile, showConsole: checked })}
-                aria-label="Show modsync console window on launch"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-4 border border-line-soft/20 bg-surface-sunken/60 p-4">
-            <div className="flex flex-col gap-3">
-              <Label htmlFor="java-path">JAVA PATH</Label>
-              <Input
-                id="java-path"
-                value={profile.javaPath ?? ""}
-                onChange={(event) =>
-                  onChange({
-                    ...profile,
-                    autoJava: false,
-                    javaPath: event.target.value,
-                  })
-                }
-                placeholder="/path/to/java or javaw.exe"
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={onBrowseJavaPath}>
-                  <Settings2 className="size-4" /> BROWSE JAVA
-                </Button>
-                <Button variant="outline" onClick={onUsePrismAutoJava}>
-                  <HardDrive className="size-4" /> USE PRISM AUTO
-                </Button>
-                <Button variant="outline" onClick={onOpenJavaInstall}>
-                  <Download className="size-4" /> INSTALL JAVA
-                </Button>
-              </div>
-              <p className="text-xs text-text-low">
-                Prism auto mode resolves managed compatible Java. Install dialog downloads Temurin runtime into gisketch//s_modpack_syncer.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <Row k="MIN RAM" v={`${profile.minMemoryMb} MiB`} />
-              <Row k="AUTO JAVA" v={profile.autoJava ? "ON" : "OFF"} />
-              <Row k="JVM ARGS" v={profile.extraJvmArgs.trim() ? "CUSTOM" : "DEFAULT"} />
-              <Row k="PACK" v={packSynced ? "SYNCED" : "CHECK SYNC"} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function CompactLaunchStat({
-  icon,
-  label,
-  value,
-  detail,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  detail: string;
-  tone: "ok" | "warn";
-}) {
-  return (
-    <div className="flex items-start gap-3 border border-line-soft/20 bg-surface-sunken/50 px-3 py-3">
-      <div className={cn("mt-0.5", tone === "ok" ? "text-brand-core" : "text-signal-alert")}>{icon}</div>
-      <div className="min-w-0 flex-1">
-        <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">{label}</p>
-        <p className={cn("mt-1 text-sm leading-none", tone === "ok" ? "text-brand-core" : "text-signal-alert")}>{value}</p>
-        <p className="mt-1 truncate text-[11px] text-text-low">{detail}</p>
-      </div>
-    </div>
-  );
-}
-
-type JavaInstallChoice = {
-  id: string;
-  major: number;
-  imageType: "jre" | "jdk";
-  title: string;
-  detail: string;
-  recommended: boolean;
-};
-
-function formatByteCount(value: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return unitIndex === 0 ? `${Math.round(size)} ${units[unitIndex]}` : `${size.toFixed(1)} ${units[unitIndex]}`;
-}
-
-function getJavaInstallChoices(mcVersion?: string, loader?: Loader): JavaInstallChoice[] {
-  const requiredMajor = mcVersion?.startsWith("1.21") ? 21 : 17;
-  const loaderLabel = loader ? loader.toUpperCase() : "PACK";
-
-  return [
-    {
-      id: `temurin-${requiredMajor}-jre`,
-      major: requiredMajor,
-      imageType: "jre",
-      title: `Temurin ${requiredMajor} JRE`,
-      detail: `${loaderLabel} ${mcVersion ?? "runtime"} recommended pick. Smallest install for play.`,
-      recommended: true,
-    },
-    {
-      id: `temurin-${requiredMajor}-jdk`,
-      major: requiredMajor,
-      imageType: "jdk",
-      title: `Temurin ${requiredMajor} JDK`,
-      detail: `Same Java ${requiredMajor}, but with full JDK tools bundled.`,
-      recommended: false,
-    },
-    {
-      id: "temurin-17-jre",
-      major: 17,
-      imageType: "jre",
-      title: "Temurin 17 JRE",
-      detail: requiredMajor === 21 ? "Legacy fallback only. Not recommended for Minecraft 1.21.1 packs." : "Legacy runtime for older packs.",
-      recommended: false,
-    },
-  ];
-}
-
-function PublishPreviewPage({
-  packId,
-  onClose,
-  pending,
-  report,
-  publishing,
-  publishLogs,
-  onPublish,
-}: {
-  packId: string;
-  onClose: () => void;
-  pending: boolean;
-  report: PublishScanReport | null;
-  publishing: boolean;
-  publishLogs: string[];
-  onPublish: (message: string, version: string) => void;
-}) {
-  const counts = summarizePublishReport(report);
-  const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
-  const hasChanges = changedItems.length > 0;
-  const publishTabs = buildPublishTabs(changedItems);
-  const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
-  const publishVersion = useQuery({
-    queryKey: ["suggest-publish-version", packId],
-    queryFn: () => tauri.suggestPublishVersion(packId),
-    retry: false,
-  });
-  const [commitTitle, setCommitTitle] = useState("Publish instance changes");
-  const [commitDescription, setCommitDescription] = useState("");
-
-  useEffect(() => {
-    if (!publishVersion.data) return;
-    setCommitTitle(`Update ${publishVersion.data}`);
-  }, [publishVersion.data]);
-
-  return (
-    <div className="flex min-h-screen flex-col gap-6 p-8">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onClose} disabled={publishing}>
-          <ArrowLeft /> BACK
-        </Button>
-        <Separator orientation="vertical" className="h-6" />
-        <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-          :: PUBLISH PREVIEW / {packId}
-        </span>
-      </div>
-
-      <header className="flex flex-col gap-2">
-        <h1 className="text-3xl text-text-high">Publish Preview</h1>
-        <p className="text-sm text-text-low">
-          {pending
-            ? "Scanning linked Prism instance..."
-            : report
-              ? `${counts.add} add · ${counts.update} update · ${counts.remove} remove`
-              : ""}
-        </p>
-      </header>
-
-      {pending && (
-        <Card>
-          <CardContent className="flex items-center gap-3 p-6 text-text-low">
-            <Loader2 className="size-4 animate-spin text-brand-core" />
-            <span className="text-sm">Reading instance folders</span>
-          </CardContent>
-        </Card>
-      )}
-
-      {report && !pending && (
-        <>
-          <Card>
-            <CardContent className="flex flex-col gap-4 p-6">
-              <Input
-                value={publishVersion.data ?? ""}
-                placeholder="Pack version"
-                disabled
-              />
-              <Input
-                value={commitTitle}
-                onChange={(event) => setCommitTitle(event.target.value)}
-                placeholder="Commit title"
-              />
-              <Textarea
-                value={commitDescription}
-                onChange={(event) => setCommitDescription(event.target.value)}
-                placeholder="Commit description"
-                className="min-h-32"
-              />
-              <div className="grid grid-cols-3 gap-3 text-xs">
-                <Row k="ADD" v={String(counts.add)} />
-                <Row k="UPDATE" v={String(counts.update)} />
-                <Row k="REMOVE" v={String(counts.remove)} />
-              </div>
-              <div className="flex justify-end">
-                <Button
-                  variant="default"
-                  onClick={() =>
-                    onPublish(
-                      buildCommitMessage(commitTitle, commitDescription),
-                      publishVersion.data ?? "",
-                    )
-                  }
-                  disabled={publishing || !hasChanges || publishVersion.isLoading || !!publishVersion.error}
-                >
-                  {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-                  COMMIT + PUSH
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {publishLogs.length > 0 ? (
-            <Card variant="window">
-              <CardWindowBar>
-                <CardWindowTab>PUBLISH TERMINAL</CardWindowTab>
-                <CardStatus>{publishing ? "Streaming" : "Idle"}</CardStatus>
-              </CardWindowBar>
-              <CardContent className="px-0 py-0">
-                <ScrollArea className="h-56 px-4 py-4">
-                  <div className="flex flex-col gap-2 font-mono text-xs text-text-low">
-                    {publishLogs.map((line, index) => (
-                      <p key={`${line}-${index}`}>{line}</p>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-              <CardFooter className="justify-between bg-surface-panel-strong/40 py-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
-                <span>{publishing ? "Commit in progress" : "Last run complete"}</span>
-                <span>{publishLogs.length} lines</span>
-              </CardFooter>
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>CHANGES</CardTitle>
-              <CardDescription>Only added, updated, removed entries shown. Grouped by publish area.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {hasChanges ? (
-                <Tabs defaultValue={defaultTab} className="gap-5">
-                  <TabsList className="flex-wrap gap-2">
-                    {publishTabs.map((tab) => (
-                      <TabsTrigger key={tab.id} value={tab.id}>
-                        <span>{tab.label}</span>
-                        <span className="font-mono text-[10px] tabular-nums text-text-low">{tab.count}</span>
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  {publishTabs.map((tab) => (
-                    <TabsContent key={tab.id} value={tab.id} className="outline-none">
-                      <Card className="mb-4">
-                        <CardContent className="flex items-center justify-between gap-3 p-4">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{tab.label}</span>
-                            <span className="text-xs text-text-low [text-wrap:pretty]">{tab.description}</span>
-                          </div>
-                          <div className="text-right font-mono text-xs tabular-nums text-text-low">
-                            {tab.count} {tab.count === 1 ? "change" : "changes"}
-                          </div>
-                        </CardContent>
-                      </Card>
-                      {tab.items.length > 0 ? (
-                        <ScrollArea className="h-[calc(100vh-27rem)]">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>CATEGORY</TableHead>
-                                <TableHead>PATH</TableHead>
-                                <TableHead>ACTION</TableHead>
-                                <TableHead>SOURCE</TableHead>
-                                <TableHead className="text-right">SIZE</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {tab.items.map((item) => (
-                                <TableRow key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}>
-                                  <TableCell>
-                                    <Badge variant="outline">{labelCategory(item.category, item.relativePath)}</Badge>
-                                  </TableCell>
-                                  <TableCell className="font-mono text-[10px] text-text-low">
-                                    {item.relativePath}
-                                  </TableCell>
-                                  <TableCell>
-                                    <PublishActionChip action={item.action} />
-                                  </TableCell>
-                                  <TableCell className="text-xs text-text-low">
-                                    {item.source ?? "instance-local"}
-                                  </TableCell>
-                                  <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
-                                    {typeof item.size === "number" ? formatBytes(item.size) : "--"}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </ScrollArea>
-                      ) : (
-                        <Card>
-                          <CardContent className="px-4 py-8 text-center text-sm text-text-low">
-                            No changed files in {tab.label.toLowerCase()}.
-                          </CardContent>
-                        </Card>
-                      )}
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              ) : (
-                <p className="text-sm text-text-low">No changed files to publish.</p>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
-  );
-}
-
-function AddModDialog({
-  open,
-  onClose,
-  packId,
-  category,
-}: {
-  open: boolean;
-  onClose: () => void;
-  packId: string;
-  category: ManifestArtifactCategory;
-}) {
-  const qc = useQueryClient();
-  const [input, setInput] = useState("");
-  const [selectedSide, setSelectedSide] = useState<"client" | "server" | "both">("client");
-  const artifactLabel = describeArtifactCategory(category);
-  const preview = useMutation({
-    mutationFn: (identifier: string) => tauri.previewModrinthMod(packId, identifier, category),
-    onSuccess: (data) => setSelectedSide(data.suggestedSide),
-  });
-  const addMod = useMutation({
-    mutationFn: (payload: { projectId: string; versionId: string; side: "client" | "server" | "both" }) =>
-      tauri.addModrinthMod(packId, category, payload.projectId, payload.versionId, payload.side),
-    onSuccess: async (entry) => {
-      if (category === "mods") {
-        await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
-      } else {
-        await qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] });
-      }
-      toast.success(`${artifactLabel.singular} staged`, { description: entry.filename });
-      handleClose();
-    },
-    onError: (error) => {
-      toast.error(`Add ${artifactLabel.singular.toLowerCase()} failed`, {
-        description: formatError(error),
-      });
-    },
-  });
-
-  function handleClose() {
-    setInput("");
-    setSelectedSide("client");
-    preview.reset();
-    addMod.reset();
-    onClose();
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={(next) => !next && handleClose()}>
-      <DialogContent className="max-w-2xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>ADD MODRINTH {artifactLabel.heading}</DialogTitle>
-          <DialogDescription>
-            Paste Modrinth link, slug, or project id. {artifactLabel.singular} downloads into instance first and stays unpublished until publish.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody className="flex flex-col gap-6 p-6">
-          <div className="flex flex-col gap-3">
-            <Label htmlFor="modrinth-link">MODRINTH SOURCE</Label>
-            <div className="flex gap-3">
-              <Input
-                id="modrinth-link"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder={artifactLabel.placeholder}
-              />
-              <Button
-                variant="outline"
-                onClick={() => preview.mutate(input.trim())}
-                disabled={!input.trim() || preview.isPending || addMod.isPending}
-              >
-                {preview.isPending ? <Loader2 className="animate-spin" /> : <Link2 />}
-                RESOLVE
-              </Button>
-            </div>
-            {preview.error ? (
-              <p className="text-sm text-signal-alert">{formatError(preview.error)}</p>
-            ) : null}
-          </div>
-
-          {preview.data ? (
-            <ResolvedModPreview preview={preview.data} selectedSide={selectedSide} onSideChange={setSelectedSide} />
-          ) : (
-            <div className="border border-line-soft/20 bg-surface-sunken px-4 py-6 text-sm text-text-low">
-              Resolve Modrinth {artifactLabel.singular.toLowerCase()} first.
-            </div>
-          )}
-        </DialogBody>
-        <DialogFooter className="px-6 py-4 sm:justify-between">
-          <Button variant="secondary" onClick={handleClose} disabled={addMod.isPending}>
-            CANCEL
-          </Button>
-          <Button
-            onClick={() =>
-              preview.data &&
-              addMod.mutate({
-                projectId: preview.data.projectId,
-                versionId: preview.data.versionId,
-                side: selectedSide,
-              })
-            }
-            disabled={!preview.data || preview.data.alreadyTracked || addMod.isPending}
-          >
-            {addMod.isPending ? <Loader2 className="animate-spin" /> : <Plus />}
-            {preview.data?.alreadyTracked ? "ALREADY TRACKED" : "DOWNLOAD TO INSTANCE"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ResolvedModPreview({
-  preview,
-  selectedSide,
-  onSideChange,
-}: {
-  preview: ModrinthAddPreview;
-  selectedSide: "client" | "server" | "both";
-  onSideChange: (value: "client" | "server" | "both") => void;
-}) {
-  return (
-    <Card variant="window">
-      <CardWindowBar>
-        <CardWindowTab>MODRINTH PREVIEW</CardWindowTab>
-      </CardWindowBar>
-      <CardContent className="flex flex-col gap-5 py-4">
-        <div className="flex items-start gap-4">
-          <div className="flex size-14 items-center justify-center overflow-hidden border border-line-soft/30 bg-surface-base">
-            {preview.iconUrl ? (
-              <img src={preview.iconUrl} alt="" className="size-full object-cover" loading="lazy" />
-            ) : (
-              <Package className="size-5 text-text-low" />
-            )}
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <p className="text-base text-text-high">{preview.title}</p>
-            <p className="font-mono text-[10px] text-text-low">{preview.filename}</p>
-            <p className="text-xs text-text-low">{preview.versionNumber}</p>
-            {preview.description ? (
-              <p className="line-clamp-3 text-xs text-text-low">{preview.description}</p>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
-          <div className="grid gap-2 text-xs">
-            <Row k="PROJECT" v={preview.slug} />
-            <Row k="SIZE" v={formatBytes(preview.size)} />
-            <Row k="VERSION" v={preview.versionNumber} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="mod-side">SIDE</Label>
-            <Select value={selectedSide} onValueChange={(value) => onSideChange(value as "client" | "server" | "both") }>
-              <SelectTrigger id="mod-side">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="client">CLIENT</SelectItem>
-                <SelectItem value="server">SERVER</SelectItem>
-                <SelectItem value="both">BOTH</SelectItem>
-              </SelectContent>
-            </Select>
-            {preview.alreadyTracked ? (
-              <p className="text-xs text-signal-warn">Already tracked in manifest. Add disabled.</p>
-            ) : null}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SyncDialog({
-  open,
-  onClose,
-  pending,
-  progress,
-  progressView,
-  report,
-}: {
-  open: boolean;
-  onClose: () => void;
-  pending: boolean;
-  progress: SyncProgressEvent | null;
-  progressView: { icon: string | null; title: string | null; filename: string | null } | null;
-  report: SyncInstanceReport | null;
-}) {
-  const total = Math.max(progress?.total ?? 0, 1);
-  const completed = Math.min(progress?.completed ?? 0, total);
-  const currentLabel = progressView?.title ?? progressView?.filename ?? "Preparing sync";
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
-        <DialogHeader>
-          <DialogTitle>{pending ? "SYNCING" : report ? "SYNC OK" : "SYNC"}</DialogTitle>
-          <DialogDescription>
-            {pending
-              ? syncProgressDescription(progress)
-              : report
-                ? `${report.instance.mods_written} mods · ${report.instance.resourcepacks_written} packs · ${report.instance.overrides_copied} overrides`
-                : ""}
-          </DialogDescription>
-        </DialogHeader>
-
-            <DialogBody className="min-h-0 flex-1 overflow-y-auto p-5 xl:p-6">
-              {pending && (
-                <div className="flex flex-col gap-5">
-                  <Card variant="window">
-                    <CardWindowBar>
-                      <CardWindowTab>{syncProgressLabel(progress)}</CardWindowTab>
-                      <CardStatus>
-                        {progress?.completed ?? 0}/{progress?.total ?? 0}
-                      </CardStatus>
-                    </CardWindowBar>
-                    <CardContent className="flex flex-col gap-5 p-5">
-                      <Slider value={[completed]} max={total} disabled>
-                        <SliderControl>
-                          <SliderTrack>
-                            <SliderIndicator />
-                          </SliderTrack>
-                          <SliderThumb className="opacity-0" />
-                        </SliderControl>
-                      </Slider>
-
-                      <div className="flex items-center gap-3 border border-line-soft/30 bg-surface-sunken px-4 py-4">
-                        <div className="flex size-10 items-center justify-center overflow-hidden border border-line-soft/40 bg-surface-base">
-                          {progressView?.icon ? (
-                            <img
-                              src={progressView.icon}
-                              alt=""
-                              className="size-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : progress?.status === "downloaded" || progress?.status === "cached" ? (
-                            <Check className="size-4 text-brand-core" />
-                          ) : progress?.status === "downloading" || progress?.status === "writing-instance" ? (
-                            <Loader2 className="size-4 animate-spin text-brand-core" />
-                          ) : (
-                            <Package className="size-4 text-text-low" />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-text-high">{currentLabel}</p>
-                          <p className="truncate font-mono text-[10px] text-text-low">
-                            {progress?.status === "writing-instance"
-                              ? "Writing Prism instance"
-                              : progressView?.filename ?? "Waiting for next artifact"}
-                          </p>
-                        </div>
-                        <StatusChip status={syncProgressToStatus(progress)} />
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3 text-xs">
-                        <Row k="CACHED" v={String(progress?.cached ?? 0)} />
-                        <Row k="DOWNLOADED" v={String(progress?.downloaded ?? 0)} />
-                        <Row k="FAILURES" v={String(progress?.failures ?? 0)} alert={(progress?.failures ?? 0) > 0} />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-
-              {report && !pending && (
-                <Card variant="window">
-                  <CardWindowBar>
-                    <CardWindowTab>SYNC REPORT</CardWindowTab>
-                    <CardStatus>COMPLETE</CardStatus>
-                  </CardWindowBar>
-                  <CardContent className="flex flex-col gap-2 p-5 text-xs">
-                    <Row k="MODS WRITTEN" v={String(report.instance.mods_written)} />
-                    <Row k="RESOURCEPACKS WRITTEN" v={String(report.instance.resourcepacks_written)} />
-                    <Row k="SHADERPACKS WRITTEN" v={String(report.instance.shaderpacks_written)} />
-                    <Row k="OVERRIDES COPIED" v={String(report.instance.overrides_copied)} />
-                    <Row k="CACHE HIT" v={`${report.fetch.cached} / ${report.fetch.total}`} />
-                    <Row k="DOWNLOADED" v={String(report.fetch.downloaded)} />
-                    {report.fetch.failures.length > 0 && (
-                      <Row k="FAILURES" v={String(report.fetch.failures.length)} alert />
-                    )}
-                    <p className="mt-2 truncate font-mono text-[10px] text-[--text-low]">
-                      {report.instance.instance_dir}
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </DialogBody>
-
-            <DialogFooter className="px-6 py-4">
-              <Button variant="secondary" onClick={onClose} disabled={pending}>
-                CLOSE
-              </Button>
-            </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Row({ k, v, alert }: { k: string; v: string; alert?: boolean }) {
-  return (
-    <div className="flex items-center justify-between border-line-soft/30 border-b pb-1">
-      <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{k}</span>
-      <span className={`font-mono text-xs ${alert ? "text-signal-alert" : "text-text-high"}`}>
-        {v}
-      </span>
-    </div>
-  );
-}
-
-function formatBytes(n: number) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function describeArtifactCategory(category: ManifestArtifactCategory) {
-  if (category === "resourcepacks") {
-    return {
-      singular: "Resourcepack",
-      heading: "RESOURCEPACK",
-      placeholder: "https://modrinth.com/resourcepack/... or slug",
-    };
-  }
-  if (category === "shaderpacks") {
-    return {
-      singular: "Shaderpack",
-      heading: "SHADERPACK",
-      placeholder: "https://modrinth.com/shader/... or slug",
-    };
-  }
-  return {
-    singular: "Mod",
-    heading: "MOD",
-    placeholder: "https://modrinth.com/mod/... or slug",
-  };
-}
-
-function entryDisplayName(filename: string) {
-  return filename.replace(/\.(jar|zip)$/i, "");
-}
-
-function ModRow({
-  entry,
-  icon,
-  title,
-  status,
-  loading,
-}: {
-  entry: ManifestEntry;
-  icon: string | null;
-  title: string | null;
-  status: ModStatusValue | null;
-  loading: boolean;
-}) {
-  const displayName = title ?? entryDisplayName(entry.filename);
-  return (
-    <TableRow>
-      <TableCell>
-        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
-          {icon ? (
-            <img src={icon} alt="" className="size-full object-cover" loading="lazy" />
-          ) : (
-            <Package className="size-4 text-text-low" />
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-text-high text-xs">{displayName}</span>
-          <span className="font-mono text-[10px] text-text-low">{entry.filename}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline">
-          {entry.source === "url" ? <Globe className="size-3" /> : null}
-          {entry.source.toUpperCase()}
-        </Badge>
-      </TableCell>
-      <TableCell className="text-text-low text-xs uppercase">{entry.side}</TableCell>
-      <TableCell>
-        <StatusChip status={status} loading={loading && status === null} />
-      </TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
-        {formatBytes(entry.size)}
-      </TableCell>
-    </TableRow>
-  );
-}
-
-
-function DeletedModRow({ mod }: { mod: ModStatus }) {
-  const displayName = entryDisplayName(mod.filename);
-  return (
-    <TableRow className="opacity-45">
-      <TableCell>
-        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
-          <Package className="size-4 text-text-low" />
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-text-low text-xs line-through">{displayName}</span>
-          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline">REMOVED</Badge>
-      </TableCell>
-      <TableCell className="text-text-low text-xs uppercase">--</TableCell>
-      <TableCell>
-        <StatusChip status="deleted" />
-      </TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
-        {typeof mod.size === "number" ? formatBytes(mod.size) : "--"}
-      </TableCell>
-    </TableRow>
-  );
-}
-
-function UnpublishedModRow({
-  mod,
-  adminMode,
-  deleting,
-  onDelete,
-}: {
-  mod: ModStatus;
-  adminMode: boolean;
-  deleting: boolean;
-  onDelete: () => void;
-}) {
-  const displayName = entryDisplayName(mod.filename);
-  const warningMode = !adminMode;
-  return (
-    <TableRow className={cn(warningMode ? "bg-signal-alert/8" : "bg-signal-warn/6")}>
-      <TableCell>
-        <div
-          className={cn(
-            "flex size-8 items-center justify-center overflow-hidden rounded bg-surface-base",
-            warningMode ? "border border-signal-alert/40" : "border border-signal-warn/40",
-          )}
-        >
-          {warningMode ? (
-            <AlertTriangle className="size-4 text-signal-alert" />
-          ) : (
-            <Package className="size-4 text-signal-warn" />
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className={cn("text-xs", warningMode ? "text-signal-alert" : "text-text-high")}>
-            {displayName}
-          </span>
-          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline">{warningMode ? "WARNING" : "INSTANCE"}</Badge>
-      </TableCell>
-      <TableCell className="text-text-low text-xs uppercase">local</TableCell>
-      <TableCell>
-        {warningMode ? <StrayModChip /> : <StatusChip status="unpublished" />}
-      </TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
-        <div className="flex items-center justify-end gap-2">
-          <span>{typeof mod.size === "number" ? formatBytes(mod.size) : "--"}</span>
-          <Button size="sm" variant="outline" onClick={onDelete} disabled={deleting}>
-            {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            DELETE
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-function StrayModChip() {
-  return (
-    <span className="inline-flex items-center gap-2 text-[10px] tracking-[0.18em] text-signal-alert">
-      <AlertTriangle className="size-3" />
-      STRAY MOD
-    </span>
-  );
-}
-
-const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: string }> = {
-  synced: {
-    label: "SYNCED",
-    dot: "bg-signal-live shadow-[0_0_6px_var(--color-signal-live)]",
-    text: "text-signal-live",
-  },
-  outdated: {
-    label: "OUTDATED",
-    dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
-    text: "text-signal-warn",
-  },
-  missing: {
-    label: "MISSING",
-    dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
-    text: "text-signal-alert",
-  },
-  deleted: {
-    label: "DELETED",
-    dot: "bg-signal-alert shadow-[0_0_6px_var(--color-signal-alert)]",
-    text: "text-signal-alert",
-  },
-  unpublished: {
-    label: "UNPUBLISHED",
-    dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
-    text: "text-signal-warn",
-  },
-};
-
-function StatusChip({ status, loading = false }: { status: ModStatusValue | null; loading?: boolean }) {
-  if (loading) {
-    return (
-      <span className="inline-flex items-center gap-2 text-[10px] tracking-[0.18em] text-text-low">
-        <Loader2 className="size-3 animate-spin" />
-        LOADING
-      </span>
-    );
-  }
-
-  const meta = STATUS_META[status ?? "missing"];
-  return (
-    <span className={cn("inline-flex items-center gap-2 text-[10px] tracking-[0.18em]", meta.text)}>
-      <span className={cn("size-2 rounded-full", meta.dot)} />
-      {meta.label}
-    </span>
-  );
-}
-
-function PublishActionChip({ action }: { action: PublishAction }) {
-  const text =
-    action === "add"
-      ? "text-brand-core"
-      : action === "update"
-        ? "text-signal-warn"
-        : action === "remove"
-          ? "text-signal-alert"
-          : "text-text-low";
-
-  return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{action}</span>;
-}
-
-type PublishTabDefinition = {
-  id: "mods" | "shaderpacks" | "resourcepacks" | "shader-settings" | "configs" | "options" | "others";
-  label: string;
-  description: string;
-  items: PublishScanReport["items"];
-  count: number;
-};
-
-function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefinition[] {
-  const tabs: Array<Omit<PublishTabDefinition, "items" | "count"> & { match: (item: PublishScanReport["items"][number]) => boolean }> = [
-    {
-      id: "mods",
-      label: "MODS",
-      description: "Jar artifacts tracked in manifest mods list.",
-      match: (item) => item.category === "mods",
-    },
-    {
-      id: "shaderpacks",
-      label: "SHADERPACKS",
-      description: "Shader archives staged for manifest shaderpacks list.",
-      match: (item) => item.category === "shaderpacks",
-    },
-    {
-      id: "resourcepacks",
-      label: "RESOURCEPACKS",
-      description: "Resource pack archives staged for manifest resourcepacks list.",
-      match: (item) => item.category === "resourcepacks",
-    },
-    {
-      id: "shader-settings",
-      label: "SHADER SETTINGS",
-      description: "Iris selector file plus shader preset .txt files alongside shaderpacks.",
-      match: (item) => item.category === "shader-settings",
-    },
-    {
-      id: "configs",
-      label: "CONFIGS",
-      description: "Tracked config tree changes from instance config folder.",
-      match: (item) => item.category === "config",
-    },
-    {
-      id: "options",
-      label: "OPTIONS",
-      description: "Root options files like options.txt intended for preset sync.",
-      match: (item) => item.category === "root" && item.relativePath === "options.txt",
-    },
-    {
-      id: "others",
-      label: "OTHERS",
-      description: "KubeJS + remaining root-level tracked files.",
-      match: (item) => item.category === "kubejs" || (item.category === "root" && item.relativePath !== "options.txt"),
-    },
-  ];
-
-  return tabs.map((tab) => {
-    const tabItems = items.filter(tab.match);
-    return {
-      id: tab.id,
-      label: tab.label,
-      description: tab.description,
-      items: tabItems,
-      count: tabItems.length,
-    };
-  });
-}
-
-function buildArtifactStatusMap(
-  report: PublishScanReport | null | undefined,
-  category: "resourcepacks" | "shaderpacks",
-) {
-  const map = new Map<string, ModStatusValue>();
-  for (const item of report?.items ?? []) {
-    if (item.category !== category) continue;
-    if (item.action === "add") continue;
-    map.set(
-      item.relativePath,
-      item.action === "unchanged"
-        ? "synced"
-        : item.action === "update"
-          ? "outdated"
-          : "missing",
-    );
-  }
-  return map;
-}
-
-type SyncCategorySummary = {
-  category: "mods" | "resourcepacks" | "shaderpacks";
-  label: string;
-  add: number;
-  update: number;
-  remove: number;
-};
-
-type SyncReviewTab = {
-  id: SyncCategorySummary["category"];
-  label: string;
-  items: PublishScanReport["items"];
-  count: number;
-};
-
-function buildSyncSummary(report: PublishScanReport | null | undefined): SyncCategorySummary[] {
-  const categories: SyncCategorySummary["category"][] = ["mods", "resourcepacks", "shaderpacks"];
-  return categories.map((category) => {
-    const items = (report?.items ?? []).filter((item) => item.category === category);
-    return {
-      category,
-      label: labelCategory(category),
-      add: items.filter((item) => item.action === "remove").length,
-      update: items.filter((item) => item.action === "update").length,
-      remove: items.filter((item) => item.action === "add").length,
-    };
-  });
-}
-
-function buildSyncReviewTabs(report: PublishScanReport | null | undefined): SyncReviewTab[] {
-  const categories: SyncCategorySummary["category"][] = ["mods", "resourcepacks", "shaderpacks"];
-  return categories.map((category) => {
-    const items = (report?.items ?? []).filter((item) => item.category === category && item.action !== "unchanged");
-    return {
-      id: category,
-      label: labelCategory(category),
-      items,
-      count: items.length,
-    };
-  });
-}
-
-function SyncPreviewCard({ summary }: { summary: SyncCategorySummary }) {
-  return (
-    <Card variant="window">
-      <CardWindowBar>
-        <CardWindowTab>{summary.label}</CardWindowTab>
-        <CardStatus>{summary.add + summary.update + summary.remove} CHANGES</CardStatus>
-      </CardWindowBar>
-      <CardContent className="grid grid-cols-3 gap-2 p-4 text-xs">
-        <Row k="ADD" v={String(summary.add)} />
-        <Row k="UPDATE" v={String(summary.update)} />
-        <Row k="DELETE" v={String(summary.remove)} />
-      </CardContent>
-    </Card>
-  );
-}
-
-function OptionsReviewStep({
-  hasTrackedOptionsFile,
-  preview,
-  loading,
-  error,
-  onToggleIgnore,
-  togglingIgnore,
-  shaderPreview,
-  shaderLoading,
-  shaderError,
-  shaderDecision,
-  onShaderDecisionChange,
-}: {
-  hasTrackedOptionsFile: boolean;
-  preview?: OptionsSyncPreview;
-  loading: boolean;
-  error: unknown;
-  onToggleIgnore: (key: string, ignored: boolean) => void;
-  togglingIgnore: boolean;
-  shaderPreview?: ShaderSettingsPreview;
-  shaderLoading: boolean;
-  shaderError: unknown;
-  shaderDecision: "undecided" | "sync" | "skip";
-  onShaderDecisionChange: (decision: "undecided" | "sync" | "skip") => void;
-}) {
-  const [showIgnored, setShowIgnored] = useState(true);
-  const hasShaderSettings = shaderLoading || !!shaderError || !!shaderPreview?.hasPackIrisFile;
-  const shaderChangeCount = (shaderPreview?.irisChanges.length ?? 0) + (shaderPreview?.presetChanges.length ?? 0);
-
-  if (!hasTrackedOptionsFile && !hasShaderSettings) {
-    return (
-      <Card>
-        <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
-          No tracked options or shader preset files for this pack yet.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex h-full min-h-[18rem] items-center gap-3 p-6 text-sm text-text-low">
-          <Loader2 className="size-4 animate-spin text-brand-core" />
-          Building options diff...
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertTriangle className="size-4" />
-        <AlertTitle>OPTIONS PREVIEW FAILED</AlertTitle>
-        <AlertDescription>{formatError(error)}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (hasTrackedOptionsFile && !preview) {
-    return null;
-  }
-
-  const reviewTabs: Array<OptionsSyncPreview["groups"][number]["category"] | "shader-settings"> = preview
-    ? ["keybinds", "video", ...(hasShaderSettings ? (["shader-settings"] as const) : []), "other"]
-    : ["shader-settings"];
-  const defaultTab =
-    preview?.groups.find((group) => group.changes.length > 0)?.category ??
-    (hasShaderSettings && shaderChangeCount > 0 ? "shader-settings" : reviewTabs[0]);
-  const changedCount = preview?.groups.reduce((sum, group) => sum + group.changes.length, 0) ?? 0;
-  const totalChangedCount = changedCount + shaderChangeCount;
-  const groupsByCategory = new Map((preview?.groups ?? []).map((group) => [group.category, group]));
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)]">
-        <Card variant="window" className="flex min-h-0 flex-col">
-          <CardWindowBar>
-            <CardWindowTab>OPTION SUMMARY</CardWindowTab>
-            <CardStatus>{totalChangedCount} CHANGES</CardStatus>
-          </CardWindowBar>
-          <CardContent className="min-h-0 flex-1 p-0">
-            <ScrollArea className="h-full px-4 py-4">
-              <div className="flex flex-col gap-3">
-                <div className="grid gap-2">
-                  <Row k="PACK FILE" v={preview?.hasPackFile ? "FOUND" : "MISSING"} />
-                  <Row k="INSTANCE FILE" v={preview?.hasInstanceFile ? "FOUND" : "MISSING"} />
-                  <Row k="IGNORED KEYS" v={String(preview?.ignoredKeys.length ?? 0)} />
-                  {hasShaderSettings ? <Row k="SHADER SETTINGS" v={String(shaderChangeCount)} /> : null}
-                  {(preview?.groups ?? []).map((group) => (
-                    <Row key={group.category} k={group.label} v={String(group.changes.length)} />
-                  ))}
-                </div>
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        <div className="flex min-h-0 flex-col gap-3 md:min-w-0">
-          {preview || hasShaderSettings ? (
-            <Tabs defaultValue={defaultTab} className="flex min-h-0 flex-1 flex-col gap-4">
-              <TabsList className="flex-wrap gap-2">
-                {reviewTabs.map((tab) => {
-                  const group = tab === "shader-settings" ? null : groupsByCategory.get(tab);
-                  const label = tab === "shader-settings" ? "SHADER SETTINGS" : group?.label ?? tab.toUpperCase();
-                  const count = tab === "shader-settings" ? shaderChangeCount : group?.changes.length ?? 0;
-                  return (
-                    <TabsTrigger key={tab} value={tab}>
-                      <span>{label}</span>
-                      <span className="font-mono text-[10px] tabular-nums text-text-low">{count}</span>
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-              {reviewTabs.map((tab) => {
-                if (tab === "shader-settings") {
-                  return (
-                    <TabsContent key={tab} value={tab} className="min-h-0 flex-1 outline-none">
-                      <ShaderSettingsTab
-                        preview={shaderPreview}
-                        loading={shaderLoading}
-                        error={shaderError}
-                        decision={shaderDecision}
-                        onDecisionChange={onShaderDecisionChange}
-                      />
-                    </TabsContent>
-                  );
-                }
-
-                const group = groupsByCategory.get(tab);
-                if (!group) {
-                  return null;
-                }
-
-                const visibleChanges = sortOptionsSyncChanges(group.changes).filter(
-                  (change) => showIgnored || !change.ignored,
-                );
-
-                return (
-                  <TabsContent key={group.category} value={group.category} className="min-h-0 flex-1 outline-none">
-                    <Card variant="window" className="flex h-full min-h-0 flex-col">
-                      <CardWindowBar>
-                        <CardWindowTab>{group.label}</CardWindowTab>
-                        <CardStatus>{visibleChanges.length} CHANGES</CardStatus>
-                        <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
-                          <span>SHOW IGNORED</span>
-                          <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
-                        </div>
-                      </CardWindowBar>
-                      <CardContent className="min-h-0 flex-1 p-0">
-                        {visibleChanges.length > 0 ? (
-                          <ScrollArea className="h-full">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="px-3 py-2">ACTION</TableHead>
-                                  <TableHead className="px-3 py-2">KEY</TableHead>
-                                  <TableHead className="px-3 py-2">PACK VALUE</TableHead>
-                                  <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
-                                  <TableHead className="px-3 py-2 text-center">IGNORE</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody className="divide-y-0">
-                                {visibleChanges.map((change) => (
-                                  <TableRow
-                                    key={`${group.category}:${change.key}`}
-                                    className={cn(
-                                      "h-8 border-l-2",
-                                      getOptionsChangeRowTone(change.action),
-                                      change.ignored && "opacity-45",
-                                    )}
-                                  >
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <SyncPlanActionChip action={change.action} />
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <OptionsPreviewKey optionKey={change.key} />
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
-                                    </TableCell>
-                                    <TableCell
-                                      className="cursor-pointer px-3 py-1.5 align-middle"
-                                      role="button"
-                                      tabIndex={togglingIgnore ? -1 : 0}
-                                      title={change.ignored ? "Stop ignoring key" : "Ignore key"}
-                                      onClick={() => {
-                                        if (!togglingIgnore) {
-                                          onToggleIgnore(change.key, !change.ignored);
-                                        }
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if ((event.key === "Enter" || event.key === " ") && !togglingIgnore) {
-                                          event.preventDefault();
-                                          onToggleIgnore(change.key, !change.ignored);
-                                        }
-                                      }}
-                                    >
-                                      <div className="flex items-center justify-center">
-                                        <Checkbox
-                                          checked={change.ignored}
-                                          disabled={togglingIgnore}
-                                          aria-label={`Ignore ${change.key}`}
-                                          className="pointer-events-none"
-                                        />
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </ScrollArea>
-                        ) : (
-                          <div className="px-4 py-8 text-center text-sm text-text-low">
-                            {showIgnored
-                              ? `No changes in ${group.label.toLowerCase()}.`
-                              : `No visible changes in ${group.label.toLowerCase()}.`}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </TabsContent>
-                );
-              })}
-            </Tabs>
-          ) : (
-            <Card>
-              <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
-                No tracked <span className="mx-1 font-mono text-text-high">options.txt</span> preset for this pack yet.
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShaderSettingsTab({
-  preview,
-  loading,
-  error,
-  decision,
-  onDecisionChange,
-}: {
-  preview?: ShaderSettingsPreview;
-  loading: boolean;
-  error: unknown;
-  decision: "undecided" | "sync" | "skip";
-  onDecisionChange: (decision: "undecided" | "sync" | "skip") => void;
-}) {
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center gap-3 px-4 py-3 text-sm text-text-low">
-          <Loader2 className="size-4 animate-spin text-brand-core" />
-          Reading shader settings...
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (error) {
-    return (
-      <Alert variant="destructive">
-        <AlertTriangle className="size-4" />
-        <AlertTitle>SHADER PREVIEW FAILED</AlertTitle>
-        <AlertDescription>{formatError(error)}</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!preview?.hasPackIrisFile) {
-    return (
-      <Card>
-        <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
-          No tracked shader settings for this pack yet.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const localShader = preview.localShaderPack ?? "NONE";
-  const packShader = preview.packShaderPack ?? "NONE";
-  const statusLabel =
-    preview.status === "disabled-local"
-      ? "SHADERS OFF LOCALLY"
-      : preview.status === "mismatch"
-        ? "SHADER MISMATCH"
-        : preview.status === "missing-preset"
-          ? "PACK PRESET MISSING"
-          : "SHADER PRESET READY";
-
-  return (
-    <Card variant="window" className="flex h-full min-h-0 flex-col">
-      <CardWindowBar>
-        <CardWindowTab>SHADER SETTINGS</CardWindowTab>
-        <CardStatus>{statusLabel}</CardStatus>
-      </CardWindowBar>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4 p-4">
-        <div className="grid gap-2 md:grid-cols-2">
-          <Row k="LOCAL SHADER" v={localShader} />
-          <Row k="PACK SHADER" v={packShader} />
-          <Row k="IRIS DIFFS" v={String(preview.irisDiffCount)} />
-          <Row k="PRESET DIFFS" v={String(preview.presetDiffCount)} />
-        </div>
-        <p className="text-xs text-text-low [text-wrap:pretty]">
-          {preview.status === "disabled-local"
-            ? "Shaders off locally. Sync can still write pack shader selection + preset."
-            : preview.status === "mismatch"
-              ? "Local shader differs from pack shader preset. Sync shader applies pack iris.properties + matching preset file."
-              : preview.status === "missing-preset"
-                ? "Pack iris.properties exists, but matching shader preset .txt missing. Sync shader will only update iris.properties."
-                : "Sync shader copies pack iris.properties and matching shader preset .txt when present."}
-        </p>
-        {preview.requiresDecision ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={decision === "sync" ? "default" : "outline"}
-              onClick={() => onDecisionChange("sync")}
-            >
-              SYNC SHADER
-            </Button>
-            <Button
-              variant={decision === "skip" ? "secondary" : "outline"}
-              onClick={() => onDecisionChange("skip")}
-            >
-              IGNORE THIS SYNC
-            </Button>
-          </div>
-        ) : (
-          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">No shader sync decision needed.</p>
-        )}
-        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-2">
-          <ShaderDiffTable
-            title="IRIS.PROPERTIES"
-            description="Pack config values vs local instance config/iris.properties."
-            changes={preview.irisChanges}
-          />
-          <ShaderDiffTable
-            title="SHADER PRESET"
-            description="Pack shaderpacks/*.txt values vs local active preset sidecar."
-            changes={preview.presetChanges}
-          />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ShaderDiffTable({
-  title,
-  description,
-  changes,
-}: {
-  title: string;
-  description: string;
-  changes: ShaderSettingsChange[];
-}) {
-  const sortedChanges = sortShaderSettingsChanges(changes);
-
-  return (
-    <div className="flex min-h-0 flex-col overflow-hidden border border-line-soft/20 bg-surface-sunken/30">
-      <div className="flex items-center justify-between gap-3 border-b border-line-soft/20 px-4 py-3">
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">{title}</p>
-          <p className="text-xs text-text-low [text-wrap:pretty]">{description}</p>
-        </div>
-        <span className="font-mono text-[10px] tabular-nums text-text-low">{sortedChanges.length}</span>
-      </div>
-      <div className="min-h-0 flex-1">
-        {sortedChanges.length > 0 ? (
-          <ScrollArea className="h-full">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="px-3 py-2">ACTION</TableHead>
-                  <TableHead className="px-3 py-2">KEY</TableHead>
-                  <TableHead className="px-3 py-2">PACK VALUE</TableHead>
-                  <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y-0">
-                {sortedChanges.map((change) => (
-                  <TableRow
-                    key={`${title}:${change.key}`}
-                    className={cn("h-8 border-l-2", getOptionsChangeRowTone(change.action))}
-                  >
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <SyncPlanActionChip action={change.action} />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewKey optionKey={change.key} />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        ) : (
-          <div className="px-4 py-8 text-center text-sm text-text-low">No changed keys.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SyncPlanActionChip({ action }: { action: PublishAction }) {
-  const label = action === "remove" ? "ADD" : action === "update" ? "UPDATE" : "DELETE";
-  const text =
-    action === "remove"
-      ? "text-signal-live"
-      : action === "update"
-        ? "text-signal-warn"
-        : "text-signal-alert";
-  return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{label}</span>;
-}
-
-function summarizePublishReport(report: PublishScanReport | null) {
-  return {
-    add: report?.items.filter((item) => item.action === "add").length ?? 0,
-    update: report?.items.filter((item) => item.action === "update").length ?? 0,
-    remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
-    unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
-  };
-}
-
 function hasTrackedOptionsPreset(report: PublishScanReport | null | undefined) {
-  return (report?.items ?? []).some((item) => item.category === "root" && item.relativePath === "options.txt");
-}
-
-function sortOptionsSyncChanges(changes: OptionsSyncPreview["groups"][number]["changes"]) {
-  return [...changes].sort((left, right) => {
-    if (left.ignored !== right.ignored) {
-      return left.ignored ? 1 : -1;
-    }
-    const order = (action: PublishAction) =>
-      action === "remove" ? 0 : action === "update" ? 1 : action === "add" ? 2 : 3;
-    return order(left.action) - order(right.action) || left.key.localeCompare(right.key);
-  });
-}
-
-function sortShaderSettingsChanges(changes: ShaderSettingsChange[]) {
-  const order = (action: PublishAction) =>
-    action === "remove" ? 0 : action === "update" ? 1 : action === "add" ? 2 : 3;
-  return [...changes].sort((left, right) => order(left.action) - order(right.action) || left.key.localeCompare(right.key));
-}
-
-function getOptionsChangeRowTone(action: PublishAction) {
-  if (action === "remove") {
-    return "border-signal-live/50";
-  }
-  if (action === "update") {
-    return "border-signal-warn/50";
-  }
-  return "border-signal-alert/50";
-}
-
-function OptionsPreviewKey({ optionKey }: { optionKey: string }) {
-  const display = formatOptionKeyDisplay(optionKey);
-  return (
-    <TooltipProvider delay={0}>
-      <TooltipLabel
-        primary={display.primary}
-        secondary={display.secondary}
-        className="text-[11px] leading-4 text-text-high"
-        tooltipClassName="font-mono text-brand-core shadow-none"
-      />
-    </TooltipProvider>
+  return (report?.items ?? []).some(
+    (item) => item.category === "root" && item.relativePath === "options.txt",
   );
-}
-
-function OptionsPreviewValue({ optionKey, value }: { optionKey: string; value: string | null }) {
-  const display = formatOptionValueDisplay(optionKey, value);
-  const keybind = isKeybindOptionKey(optionKey);
-  return (
-    <TooltipProvider delay={0}>
-      <TooltipLabel
-        primary={display.primary}
-        secondary={display.secondary}
-        className={cn(
-          "w-fit max-w-full truncate text-[11px] leading-4",
-          keybind
-            ? "border border-line-soft/30 bg-surface-sunken/70 px-1.5 py-0.5 font-semibold tracking-[0.08em] text-text-high"
-            : "font-mono text-text-low",
-        )}
-        tooltipClassName="font-mono text-brand-core shadow-none"
-      />
-    </TooltipProvider>
-  );
-}
-
-function TooltipLabel({
-  primary,
-  secondary,
-  className,
-  tooltipClassName,
-}: {
-  primary: string;
-  secondary: string | null;
-  className?: string;
-  tooltipClassName?: string;
-}) {
-  if (!secondary) {
-    return (
-      <span className={className} title={primary}>
-        {primary}
-      </span>
-    );
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className={className} title={secondary} />}>{primary}</TooltipTrigger>
-      <TooltipContent className={tooltipClassName}>{secondary}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function formatOptionKeyDisplay(optionKey: string) {
-  if (!isKeybindOptionKey(optionKey)) {
-    return {
-      primary: humanizeOptionToken(optionKey),
-      secondary: /[A-Z_.]/.test(optionKey) ? optionKey : null,
-    };
-  }
-
-  let raw = optionKey.slice(4);
-  if (raw.startsWith("key.")) {
-    raw = raw.slice(4);
-  }
-  const parts = raw.split(".").filter(Boolean).filter((part) => part !== "keybind");
-  return {
-    primary: parts.map(humanizeOptionToken).join(" "),
-    secondary: optionKey,
-  };
-}
-
-function formatOptionValueDisplay(optionKey: string, value: string | null) {
-  if (!value) {
-    return { primary: "--", secondary: null };
-  }
-  if (!isKeybindOptionKey(optionKey)) {
-    return { primary: value, secondary: null };
-  }
-
-  const primary = humanizeKeybindValue(value);
-  return {
-    primary,
-    secondary: primary === value ? null : value,
-  };
-}
-
-function isKeybindOptionKey(optionKey: string) {
-  return optionKey.startsWith("key_");
-}
-
-function humanizeKeybindValue(value: string) {
-  if (value === "key.keyboard.unknown") {
-    return "UNBOUND";
-  }
-  if (value.startsWith("key.keyboard.")) {
-    return humanizeOptionToken(value.slice("key.keyboard.".length));
-  }
-  if (value.startsWith("key.mouse.")) {
-    return `Mouse ${humanizeOptionToken(value.slice("key.mouse.".length))}`;
-  }
-  if (value.startsWith("scancode.")) {
-    return `Scancode ${value.slice("scancode.".length)}`;
-  }
-  return humanizeOptionToken(value);
-}
-
-function humanizeOptionToken(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/-/g, " ")
-    .replace(/\./g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => {
-      if (/^f\d+$/i.test(part) || /^\d+$/.test(part)) {
-        return part.toUpperCase();
-      }
-      if (part.length <= 2 && part === part.toLowerCase()) {
-        return part.toUpperCase();
-      }
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(" ");
-}
-
-function ChangelogCard({
-  entry,
-  expanded,
-  highlighted,
-  onToggle,
-  collapsible = true,
-  className,
-}: {
-  entry: PackChangelogEntry;
-  expanded: boolean;
-  highlighted: boolean;
-  onToggle?: () => void;
-  collapsible?: boolean;
-  className?: string;
-}) {
-  return (
-    <Card
-      variant="window"
-      highlighted={highlighted}
-      size="sm"
-      className={cn("h-full", highlighted && "bg-surface-panel-strong/80", className)}
-    >
-      <CardWindowBar className="px-0 py-0">
-        <div className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left">
-          <div className="flex items-center gap-3">
-            <CardWindowTab>UPDATE {entry.packVersion}</CardWindowTab>
-            <p className="truncate text-[10px] text-text-low">{formatGmt8(entry.committedAt)}</p>
-          </div>
-          {collapsible ? (
-            <button type="button" onClick={onToggle} className="text-text-low">
-              {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            </button>
-          ) : highlighted ? (
-            <Badge>NEW</Badge>
-          ) : null}
-        </div>
-      </CardWindowBar>
-
-      {expanded ? (
-        <CardContent className="flex flex-col gap-4 border-t border-line-soft/20 pt-4">
-          <div className="flex flex-col gap-2">
-            <p className="text-sm text-text-high">{entry.title}</p>
-            {entry.description ? (
-              <p className="whitespace-pre-wrap text-xs text-text-low">{entry.description}</p>
-            ) : null}
-          </div>
-
-          {entry.items.length ? (
-            <div className="flex flex-col gap-4">
-              {entry.items.map((item, itemIndex) => {
-                const meta = changelogActionMeta(item.action);
-                return (
-                  <section key={`${entry.commitSha}:${item.category}:${item.action}:${itemIndex}`} className="flex flex-col gap-2">
-                    <p className={cn("text-xs", meta.headingClass)}>{formatChangelogHeading(item)}</p>
-                    <div className="flex flex-col gap-1 text-xs text-text-low">
-                      {item.details.map((detail, detailIndex) => (
-                        <p
-                          key={`${entry.commitSha}:${item.category}:${item.action}:${detailIndex}`}
-                          className={cn(meta.detailClass)}
-                        >
-                          <span className={cn("mr-2 inline-block w-3 font-mono", meta.prefixClass)}>
-                            {meta.prefix}
-                          </span>
-                          {detail}
-                        </p>
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-text-low">No tracked content changes</p>
-          )}
-        </CardContent>
-      ) : null}
-    </Card>
-  );
-}
-
-function buildCommitMessage(title: string, description: string) {
-  const cleanTitle = title.trim() || "Publish instance changes";
-  const cleanDescription = description.trim();
-  return cleanDescription ? `${cleanTitle}\n\n${cleanDescription}` : cleanTitle;
-}
-
-function formatGmt8(unixSeconds: number) {
-  const date = new Date(unixSeconds * 1000);
-  const formatted = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Singapore",
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-  return formatted.toUpperCase().replace(",", ", ");
-}
-
-function formatChangelogHeading(item: PackChangelogItem) {
-  const action = item.action === "add" ? "Added" : item.action === "update" ? "Updated" : "Removed";
-  const category =
-    item.category === "mods"
-      ? item.count === 1
-        ? "Mod"
-        : "Mods"
-      : item.category === "resourcepacks"
-        ? item.count === 1
-          ? "Resourcepack"
-          : "Resourcepacks"
-        : item.category === "shaderpacks"
-          ? item.count === 1
-            ? "Shaderpack"
-            : "Shaderpacks"
-          : item.category === "config"
-            ? item.count === 1
-              ? "Config"
-              : "Configs"
-            : item.category === "kubejs"
-              ? item.count === 1
-                ? "KubeJS File"
-                : "KubeJS Files"
-              : item.count === 1
-                ? "Root File"
-                : "Root Files";
-  return `${action} ${item.count} ${category}`;
-}
-
-function formatChangelogSummary(newUpdateCount: number, totalEntries: number) {
-  if (newUpdateCount > 0) {
-    return `${newUpdateCount} NEW ${newUpdateCount === 1 ? "UPDATE" : "UPDATES"}!`;
-  }
-  if (totalEntries > 0) {
-    return "UP TO DATE";
-  }
-  return "NO HISTORY";
-}
-
-function changelogActionMeta(action: PackChangelogItem["action"]) {
-  if (action === "add") {
-    return {
-      prefix: "+",
-      headingClass: "text-signal-live",
-      detailClass: "text-text-high",
-      prefixClass: "text-signal-live",
-    };
-  }
-  if (action === "update") {
-    return {
-      prefix: "~",
-      headingClass: "text-signal-warn",
-      detailClass: "text-text-high",
-      prefixClass: "text-signal-warn",
-    };
-  }
-  return {
-    prefix: "-",
-    headingClass: "text-signal-alert",
-    detailClass: "text-text-low line-through",
-    prefixClass: "text-signal-alert",
-  };
-}
-
-function labelCategory(category: PublishCategory, relativePath?: string) {
-  if (category === "root" && relativePath === "options.txt") {
-    return "OPTIONS";
-  }
-  if (category === "shader-settings") {
-    return "SHADER SETTINGS";
-  }
-  if (category === "root") {
-    return "ROOT";
-  }
-  return category.toUpperCase();
-}
-
-function syncProgressLabel(progress: SyncProgressEvent | null) {
-  if (!progress) return "WORKING";
-  if (progress.status === "writing-instance") return "WRITING";
-  if (progress.status === "cached") return "CACHED";
-  if (progress.status === "downloaded") return "DOWNLOADED";
-  if (progress.status === "failed") return "FAILED";
-  if (progress.status === "done") return "DONE";
-  return "DOWNLOADING";
-}
-
-function syncProgressDescription(progress: SyncProgressEvent | null) {
-  if (!progress) return "Downloading + writing Prism instance…";
-  if (progress.status === "writing-instance") {
-    return `Writing instance files · ${progress.completed}/${progress.total}`;
-  }
-  return `${progress.completed}/${progress.total} artifacts processed`;
-}
-
-function syncProgressToStatus(progress: SyncProgressEvent | null): ModStatusValue {
-  if (!progress) return "missing";
-  if (progress.status === "cached" || progress.status === "downloaded" || progress.status === "done") {
-    return "synced";
-  }
-  if (progress.status === "failed") return "deleted";
-  return "outdated";
 }

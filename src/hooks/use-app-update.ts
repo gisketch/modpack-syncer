@@ -79,7 +79,9 @@ export function useInstallAppUpdate(update: Update | null) {
                 phase: "downloading",
                 downloadedBytes,
                 totalBytes,
-                percent: totalBytes ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : null,
+                percent: totalBytes
+                  ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+                  : null,
               };
             });
             break;

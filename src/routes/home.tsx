@@ -2,12 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ChevronRight, FolderGit2, Loader2, Package, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { PackIcon } from "@/components/pack-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { PackIcon } from "@/components/pack-icon";
 import { formatError } from "@/lib/format-error";
 import { type PackSummary, tauri } from "@/lib/tauri";
 import { useNav } from "@/stores/nav-store";
@@ -180,7 +180,9 @@ function PackCard({ pack }: { pack: PackSummary }) {
               </div>
             )}
             {manifest.isError && (
-              <p className="cp-tactical-label mt-2 text-[--signal-alert] text-xs">NO MANIFEST.JSON</p>
+              <p className="cp-tactical-label mt-2 text-[--signal-alert] text-xs">
+                NO MANIFEST.JSON
+              </p>
             )}
           </div>
         </div>
