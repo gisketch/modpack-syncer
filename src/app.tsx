@@ -13,6 +13,7 @@ import {
   SidebarSubmenu,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
+import { useAppVersion } from "@/hooks/use-app-version";
 import { tauri } from "@/lib/tauri";
 import { HomeRoute } from "@/routes/home";
 import { OnboardingRoute } from "@/routes/onboarding";
@@ -64,6 +65,7 @@ function RootGate() {
 function Shell() {
   const view = useNav((s) => s.view);
   const go = useNav((s) => s.go);
+  const appVersion = useAppVersion();
   const packs = useQuery({
     queryKey: ["packs"],
     queryFn: () => tauri.listPacks(),
@@ -132,7 +134,9 @@ function Shell() {
           </SidebarItem>
         </SidebarContent>
         <SidebarFooter>
-          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">:: v0.1.0</span>
+          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+            :: v{appVersion.data ?? "..."}
+          </span>
         </SidebarFooter>
       </Sidebar>
       <main className="flex-1 overflow-auto scrollbar-tactical">
