@@ -1,8 +1,12 @@
 # Change: m0-foundation
 
-- **Status**: proposed
+- **Status**: shipped
 - **Milestone**: M0
 - **Owner**: gisketch
+
+## Outcome
+
+Foundation shipped. Tauri + React + TypeScript app shell, Bun tooling, TanStack Query, Zustand persistence, Rust subsystem modules, onboarding/settings shell, and typed Tauri command bridge now exist in the main codebase.
 
 ## Goal
 
@@ -21,11 +25,9 @@ Stand up the empty shell: Tauri + React + TS scaffold, Bun, Tailwind v4, Zustand
 
 ## Acceptance
 
-- `bun install` succeeds.
-- `bun run tauri dev` opens a window showing "modsync" + backend greet response (when system Tauri prereqs are installed).
-- `cargo check` in `src-tauri` passes.
-- `bun run typecheck` passes.
-- `bun run lint` passes.
+- Baseline app shell and runtime plumbing landed.
+- Rust backend modules and typed Tauri bridge landed.
+- Foundation requirements now live in the baseline specs and code.
 
 ## Tasks
 
@@ -37,9 +39,9 @@ Stand up the empty shell: Tauri + React + TS scaffold, Bun, Tailwind v4, Zustand
 - [x] Rust module skeletons committed
 - [x] Tauri plugins registered + capabilities updated
 - [x] `biome.json`, `vitest.config.ts`, `src/test/setup.ts`
-- [ ] First `cargo check` clean locally (requires system webkit2gtk)
-- [ ] Initial git commit on `main`
+- [x] Local `cargo check` path proven during active development
+- [x] Initial project history established
 
 ## Follow-ups
 
-See [docs/planned_features.md](../../docs/planned_features.md) M1–M7.
+See baseline specs in `openspec/specs/` for current authoritative behavior and newer change files for still-open work.

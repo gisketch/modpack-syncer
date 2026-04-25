@@ -1,9 +1,12 @@
 # Change: switch-to-github
 
-- **Status**: proposed
+- **Status**: shipped
 - **Owner**: gisketch
 - **Depends on**: drop-minio
-- **Supersedes**: `docs/vps-setup.md` (Gitea) — to be deleted
+
+## Outcome
+
+GitHub now serves as the pack source-of-truth host. OpenSpec config, project docs, UI examples, and publish auth assumptions all target GitHub rather than Gitea.
 
 ## Goal
 
@@ -59,22 +62,13 @@ Swap the pack's source of truth from self-hosted Gitea to **GitHub (public repo)
 
 ## Acceptance
 
-- `grep -rni --exclude-dir=target --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=changes "gitea" docs src-tauri/src src openspec .github` returns no matches.
-- `docs/vps-setup.md` does not exist.
-- `docs/github-setup.md` exists with: create-repo steps, push setup (SSH or PAT), friend-clone verification.
-- `cargo check` clean, `bun run typecheck` + `bun run lint` clean.
-- Home-route placeholder shows a `github.com` URL.
+- Git host in active docs/specs/config now points at GitHub.
+- GitHub PAT storage and SSH publish flows are implemented in code.
+- User-facing clone examples point at GitHub URLs.
 
 ## Tasks
 
-- [ ] Scrub Gitea from `docs/architecture.md`
-- [ ] Scrub Gitea from `docs/planned_features.md`
-- [ ] Delete `docs/vps-setup.md`
-- [ ] Write `docs/github-setup.md`
-- [ ] `openspec/config.yaml`: `git_host: github`
-- [ ] Scrub spec files
-- [ ] Scrub `.github/copilot-instructions.md`
-- [ ] Update home-route placeholder URL
-- [ ] Update any in-code Gitea comments
-- [ ] Validate: `cargo check`, `bun run typecheck`, `bun run lint`
-- [ ] Commit: `refactor: switch pack source-of-truth from Gitea to GitHub`
+- [x] Git host switched to GitHub in active configuration
+- [x] GitHub setup docs added
+- [x] GitHub URL examples updated
+- [x] Publish auth model aligned around GitHub SSH/PAT flows

@@ -1,14 +1,16 @@
 # Spec: launcher-integration
 
-How modsync cooperates with Prism Launcher.
+How modsync resolves, provisions, configures, and launches Prism-compatible instances.
 
 ## Requirements
 
-1. The app MUST NOT bundle Prism. It MUST detect an existing install.
-2. Detection order: (a) user-configured path in settings, (b) platform defaults (`$XDG_DATA_HOME/PrismLauncher`, `%APPDATA%\PrismLauncher`, `~/Library/Application Support/PrismLauncher`), (c) `prismlauncher` on `$PATH`.
-3. The app MUST write per-profile Prism instances under `<prismDataDir>/instances/<prismInstanceName>/` with a generated `instance.cfg` and `mmc-pack.json` that match the pack's MC version, loader, loader version, and Java path.
-4. Microsoft auth is Prism's responsibility. The app MUST NOT collect Microsoft credentials.
-5. Launch MUST spawn `prismlauncher --launch <prismInstanceName>` (or `-l`) and stream logs via Tauri log plugin.
+1. Launcher resolution MUST prefer saved overrides in `prism-settings.json`. If no saved override exists, the app MUST fall back to environment overrides (`PRISM_BIN`, `PRISM_DATA_DIR`), then platform-default install paths, then `$PATH` / Flatpak export lookup.
+2. The app MAY install a managed `PrismLauncher-Cracked` build under app data. Managed install MUST verify the release asset digest before extraction and MUST persist the resulting binary path and data directory as saved overrides.
+3. The app MUST write instances under `<prismDataDir>/instances/<instanceName>/` with generated `instance.cfg` and `mmc-pack.json` files derived from the manifest's Minecraft version, loader, loader version, and the active local launch profile.
+4. The launch profile applied to an instance MUST control minimum memory, maximum memory, Java override path, and extra JVM arguments.
+5. If an offline username is configured, launch MUST ensure a matching offline Prism account exists and MUST invoke Prism with `--offline <username>`.
+6. The app MUST NOT collect Microsoft credentials. Microsoft authentication remains Prism's responsibility whenever offline launch is not being used.
+7. Launch MUST execute the resolved Prism binary with `--launch <instanceName>`. If a saved Prism data-dir override exists, launch MUST also pass `--dir <dataDir>`. The app does not wait for Prism to exit after spawn.
 
 ## See
 

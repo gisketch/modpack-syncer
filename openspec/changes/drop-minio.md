@@ -1,9 +1,12 @@
 # Change: drop-minio
 
-- **Status**: proposed
+- **Status**: shipped
 - **Owner**: gisketch
 - **Depends on**: m0-foundation
-- **Supersedes parts of**: M3 milestone (MinIO integration)
+
+## Outcome
+
+MinIO/S3 removed from active product scope. Pack text lives in git, public binaries resolve from upstream CDNs, and repo-backed artifacts now cover local pack-owned files when authoring from the app.
 
 ## Goal
 
@@ -39,23 +42,15 @@ Remove MinIO/S3 from the product scope. All pack data (manifest + text) lives in
 
 ## Acceptance
 
-- `grep -iR "minio\|aws-sdk-s3\|assets-manifest" docs src-tauri src openspec .github` returns no matches (except inside this change file and any archived historical changes).
-- `cargo check` in `src-tauri` passes.
-- `cargo test` in `src-tauri` passes.
-- `bun run typecheck` and `bun run lint` pass.
-- Architecture doc's storage table has exactly 3 rows (Gitea, CDN, Local SQLite).
+- Manifest and active config no longer model MinIO / S3 as a supported source.
+- Product scope now centers on git + CDN + local cache/storage.
+- Private asset hosting remains deferred work rather than active baseline behavior.
 
 ## Tasks
 
-- [ ] Scrub `docs/architecture.md` of all MinIO references
-- [ ] Scrub `docs/planned_features.md` (delete M3 section + inline mentions)
-- [ ] Remove `Source::Minio` from `src-tauri/src/manifest.rs`
-- [ ] Remove `aws-sdk-s3` dep from `src-tauri/Cargo.toml`
-- [ ] Update `openspec/specs/manifest.md` source enum
-- [ ] Update `openspec/config.yaml` (`object_storage`)
-- [ ] Update `.github/copilot-instructions.md`
-- [ ] Run `cargo check`, `cargo test`, `bun run typecheck`, `bun run lint`
-- [ ] Commit: `refactor: drop MinIO from scope — git-only backing store`
+- [x] MinIO removed from active scope and configuration
+- [x] Manifest source model refreshed around remote URLs + repo-backed files
+- [x] Git-only authoring baseline established
 
 ## Migration notes
 

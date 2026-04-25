@@ -10,9 +10,12 @@ The manifest is the single source of truth for what a pack contains at a given c
 
 1. **Schema version** — the manifest MUST include `schemaVersion` (integer). The app MUST reject manifests whose version it does not know.
 2. **Pack metadata** — the manifest MUST include `pack.name`, `pack.version` (semver-ish), `pack.mcVersion`, `pack.loader` (`neoforge` | `fabric` | `forge` | `quilt`), and `pack.loaderVersion`. It MAY include `pack.icon` as an HTTPS URL for pack artwork.
-3. **Entries** — `mods`, `resourcepacks`, `shaderpacks` are each arrays of entries. Each entry MUST have `id`, `source` (`modrinth` | `curseforge` | `url`), `filename`, `sha1`, `size`, `url`. `sha512`, `projectId`, `versionId`, `optional`, `side` are optional.
-4. **Integrity** — every downloaded artifact MUST be SHA1-verified before being written to the instance. If `sha512` is present it MUST also match.
-5. **URL safety** — the app MUST validate `url` host against an allowlist: `cdn.modrinth.com`, `edge.forgecdn.net`, `mediafilez.forgecdn.net`.
+3. **Entries** — `mods`, `resourcepacks`, and `shaderpacks` are arrays of entries. Each entry MUST have `id`, `source`, `filename`, `sha1`, and `size`.
+4. **Supported sources** — `source` MUST be one of `modrinth`, `curseforge`, `url`, or `repo`.
+5. **Remote entries** — entries with source `modrinth`, `curseforge`, or `url` MUST include `url`. They MAY also include `projectId`, `versionId`, `sha512`, `optional`, and `side`.
+6. **Repo entries** — entries with source `repo` MUST include `repoPath`, resolved relative to the local pack clone. Repo entries MAY leave `url` empty.
+7. **Integrity** — every artifact used for sync MUST be SHA1-verified before it is copied into the Prism instance. If `sha512` is present it MUST also match. This verification applies to freshly downloaded files, cache hits, and repo-backed entries.
+8. **URL safety** — remote `url` hosts MUST be allowlisted. Current built-in hosts are `cdn.modrinth.com`, `edge.forgecdn.net`, and `mediafilez.forgecdn.net`.
 
 ## See
 

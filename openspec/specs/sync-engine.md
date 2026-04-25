@@ -4,13 +4,15 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 
 ## Requirements
 
-1. Sync MUST be idempotent. Running it twice in a row with no upstream changes MUST be a no-op.
-2. Sync MUST only touch files listed in the manifest OR files under directories enabled by profile toggles (`configs/`, `kubejs/`, `resourcepacks/`, `shaderpacks/`). Unrelated user files MUST be preserved.
-3. Sync MUST present a dry-run preview (added / removed / changed) before mutating the filesystem, unless the user has explicitly opted into auto-sync.
-4. Mod jar downloads MUST be parallel, bounded by a concurrency cap (default 8), and MUST support resume via HTTP Range.
-5. Every downloaded artifact MUST be SHA-verified before being linked/copied into the instance.
-6. The local cache at `<data>/cache/<sha1>.jar` MUST be preferred over re-downloading; cache hits MUST still SHA-verify before use.
-7. `options.txt` and `servers.dat` are NEVER clobbered wholesale. If `keybinds`/`servers` toggle is on, the app MUST do a partial merge (keybind lines / NBT server list entries only).
+1. Sync MUST load the pack manifest from the local git clone at `<appData>/packs/<packId>/manifest.json` and MUST fail fast on unsupported manifest schema.
+2. Remote manifest entries (`modrinth`, `curseforge`, `url`) MUST download through the bounded parallel pipeline with concurrency cap `8`.
+3. The local cache at `<data>/cache/<sha1>.jar` MUST be preferred over re-downloading, and cache hits MUST still pass artifact verification before use.
+4. Repo-backed manifest entries (`source = repo`) MUST resolve from `repoPath` inside the local pack clone and MUST exist before instance write begins.
+5. Sync MUST abort before instance mutation if any required remote artifact fails to download or verify.
+6. Sync MUST write generated Prism metadata (`instance.cfg`, `mmc-pack.json`) and managed content into `.minecraft/mods`, `.minecraft/resourcepacks`, and `.minecraft/shaderpacks`.
+7. Sync MUST only replace files it manages inside mods/resourcepacks/shaderpacks and MUST preserve unrelated user files in those directories.
+8. Sync MUST merge pack-owned text trees by copying `overrides/` into `.minecraft/`, `configs/` into `.minecraft/config/`, and `kubejs/` into `.minecraft/kubejs/`.
+9. Current sync does not provide a dry-run preview and does not mutate `options.txt` or `servers.dat`.
 
 ## See
 
