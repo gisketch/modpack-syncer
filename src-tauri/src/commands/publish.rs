@@ -853,6 +853,28 @@ fn apply_artifact_dir(
         };
 
         if preserve_existing_same_name {
+            if entry.source == manifest::Source::Repo {
+                let repo_path = entry
+                    .repo_path
+                    .clone()
+                    .unwrap_or_else(|| format!("{repo_prefix}/{filename}"));
+                let target = repo_dir.parent().unwrap_or(repo_dir).join(&repo_path);
+                let artifact_path = if is_valid_shaderpack_archive(&target) {
+                    target
+                } else {
+                    copy_file_to_repo(&path, &target)?;
+                    *repo_files_written += 1;
+                    target
+                };
+                entry.source = manifest::Source::Repo;
+                entry.project_id = None;
+                entry.version_id = None;
+                entry.repo_path = Some(repo_path);
+                entry.url.clear();
+                entry.sha1 = cache::file_sha1_hex(&artifact_path)?;
+                entry.sha512 = None;
+                entry.size = artifact_path.metadata()?.len();
+            }
             seen_filenames.insert(filename);
             next_entries.push(entry);
             continue;
@@ -1215,6 +1237,16 @@ fn remove_path_if_exists(path: &std::path::Path) -> Result<bool, CommandError> {
     }
     std::fs::remove_file(path)?;
     Ok(true)
+}
+
+fn is_valid_shaderpack_archive(path: &std::path::Path) -> bool {
+    if path.metadata().map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    zip::ZipArchive::new(file).is_ok()
 }
 
 fn unique_local_id(

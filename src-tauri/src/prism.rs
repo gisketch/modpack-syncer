@@ -578,6 +578,11 @@ fn build_components(m: &Manifest) -> Vec<serde_json::Value> {
 }
 
 fn copy_or_link(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if let (Ok(src), Ok(dst)) = (src.canonicalize(), dst.canonicalize()) {
+        if src == dst {
+            return Ok(());
+        }
+    }
     if dst.exists() {
         std::fs::remove_file(dst)?;
     }
@@ -685,8 +690,15 @@ fn write_managed_files(
     use std::collections::HashSet;
 
     let sidecar = dest_dir.join(sidecar_name);
+    let desired = resolved_paths
+        .iter()
+        .map(|(_, filename)| filename.as_str())
+        .collect::<HashSet<_>>();
     if let Ok(prev) = std::fs::read_to_string(&sidecar) {
         for line in prev.lines() {
+            if desired.contains(line) {
+                continue;
+            }
             let p = dest_dir.join(line);
             if p.exists() {
                 let _ = std::fs::remove_file(p);
@@ -695,10 +707,6 @@ fn write_managed_files(
     }
 
     if strict_sync {
-        let desired = resolved_paths
-            .iter()
-            .map(|(_, filename)| filename.as_str())
-            .collect::<HashSet<_>>();
         for entry in std::fs::read_dir(dest_dir)? {
             let entry = entry?;
             let path = entry.path();

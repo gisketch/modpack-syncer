@@ -106,12 +106,21 @@ pub async fn sync_instance(
         )));
     }
 
-    let resolved_mods = resolve_entries(&pack_dir, &manifest.mods)?;
-    let resolved_resourcepacks = resolve_entries(&pack_dir, &manifest.resourcepacks)?;
-    let resolved_shaderpacks = resolve_entries(&pack_dir, &sync_shaderpacks)?;
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let existing_instance_root = prism::instance_minecraft_dir(&instance_name);
+    let shaderpack_fallback_dir = existing_instance_root
+        .as_ref()
+        .map(|root| root.join("shaderpacks"));
+
+    let resolved_mods = resolve_entries(&pack_dir, &manifest.mods, None)?;
+    let resolved_resourcepacks = resolve_entries(&pack_dir, &manifest.resourcepacks, None)?;
+    let resolved_shaderpacks = resolve_entries(
+        &pack_dir,
+        &sync_shaderpacks,
+        shaderpack_fallback_dir.as_deref(),
+    )?;
     let launch_profile = prism::load_launch_profile(&pack_id)?;
 
-    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let _ = app.emit(
         "sync-progress",
         SyncProgressEvent {
@@ -254,6 +263,7 @@ fn is_shaderpack_sidecar(filename: &str) -> bool {
 fn resolve_entries(
     pack_dir: &std::path::Path,
     entries: &[manifest::Entry],
+    shaderpack_fallback_dir: Option<&std::path::Path>,
 ) -> Result<Vec<(std::path::PathBuf, String)>, CommandError> {
     entries
         .iter()
@@ -277,8 +287,30 @@ fn resolve_entries(
                     path.display()
                 )));
             }
-            download::verify_file(&path, entry)?;
-            Ok((path, entry.filename.clone()))
+            let resolved_path = match download::verify_file(&path, entry) {
+                Ok(()) => path,
+                Err(error) if should_allow_repo_shaderpack_sha_drift(entry, &error) => {
+                    if let Some(fallback_path) = shaderpack_fallback_dir
+                        .map(|dir| dir.join(&entry.filename))
+                        .filter(|fallback_path| fallback_path.is_file())
+                    {
+                        fallback_path
+                    } else {
+                        path
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            };
+            Ok((resolved_path, entry.filename.clone()))
         })
         .collect()
+}
+
+fn should_allow_repo_shaderpack_sha_drift(
+    entry: &manifest::Entry,
+    error: &download::DownloadError,
+) -> bool {
+    entry.source == manifest::Source::Repo
+        && entry.filename.ends_with(".zip")
+        && matches!(error, download::DownloadError::Sha1Mismatch { .. })
 }

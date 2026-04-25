@@ -154,13 +154,7 @@ export function SyncReviewDialog({
               <Button variant="secondary" onClick={onBack}>
                 <ChevronLeft /> BACK
               </Button>
-              <Button
-                onClick={onConfirm}
-                disabled={
-                  syncPending ||
-                  (!!shaderPreview?.requiresDecision && shaderDecision === "undecided")
-                }
-              >
+              <Button onClick={onConfirm} disabled={syncPending}>
                 {syncPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 CONTINUE TO SYNC
               </Button>

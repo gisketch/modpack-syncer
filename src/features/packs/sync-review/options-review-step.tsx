@@ -219,9 +219,14 @@ export function OptionsReviewStep({
                         <CardStatus>{visibleChanges.length} CHANGES</CardStatus>
                         <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
                           <span>SHOW IGNORED</span>
-                          <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                          <Switch
+                            size="sm"
+                            checked={showIgnored}
+                            onCheckedChange={setShowIgnored}
+                          />
                           <span>{syncCategoryLabel(group.category)}</span>
                           <Switch
+                            size="sm"
                             checked={syncCategoryEnabled}
                             onCheckedChange={(enabled) =>
                               onOptionSyncCategoryChange(group.category, enabled)
