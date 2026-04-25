@@ -533,7 +533,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         </span>
       </div>
 
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col gap-5">
         <div className="flex items-start gap-4">
           <PackIcon
             iconUrl={manifest.data?.pack.icon}
@@ -541,7 +541,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             className="size-20 shrink-0"
             fallbackClassName="size-8"
           />
-          <div className="flex flex-col gap-2">
+          <div className="flex min-w-0 flex-col gap-2">
             <h1 className="text-3xl text-text-high [text-wrap:balance]">{manifest.data?.pack.name ?? packId}</h1>
             {manifest.data && (
               <div className="flex flex-wrap gap-2">
@@ -556,14 +556,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 </Badge>
               </div>
             )}
-            {pack.data && (
-              <p className="font-mono text-[--text-low] text-xs">
-                {pack.data.head_sha.slice(0, 10)} :: {pack.data.url}
-              </p>
-            )}
           </div>
         </div>
-        <div className="flex gap-2">
+
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             onClick={() => void handleOpenInstanceFolder()}
