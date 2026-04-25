@@ -16,7 +16,7 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 10. Options review MUST diff pack `options.txt` against instance `options.txt`, group rows into keybinds, video settings, and all other options, and allow per-key ignore state.
 11. Ignored option keys MUST persist per instance and MUST remain visible when the user enables the ignored-row toggle.
 12. Shader settings review MUST live as a separate tab inside options review. It MUST diff pack `configs/iris.properties` against instance `config/iris.properties` and MUST diff the active shader preset sidecar `shaderpacks/<shaderPack>.txt` when present.
-13. Shader settings sync MUST be an explicit decision when shader settings differ. Applying it MUST copy pack `configs/iris.properties` to instance `config/iris.properties` and copy the matching shader preset sidecar when present.
+13. Shader settings review MUST expose an explicit `IGNORE SHADER SETTINGS` control when shader settings differ. When ignore is off, sync MUST copy pack `configs/iris.properties` to instance `config/iris.properties` and copy the matching shader preset sidecar when present. When ignore is on, sync MUST leave shader settings unchanged.
 14. Sync MUST support remote and repo-backed entries across mods, resourcepacks, and shaderpacks with the same SHA verification rules.
 
 ## See

@@ -1,4 +1,3 @@
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -38,72 +37,74 @@ export function SyncPlanActionChip({ action }: { action: PublishAction }) {
   return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{label}</span>;
 }
 
-export function ShaderDiffTable({
-  title,
-  description,
+export function ShaderSettingsChangesTable({
   changes,
 }: {
-  title: string;
-  description: string;
-  changes: ShaderSettingsChange[];
+  changes: Array<ShaderSettingsChange & { source?: string }>;
 }) {
   const sortedChanges = sortShaderSettingsChanges(changes);
 
+  if (sortedChanges.length === 0) {
+    return <div className="px-4 py-8 text-center text-sm text-text-low">No changed keys.</div>;
+  }
+
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden border border-line-soft/20 bg-surface-sunken/30">
-      <div className="flex items-center justify-between gap-3 border-b border-line-soft/20 px-4 py-3">
-        <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">{title}</p>
-          <p className="text-xs text-text-low [text-wrap:pretty]">{description}</p>
-        </div>
-        <span className="font-mono text-[10px] tabular-nums text-text-low">
-          {sortedChanges.length}
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="px-3 py-2">ACTION</TableHead>
+          <TableHead className="px-3 py-2">SETTING</TableHead>
+          <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
+          <TableHead className="px-3 py-2">PACK VALUE</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody className="divide-y-0">
+        {sortedChanges.map((change) => (
+          <TableRow
+            key={`${change.source ?? "shader"}:${change.action}:${change.key}`}
+            className={cn("h-8 border-l-2", getOptionsChangeRowTone(change.action))}
+          >
+            <TableCell className="px-3 py-1.5 align-top">
+              <SyncPlanActionChip action={change.action} />
+            </TableCell>
+            <TableCell className="px-3 py-1.5 align-top">
+              <OptionsPreviewKey optionKey={change.key} />
+            </TableCell>
+            <TableCell className="px-3 py-1.5 align-top">
+              <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
+            </TableCell>
+            <TableCell className="px-3 py-1.5 align-top">
+              <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+export function ShaderSelectionLine({
+  localShader,
+  packShader,
+}: {
+  localShader: string;
+  packShader: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+      <div className="min-w-0">
+        <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+          SHADER SELECTED:
+        </span>
+        <span className="ml-2 font-mono text-text-high" title={localShader}>
+          {localShader}
         </span>
       </div>
-      <div className="min-h-0 flex-1">
-        {sortedChanges.length > 0 ? (
-          <ScrollArea className="h-full">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="px-3 py-2">ACTION</TableHead>
-                  <TableHead className="px-3 py-2">KEY</TableHead>
-                  <TableHead className="px-3 py-2">PACK VALUE</TableHead>
-                  <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y-0">
-                {sortedChanges.map((change) => (
-                  <TableRow
-                    key={`${title}:${change.key}`}
-                    className={cn("h-8 border-l-2", getOptionsChangeRowTone(change.action))}
-                  >
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <SyncPlanActionChip action={change.action} />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewKey optionKey={change.key} />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewValue
-                        optionKey={change.key}
-                        value={change.packValue ?? null}
-                      />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 align-top">
-                      <OptionsPreviewValue
-                        optionKey={change.key}
-                        value={change.instanceValue ?? null}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        ) : (
-          <div className="px-4 py-8 text-center text-sm text-text-low">No changed keys.</div>
-        )}
+      <div className="min-w-0">
+        <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">PACK:</span>
+        <span className="ml-2 font-mono text-text-high" title={packShader}>
+          {packShader}
+        </span>
       </div>
     </div>
   );
@@ -130,7 +131,7 @@ export function getOptionsChangeRowTone(action: PublishAction) {
   return "border-signal-alert/50";
 }
 
-function sortShaderSettingsChanges(changes: ShaderSettingsChange[]) {
+function sortShaderSettingsChanges<T extends ShaderSettingsChange>(changes: T[]) {
   return [...changes].sort(
     (left, right) =>
       actionOrder(left.action) - actionOrder(right.action) || left.key.localeCompare(right.key),

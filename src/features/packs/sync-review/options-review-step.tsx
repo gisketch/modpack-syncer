@@ -1,7 +1,6 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardStatus, CardWindowBar, CardWindowTab } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -22,7 +21,8 @@ import { OptionsPreviewKey, OptionsPreviewValue } from "./option-value-cells";
 import {
   getOptionsChangeRowTone,
   Row,
-  ShaderDiffTable,
+  ShaderSelectionLine,
+  ShaderSettingsChangesTable,
   SyncPlanActionChip,
   sortOptionsSyncChanges,
 } from "./sync-review-tables";
@@ -310,6 +310,12 @@ function ShaderSettingsTab({
   decision: ShaderDecision;
   onDecisionChange: (decision: ShaderDecision) => void;
 }) {
+  useEffect(() => {
+    if (preview?.requiresDecision && decision === "undecided") {
+      onDecisionChange("sync");
+    }
+  }, [decision, onDecisionChange, preview?.requiresDecision]);
+
   if (loading) {
     return (
       <Card>
@@ -343,6 +349,10 @@ function ShaderSettingsTab({
 
   const localShader = preview.localShaderPack ?? "NONE";
   const packShader = preview.packShaderPack ?? "NONE";
+  const shaderChanges = [
+    ...preview.irisChanges.map((change) => ({ ...change, source: "iris" as const })),
+    ...preview.presetChanges.map((change) => ({ ...change, source: "preset" as const })),
+  ];
   const statusLabel =
     preview.status === "disabled-local"
       ? "SHADERS OFF LOCALLY"
@@ -358,53 +368,23 @@ function ShaderSettingsTab({
         <CardWindowTab>SHADER SETTINGS</CardWindowTab>
         <CardStatus>{statusLabel}</CardStatus>
       </CardWindowBar>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4 p-4">
-        <div className="grid gap-2 md:grid-cols-2">
-          <Row k="LOCAL SHADER" v={localShader} />
-          <Row k="PACK SHADER" v={packShader} />
-          <Row k="IRIS DIFFS" v={String(preview.irisDiffCount)} />
-          <Row k="PRESET DIFFS" v={String(preview.presetDiffCount)} />
-        </div>
-        <p className="text-xs text-text-low [text-wrap:pretty]">
-          {preview.status === "disabled-local"
-            ? "Shaders off locally. Sync can still write pack shader selection + preset."
-            : preview.status === "mismatch"
-              ? "Local shader differs from pack shader preset. Sync shader applies pack iris.properties + matching preset file."
-              : preview.status === "missing-preset"
-                ? "Pack iris.properties exists, but matching shader preset .txt missing. Sync shader will only update iris.properties."
-                : "Sync shader copies pack iris.properties and matching shader preset .txt when present."}
-        </p>
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+        <ShaderSelectionLine localShader={localShader} packShader={packShader} />
         {preview.requiresDecision ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={decision === "sync" ? "default" : "outline"}
-              onClick={() => onDecisionChange("sync")}
-            >
-              SYNC SHADER
-            </Button>
-            <Button
-              variant={decision === "skip" ? "secondary" : "outline"}
-              onClick={() => onDecisionChange("skip")}
-            >
-              IGNORE THIS SYNC
-            </Button>
+          <div className="flex items-center justify-between gap-3 border-y border-line-soft/20 py-2">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+              IGNORE SHADER SETTINGS
+            </p>
+            <Switch
+              checked={decision === "skip"}
+              onCheckedChange={(ignored) => onDecisionChange(ignored ? "skip" : "sync")}
+            />
           </div>
-        ) : (
-          <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-            No shader sync decision needed.
-          </p>
-        )}
-        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-2">
-          <ShaderDiffTable
-            title="IRIS.PROPERTIES"
-            description="Pack config values vs local instance config/iris.properties."
-            changes={preview.irisChanges}
-          />
-          <ShaderDiffTable
-            title="SHADER PRESET"
-            description="Pack shaderpacks/*.txt values vs local active preset sidecar."
-            changes={preview.presetChanges}
-          />
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-hidden border border-line-soft/20 bg-surface-sunken/30">
+          <ScrollArea className="h-full">
+            <ShaderSettingsChangesTable changes={shaderChanges} />
+          </ScrollArea>
         </div>
       </CardContent>
     </Card>
