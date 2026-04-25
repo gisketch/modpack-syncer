@@ -66,6 +66,8 @@ pub fn run() {
             commands::unpublished_artifact_statuses,
             commands::mod_statuses,
             commands::scan_instance_publish,
+            commands::preview_options_sync,
+            commands::set_options_sync_ignored,
             commands::apply_instance_publish,
             commands::commit_and_push_publish,
         ])

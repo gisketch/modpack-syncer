@@ -94,6 +94,31 @@ export type PublishPushReport = {
   method: string;
 };
 
+export type OptionsSyncCategory = "keybinds" | "video" | "other";
+
+export type OptionsSyncChange = {
+  category: OptionsSyncCategory;
+  key: string;
+  packValue?: string | null;
+  instanceValue?: string | null;
+  action: PublishAction;
+  ignored: boolean;
+};
+
+export type OptionsSyncGroup = {
+  category: OptionsSyncCategory;
+  label: string;
+  description: string;
+  changes: OptionsSyncChange[];
+};
+
+export type OptionsSyncPreview = {
+  hasPackFile: boolean;
+  hasInstanceFile: boolean;
+  groups: OptionsSyncGroup[];
+  ignoredKeys: string[];
+};
+
 export type PackChangelogItem = {
   action: PublishAction;
   category: PublishCategory;
@@ -303,6 +328,10 @@ export const tauri = {
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>
     invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
+  previewOptionsSync: (packId: string, instanceName?: string) =>
+    invoke<OptionsSyncPreview>("preview_options_sync", { packId, instanceName }),
+  setOptionsSyncIgnored: (packId: string, key: string, ignored: boolean, instanceName?: string) =>
+    invoke<string[]>("set_options_sync_ignored", { packId, key, ignored, instanceName }),
   applyInstancePublish: (packId: string, instanceName?: string, version?: string) =>
     invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName, version }),
   commitAndPushPublish: (packId: string, message: string) =>

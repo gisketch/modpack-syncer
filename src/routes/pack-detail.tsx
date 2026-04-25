@@ -61,6 +61,8 @@ import { Separator } from "@/components/ui/separator";
 import { Slider, SliderControl, SliderIndicator, SliderThumb, SliderTrack } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -83,6 +85,7 @@ import {
   type PackChangelogItem,
   type ModStatus,
   type ModStatusValue,
+  type OptionsSyncPreview,
   type PublishAction,
   type PublishCategory,
   type PublishScanReport,
@@ -136,6 +139,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
+  const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "options">("artifacts");
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -191,6 +195,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     enabled: !!manifest.data && !!instanceDir.data,
     retry: false,
   });
+  const hasTrackedOptionsFile = hasTrackedOptionsPreset(artifactPublishScan.data);
+  const optionsSyncPreview = useQuery({
+    queryKey: ["options-sync-preview", packId],
+    queryFn: () => tauri.previewOptionsSync(packId),
+    enabled: syncReviewOpen && syncReviewStep === "options" && !!instanceDir.data && hasTrackedOptionsFile,
+    retry: false,
+  });
   const changelog = useQuery({
     queryKey: ["pack-changelog", packId, lastSyncedCommit],
     queryFn: () => tauri.packChangelog(packId, 12),
@@ -200,6 +211,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     queryKey: ["launch-profile", packId],
     queryFn: () => tauri.getLaunchProfile(packId),
     retry: false,
+  });
+  const setOptionsSyncIgnored = useMutation({
+    mutationFn: ({ key, ignored }: { key: string; ignored: boolean }) =>
+      tauri.setOptionsSyncIgnored(packId, key, ignored),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
+    },
+    onError: (error) => {
+      toast.error("Ignore update failed", { description: formatError(error) });
+    },
   });
   const statusMap = new Map<string, ModStatusValue>(
     (statuses.data ?? [])
@@ -317,6 +338,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
       ]);
       toast.success("Pack updated", {
         description: updatedPack.head_sha.slice(0, 10),
@@ -356,6 +378,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         statuses.refetch(),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
       ]);
       toast.success("Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
@@ -443,6 +466,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       } else {
         await qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] });
       }
+      await qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
       toast.success(`Local ${describeArtifactCategory(variables.category).singular.toLowerCase()} deleted`);
     },
     onError: (error) => {
@@ -472,6 +496,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["packs"] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
       ]);
       setPublishOpen(false);
       toast.success("Publish pushed", {
@@ -538,11 +563,21 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   function handleSyncClick() {
+    setSyncReviewStep("artifacts");
     setSyncReviewOpen(true);
   }
 
-  function handleConfirmSyncFromReview() {
+  function handleCloseSyncReview() {
     setSyncReviewOpen(false);
+    setSyncReviewStep("artifacts");
+  }
+
+  function handleSyncReviewNext() {
+    setSyncReviewStep("options");
+  }
+
+  function handleConfirmSyncFromReview() {
+    handleCloseSyncReview();
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
@@ -978,23 +1013,25 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={report}
       />
 
-      <Dialog open={syncReviewOpen} onOpenChange={setSyncReviewOpen}>
+      <Dialog open={syncReviewOpen} onOpenChange={(open) => !open && handleCloseSyncReview()}>
         <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
           <DialogHeader>
-            <DialogTitle>SYNC PREVIEW</DialogTitle>
+            <DialogTitle>{syncReviewStep === "artifacts" ? "SYNC PREVIEW" : "OPTIONS REVIEW"}</DialogTitle>
             <DialogDescription>
-              Review category changes before writing Prism instance.
+              {syncReviewStep === "artifacts"
+                ? "Review mods, resourcepacks, and shaderpacks before writing Prism instance."
+                : "Review options categories before final sync confirm."}
             </DialogDescription>
           </DialogHeader>
           <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
-            {artifactPublishScan.isLoading || artifactPublishScan.isFetching ? (
+            {syncReviewStep === "artifacts" && (artifactPublishScan.isLoading || artifactPublishScan.isFetching) ? (
               <Card>
                 <CardContent className="flex items-center gap-3 p-5 text-sm text-text-low">
                   <Loader2 className="size-4 animate-spin text-brand-core" />
                   Building sync diff...
                 </CardContent>
               </Card>
-            ) : (
+            ) : syncReviewStep === "artifacts" ? (
               <>
                 <div className="grid gap-3 md:grid-cols-3">
                   {syncSummary.map((item) => (
@@ -1063,19 +1100,41 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   </CardContent>
                 </Card>
               </>
+            ) : (
+              <OptionsReviewStep
+                hasTrackedOptionsFile={hasTrackedOptionsFile}
+                preview={optionsSyncPreview.data}
+                loading={optionsSyncPreview.isLoading || optionsSyncPreview.isFetching}
+                error={optionsSyncPreview.error}
+                onToggleIgnore={(key, ignored) => setOptionsSyncIgnored.mutate({ key, ignored })}
+                togglingIgnore={setOptionsSyncIgnored.isPending}
+              />
             )}
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={() => setSyncReviewOpen(false)}>
-              CANCEL
-            </Button>
-            <Button
-              onClick={handleConfirmSyncFromReview}
-              disabled={artifactPublishScan.isLoading || artifactPublishScan.isFetching || sync.isPending}
-            >
-              {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              CONTINUE TO SYNC
-            </Button>
+            {syncReviewStep === "artifacts" ? (
+              <>
+                <Button variant="secondary" onClick={handleCloseSyncReview}>
+                  CANCEL
+                </Button>
+                <Button
+                  onClick={handleSyncReviewNext}
+                  disabled={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
+                >
+                  NEXT <ChevronRight />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => setSyncReviewStep("artifacts")}>
+                  <ChevronLeft /> BACK
+                </Button>
+                <Button onClick={handleConfirmSyncFromReview} disabled={sync.isPending}>
+                  {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  CONTINUE TO SYNC
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2539,11 +2598,199 @@ function SyncPreviewCard({ summary }: { summary: SyncCategorySummary }) {
   );
 }
 
+function OptionsReviewStep({
+  hasTrackedOptionsFile,
+  preview,
+  loading,
+  error,
+  onToggleIgnore,
+  togglingIgnore,
+}: {
+  hasTrackedOptionsFile: boolean;
+  preview?: OptionsSyncPreview;
+  loading: boolean;
+  error: unknown;
+  onToggleIgnore: (key: string, ignored: boolean) => void;
+  togglingIgnore: boolean;
+}) {
+  const [showIgnored, setShowIgnored] = useState(false);
+
+  if (!hasTrackedOptionsFile) {
+    return (
+      <Card>
+        <CardContent className="flex h-full min-h-[18rem] items-center justify-center p-6 text-center text-sm text-text-low">
+          No tracked <span className="mx-1 font-mono text-text-high">options.txt</span> preset for this pack yet.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="flex h-full min-h-[18rem] items-center gap-3 p-6 text-sm text-text-low">
+          <Loader2 className="size-4 animate-spin text-brand-core" />
+          Building options diff...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="size-4" />
+        <AlertTitle>OPTIONS PREVIEW FAILED</AlertTitle>
+        <AlertDescription>{formatError(error)}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (!preview) {
+    return null;
+  }
+
+  const defaultTab = preview.groups.find((group) => group.changes.length > 0)?.category ?? "keybinds";
+  const changedCount = preview.groups.reduce((sum, group) => sum + group.changes.length, 0);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+      <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[minmax(16rem,18rem)_minmax(0,1fr)]">
+        <Card variant="window" className="flex min-h-0 flex-col">
+          <CardWindowBar>
+            <CardWindowTab>OPTION SUMMARY</CardWindowTab>
+            <CardStatus>{changedCount} CHANGES</CardStatus>
+          </CardWindowBar>
+          <CardContent className="min-h-0 flex-1 p-0">
+            <ScrollArea className="h-full px-4 py-4">
+              <div className="flex flex-col gap-3">
+                <div className="grid gap-2">
+                  <Row k="PACK FILE" v={preview.hasPackFile ? "FOUND" : "MISSING"} />
+                  <Row k="INSTANCE FILE" v={preview.hasInstanceFile ? "FOUND" : "MISSING"} />
+                  <Row k="IGNORED KEYS" v={String(preview.ignoredKeys.length)} />
+                  {preview.groups.map((group) => (
+                    <Row key={group.category} k={group.label} v={String(group.changes.length)} />
+                  ))}
+                </div>
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
+        <Tabs defaultValue={defaultTab} className="flex min-h-0 flex-col gap-4 md:min-w-0">
+          <TabsList className="flex-wrap gap-2">
+            {preview.groups.map((group) => (
+              <TabsTrigger key={group.category} value={group.category}>
+                <span>{group.label}</span>
+                <span className="font-mono text-[10px] tabular-nums text-text-low">{group.changes.length}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {preview.groups.map((group) => {
+            const visibleChanges = sortOptionsSyncChanges(group.changes).filter(
+              (change) => showIgnored || !change.ignored,
+            );
+
+            return (
+              <TabsContent key={group.category} value={group.category} className="min-h-0 flex-1 outline-none">
+                <Card variant="window" className="flex h-full min-h-0 flex-col">
+                <CardWindowBar>
+                  <CardWindowTab>{group.label}</CardWindowTab>
+                  <CardStatus>{visibleChanges.length} CHANGES</CardStatus>
+                  <div className="ml-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
+                    <span>SHOW IGNORED</span>
+                    <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                  </div>
+                </CardWindowBar>
+                <CardContent className="min-h-0 flex-1 p-0">
+                  {visibleChanges.length > 0 ? (
+                    <ScrollArea className="h-full">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="px-3 py-2">ACTION</TableHead>
+                            <TableHead className="px-3 py-2">KEY</TableHead>
+                            <TableHead className="px-3 py-2">PACK VALUE</TableHead>
+                            <TableHead className="px-3 py-2">LOCAL VALUE</TableHead>
+                            <TableHead className="px-3 py-2 text-center">IGNORE</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="divide-y-0">
+                          {visibleChanges.map((change) => (
+                            <TableRow
+                              key={`${group.category}:${change.key}`}
+                              className={cn(
+                                "h-8 border-l-2",
+                                getOptionsChangeRowTone(change.action),
+                                change.ignored && "opacity-45",
+                              )}
+                            >
+                              <TableCell className="px-3 py-1.5 align-top">
+                                <SyncPlanActionChip action={change.action} />
+                              </TableCell>
+                              <TableCell className="px-3 py-1.5 align-top">
+                                <OptionsPreviewKey optionKey={change.key} />
+                              </TableCell>
+                              <TableCell className="px-3 py-1.5 align-top">
+                                <OptionsPreviewValue optionKey={change.key} value={change.packValue ?? null} />
+                              </TableCell>
+                              <TableCell className="px-3 py-1.5 align-top">
+                                <OptionsPreviewValue optionKey={change.key} value={change.instanceValue ?? null} />
+                              </TableCell>
+                              <TableCell
+                                className="cursor-pointer px-3 py-1.5 align-middle"
+                                role="button"
+                                tabIndex={togglingIgnore ? -1 : 0}
+                                title={change.ignored ? "Stop ignoring key" : "Ignore key"}
+                                onClick={() => {
+                                  if (!togglingIgnore) {
+                                    onToggleIgnore(change.key, !change.ignored);
+                                  }
+                                }}
+                                onKeyDown={(event) => {
+                                  if ((event.key === "Enter" || event.key === " ") && !togglingIgnore) {
+                                    event.preventDefault();
+                                    onToggleIgnore(change.key, !change.ignored);
+                                  }
+                                }}
+                              >
+                                <div className="flex items-center justify-center">
+                                  <Checkbox
+                                    checked={change.ignored}
+                                    disabled={togglingIgnore}
+                                    aria-label={`Ignore ${change.key}`}
+                                    className="pointer-events-none"
+                                  />
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  ) : (
+                    <div className="px-4 py-8 text-center text-sm text-text-low">
+                      {showIgnored
+                        ? `No changes in ${group.label.toLowerCase()}.`
+                        : `No visible changes in ${group.label.toLowerCase()}.`}
+                    </div>
+                  )}
+                </CardContent>
+                </Card>
+              </TabsContent>
+            );
+          })}
+        </Tabs>
+      </div>
+    </div>
+  );
+}
+
 function SyncPlanActionChip({ action }: { action: PublishAction }) {
   const label = action === "remove" ? "ADD" : action === "update" ? "UPDATE" : "DELETE";
   const text =
     action === "remove"
-      ? "text-brand-core"
+      ? "text-signal-live"
       : action === "update"
         ? "text-signal-warn"
         : "text-signal-alert";
@@ -2557,6 +2804,166 @@ function summarizePublishReport(report: PublishScanReport | null) {
     remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
     unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
   };
+}
+
+function hasTrackedOptionsPreset(report: PublishScanReport | null | undefined) {
+  return (report?.items ?? []).some((item) => item.category === "root" && item.relativePath === "options.txt");
+}
+
+function sortOptionsSyncChanges(changes: OptionsSyncPreview["groups"][number]["changes"]) {
+  return [...changes].sort((left, right) => {
+    if (left.ignored !== right.ignored) {
+      return left.ignored ? 1 : -1;
+    }
+    const order = (action: PublishAction) =>
+      action === "remove" ? 0 : action === "update" ? 1 : action === "add" ? 2 : 3;
+    return order(left.action) - order(right.action) || left.key.localeCompare(right.key);
+  });
+}
+
+function getOptionsChangeRowTone(action: PublishAction) {
+  if (action === "remove") {
+    return "border-signal-live/50";
+  }
+  if (action === "update") {
+    return "border-signal-warn/50";
+  }
+  return "border-signal-alert/50";
+}
+
+function OptionsPreviewKey({ optionKey }: { optionKey: string }) {
+  const display = formatOptionKeyDisplay(optionKey);
+  return (
+    <TooltipProvider delay={0}>
+      <TooltipLabel
+        primary={display.primary}
+        secondary={display.secondary}
+        className="text-[11px] leading-4 text-text-high"
+        tooltipClassName="font-mono text-brand-core shadow-none"
+      />
+    </TooltipProvider>
+  );
+}
+
+function OptionsPreviewValue({ optionKey, value }: { optionKey: string; value: string | null }) {
+  const display = formatOptionValueDisplay(optionKey, value);
+  const keybind = isKeybindOptionKey(optionKey);
+  return (
+    <TooltipProvider delay={0}>
+      <TooltipLabel
+        primary={display.primary}
+        secondary={display.secondary}
+        className={cn(
+          "w-fit max-w-full truncate text-[11px] leading-4",
+          keybind
+            ? "border border-line-soft/30 bg-surface-sunken/70 px-1.5 py-0.5 font-semibold tracking-[0.08em] text-text-high"
+            : "font-mono text-text-low",
+        )}
+        tooltipClassName="font-mono text-brand-core shadow-none"
+      />
+    </TooltipProvider>
+  );
+}
+
+function TooltipLabel({
+  primary,
+  secondary,
+  className,
+  tooltipClassName,
+}: {
+  primary: string;
+  secondary: string | null;
+  className?: string;
+  tooltipClassName?: string;
+}) {
+  if (!secondary) {
+    return (
+      <span className={className} title={primary}>
+        {primary}
+      </span>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className={className} title={secondary} />}>{primary}</TooltipTrigger>
+      <TooltipContent className={tooltipClassName}>{secondary}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function formatOptionKeyDisplay(optionKey: string) {
+  if (!isKeybindOptionKey(optionKey)) {
+    return {
+      primary: humanizeOptionToken(optionKey),
+      secondary: /[A-Z_.]/.test(optionKey) ? optionKey : null,
+    };
+  }
+
+  let raw = optionKey.slice(4);
+  if (raw.startsWith("key.")) {
+    raw = raw.slice(4);
+  }
+  const parts = raw.split(".").filter(Boolean).filter((part) => part !== "keybind");
+  return {
+    primary: parts.map(humanizeOptionToken).join(" "),
+    secondary: optionKey,
+  };
+}
+
+function formatOptionValueDisplay(optionKey: string, value: string | null) {
+  if (!value) {
+    return { primary: "--", secondary: null };
+  }
+  if (!isKeybindOptionKey(optionKey)) {
+    return { primary: value, secondary: null };
+  }
+
+  const primary = humanizeKeybindValue(value);
+  return {
+    primary,
+    secondary: primary === value ? null : value,
+  };
+}
+
+function isKeybindOptionKey(optionKey: string) {
+  return optionKey.startsWith("key_");
+}
+
+function humanizeKeybindValue(value: string) {
+  if (value === "key.keyboard.unknown") {
+    return "UNBOUND";
+  }
+  if (value.startsWith("key.keyboard.")) {
+    return humanizeOptionToken(value.slice("key.keyboard.".length));
+  }
+  if (value.startsWith("key.mouse.")) {
+    return `Mouse ${humanizeOptionToken(value.slice("key.mouse.".length))}`;
+  }
+  if (value.startsWith("scancode.")) {
+    return `Scancode ${value.slice("scancode.".length)}`;
+  }
+  return humanizeOptionToken(value);
+}
+
+function humanizeOptionToken(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/-/g, " ")
+    .replace(/\./g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (/^f\d+$/i.test(part) || /^\d+$/.test(part)) {
+        return part.toUpperCase();
+      }
+      if (part.length <= 2 && part === part.toLowerCase()) {
+        return part.toUpperCase();
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
 }
 
 function ChangelogCard({

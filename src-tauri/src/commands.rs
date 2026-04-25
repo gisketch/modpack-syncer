@@ -1,7 +1,7 @@
 //! Tauri commands exposed to the frontend.
 //! Keep this in sync with `src/lib/tauri.ts`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -78,6 +78,43 @@ pub struct PublishApplyReport {
 pub struct PublishPushReport {
     pub commit_sha: String,
     pub method: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OptionsSyncCategory {
+    Keybinds,
+    Video,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionsSyncChange {
+    pub category: OptionsSyncCategory,
+    pub key: String,
+    pub pack_value: Option<String>,
+    pub instance_value: Option<String>,
+    pub action: PublishAction,
+    pub ignored: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionsSyncGroup {
+    pub category: OptionsSyncCategory,
+    pub label: String,
+    pub description: String,
+    pub changes: Vec<OptionsSyncChange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionsSyncPreview {
+    pub has_pack_file: bool,
+    pub has_instance_file: bool,
+    pub groups: Vec<OptionsSyncGroup>,
+    pub ignored_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -655,7 +692,7 @@ pub async fn sync_instance(
     let manifest_clone = m.clone();
     let inst_name_clone = inst_name.clone();
     let inst_report = tokio::task::spawn_blocking(move || {
-        prism::write_instance(
+        let report = prism::write_instance(
             &inst_name_clone,
             &manifest_clone,
             &resolved_mods,
@@ -663,7 +700,9 @@ pub async fn sync_instance(
             &resolved_shaderpacks,
             &pack_dir_clone,
             Some(&launch_profile),
-        )
+        )?;
+        apply_options_sync(&pack_dir_clone.join("options.txt"), &inst_name_clone)?;
+        Ok::<_, CommandError>(report)
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
@@ -977,6 +1016,48 @@ pub async fn scan_instance_publish(
             instance_dir: instance_dir_for_scan.display().to_string(),
             items,
         })
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn preview_options_sync(
+    pack_id: String,
+    instance_name: Option<String>,
+) -> Result<OptionsSyncPreview, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_dir = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || {
+        build_options_sync_preview(&pack_dir.join("options.txt"), &instance_dir.join("options.txt"))
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn set_options_sync_ignored(
+    pack_id: String,
+    key: String,
+    ignored: bool,
+    instance_name: Option<String>,
+) -> Result<Vec<String>, CommandError> {
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_dir = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || {
+        let mut ignored_keys = read_options_ignore_set(&instance_dir)?;
+        if ignored {
+            ignored_keys.insert(key);
+        } else {
+            ignored_keys.remove(&key);
+        }
+        write_options_ignore_set(&instance_dir, &ignored_keys)?;
+        Ok(ignored_keys.into_iter().collect())
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
@@ -1422,6 +1503,227 @@ fn scan_root_files(
         }
     }
     Ok(out)
+}
+
+fn build_options_sync_preview(
+    pack_path: &std::path::Path,
+    instance_path: &std::path::Path,
+) -> Result<OptionsSyncPreview, CommandError> {
+    let has_pack_file = pack_path.exists();
+    let has_instance_file = instance_path.exists();
+    let pack_map = read_options_map(pack_path)?;
+    let instance_map = read_options_map(instance_path)?;
+    let ignored_set = read_options_ignore_set(
+        instance_path
+            .parent()
+            .ok_or_else(|| CommandError::Other("invalid options.txt path".to_string()))?,
+    )?;
+
+    let mut keybind_changes = Vec::new();
+    let mut video_changes = Vec::new();
+    let mut other_changes = Vec::new();
+
+    let mut all_keys = pack_map
+        .keys()
+        .chain(instance_map.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    all_keys.sort();
+    all_keys.dedup();
+
+    for key in all_keys {
+        let pack_value = pack_map.get(&key);
+        let instance_value = instance_map.get(&key);
+
+        if pack_value == instance_value {
+            continue;
+        }
+        let ignored = ignored_set.contains(&key);
+
+        let change = OptionsSyncChange {
+            category: classify_option_key(&key),
+            key,
+            pack_value: pack_value.cloned(),
+            instance_value: instance_value.cloned(),
+            action: match (pack_value, instance_value) {
+                (Some(_), Some(_)) => PublishAction::Update,
+                (Some(_), None) => PublishAction::Remove,
+                (None, Some(_)) => PublishAction::Add,
+                (None, None) => continue,
+            },
+            ignored,
+        };
+
+        match change.category {
+            OptionsSyncCategory::Keybinds => keybind_changes.push(change),
+            OptionsSyncCategory::Video => video_changes.push(change),
+            OptionsSyncCategory::Other => other_changes.push(change),
+        }
+    }
+
+    let groups = vec![
+        OptionsSyncGroup {
+            category: OptionsSyncCategory::Keybinds,
+            label: "KEYBINDS".to_string(),
+            description: "Changed key mappings from pack preset.".to_string(),
+            changes: keybind_changes,
+        },
+        OptionsSyncGroup {
+            category: OptionsSyncCategory::Video,
+            label: "VIDEO SETTINGS".to_string(),
+            description: "Display, visual, and active resource-pack related settings.".to_string(),
+            changes: video_changes,
+        },
+        OptionsSyncGroup {
+            category: OptionsSyncCategory::Other,
+            label: "ALL OTHER OPTIONS".to_string(),
+            description: "Safe remaining option keys after dangerous exclusions.".to_string(),
+            changes: other_changes,
+        },
+    ];
+
+    Ok(OptionsSyncPreview {
+        has_pack_file,
+        has_instance_file,
+        groups,
+        ignored_keys: ignored_set.into_iter().collect(),
+    })
+}
+
+fn read_options_ignore_set(instance_root: &std::path::Path) -> Result<BTreeSet<String>, CommandError> {
+    let path = options_ignore_path(instance_root);
+    if !path.exists() {
+        return Ok(BTreeSet::new());
+    }
+
+    let bytes = std::fs::read(path)?;
+    let mut keys = serde_json::from_slice::<Vec<String>>(&bytes)
+        .map_err(|e| CommandError::Other(format!("failed to read ignored options: {e}")))?;
+    keys.sort();
+    keys.dedup();
+    Ok(keys.into_iter().collect())
+}
+
+fn write_options_ignore_set(
+    instance_root: &std::path::Path,
+    ignored_keys: &BTreeSet<String>,
+) -> Result<(), CommandError> {
+    let path = options_ignore_path(instance_root);
+    let payload = ignored_keys.iter().cloned().collect::<Vec<_>>();
+    std::fs::write(path, serde_json::to_vec_pretty(&payload).map_err(|e| CommandError::Other(e.to_string()))?)?;
+    Ok(())
+}
+
+fn options_ignore_path(instance_root: &std::path::Path) -> std::path::PathBuf {
+    instance_root.join(".modsync-options-ignore.json")
+}
+
+fn apply_options_sync(pack_options_path: &std::path::Path, instance_name: &str) -> Result<(), CommandError> {
+    if !pack_options_path.exists() {
+        return Ok(());
+    }
+
+    let instance_root = prism::instance_minecraft_dir(instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let instance_options_path = instance_root.join("options.txt");
+    let pack_map = read_options_map(pack_options_path)?;
+    let instance_map = read_options_map(&instance_options_path)?;
+    let ignored_set = read_options_ignore_set(&instance_root)?;
+
+    let mut merged = instance_map.clone();
+    for key in pack_map.keys().chain(instance_map.keys()).cloned().collect::<BTreeSet<_>>() {
+        if ignored_set.contains(&key) {
+            continue;
+        }
+        match pack_map.get(&key) {
+            Some(value) => {
+                merged.insert(key, value.clone());
+            }
+            None => {
+                merged.remove(&key);
+            }
+        }
+    }
+
+    write_options_map(&instance_options_path, &merged)
+}
+
+fn write_options_map(
+    path: &std::path::Path,
+    entries: &BTreeMap<String, String>,
+) -> Result<(), CommandError> {
+    let mut out = String::new();
+    for (key, value) in entries {
+        out.push_str(key);
+        out.push(':');
+        out.push_str(value);
+        out.push('\n');
+    }
+    std::fs::write(path, out)?;
+    Ok(())
+}
+
+fn read_options_map(path: &std::path::Path) -> Result<BTreeMap<String, String>, CommandError> {
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let mut out = BTreeMap::new();
+    for line in content.lines() {
+        if let Some((key, value)) = line.split_once(':') {
+            out.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+    Ok(out)
+}
+
+fn classify_option_key(key: &str) -> OptionsSyncCategory {
+    if key.starts_with("key_") {
+        return OptionsSyncCategory::Keybinds;
+    }
+    if is_video_option_key(key) {
+        return OptionsSyncCategory::Video;
+    }
+    OptionsSyncCategory::Other
+}
+
+fn is_video_option_key(key: &str) -> bool {
+    matches!(
+        key,
+        "ao"
+            | "attackIndicator"
+            | "biomeBlendRadius"
+            | "bobView"
+            | "chunkBuilderMode"
+            | "cloudStatus"
+            | "darkMojangStudiosBackground"
+            | "darknessEffectScale"
+            | "enableVsync"
+            | "entityDistanceScaling"
+            | "entityShadows"
+            | "fov"
+            | "fovEffectScale"
+            | "fullscreen"
+            | "gamma"
+            | "glintSpeed"
+            | "glintStrength"
+            | "graphicsMode"
+            | "guiScale"
+            | "hideLightningFlashes"
+            | "highContrast"
+            | "incompatibleResourcePacks"
+            | "maxFps"
+            | "menuBackgroundBlurriness"
+            | "mipmapLevels"
+            | "notificationDisplayTime"
+            | "particles"
+            | "prioritizeChunkUpdates"
+            | "renderDistance"
+            | "resourcePacks"
+            | "screenEffectScale"
+            | "simulationDistance"
+    )
 }
 
 fn list_regular_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, CommandError> {
