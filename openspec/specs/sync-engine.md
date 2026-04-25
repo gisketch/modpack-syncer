@@ -23,6 +23,8 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 17. Sync review MUST let users choose Default or a pack preset before confirming options sync. Default MUST pull from the pack's main source files rather than any preset. A selected preset MUST affect options and shader previews before sync.
 18. Sync MUST apply selected preset keys after pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
 19. `IGNORE SHADER SETTINGS` MUST override the shader portion of a selected preset.
+20. The pack detail UI MUST consider an instance needing sync when the last synced pack commit differs from the current local pack head, even if current artifact files look unchanged.
+21. Local option file edits MUST be handled through options review and ignored-key controls, not treated as a global pack-update signal by themselves.
 
 ## See
 

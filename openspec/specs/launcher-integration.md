@@ -11,6 +11,7 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 5. If an offline username is configured, launch MUST ensure a matching offline Prism account exists and MUST invoke Prism with `--offline <username>`.
 6. The app MUST NOT collect Microsoft credentials. Microsoft authentication remains Prism's responsibility whenever offline launch is not being used.
 7. Launch MUST execute the resolved Prism binary with `--launch <instanceName>`. If a saved Prism data-dir override exists, launch MUST also pass `--dir <dataDir>`. The app does not wait for Prism to exit after spawn.
+8. If the current pack head differs from the last synced commit, launching from pack detail MUST show a sync-first gate with `SYNC NOW` and `CONTINUE ANYWAY` choices.
 
 ## See
 

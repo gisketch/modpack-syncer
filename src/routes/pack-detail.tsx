@@ -127,6 +127,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     retry: false,
   });
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
+  const [launchSyncGateOpen, setLaunchSyncGateOpen] = useState(false);
   const [launchProfileDraft, setLaunchProfileDraft] = useState<LaunchProfile | null>(null);
   const [javaInstallOpen, setJavaInstallOpen] = useState(false);
   const [selectedJavaChoiceId, setSelectedJavaChoiceId] = useState("temurin-21-jre");
@@ -286,6 +287,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const shaderpackRiskCount = visibleShaderpacks.filter(
     (entry) => shaderpackStatusMap.get(entry.filename) !== "synced",
   ).length;
+  const totalLaunchRiskCount = launchRiskCount + resourcepackRiskCount + shaderpackRiskCount;
   const stagedArtifactCount =
     unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
   const javaChoices = getJavaInstallChoices(
@@ -293,15 +295,20 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     manifest.data?.pack.loader,
   );
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
-  const alreadySynced =
+  const hasLocalArtifactDrift =
     !!manifest.data &&
     !!statuses.data &&
-    launchRiskCount === 0 &&
-    resourcepackRiskCount === 0 &&
-    shaderpackRiskCount === 0 &&
-    deletedMods.length === 0 &&
-    stagedArtifactCount === 0 &&
-    syncedModCount === manifest.data.mods.length;
+    (launchRiskCount > 0 ||
+      resourcepackRiskCount > 0 ||
+      shaderpackRiskCount > 0 ||
+      deletedMods.length > 0 ||
+      stagedArtifactCount > 0 ||
+      syncedModCount !== manifest.data.mods.length);
+  const latestPackCommit = pack.data?.head_sha ?? null;
+  const hasSyncedLatestCommit = !!latestPackCommit && lastSyncedCommit === latestPackCommit;
+  const needsPackSync = !!latestPackCommit && !hasSyncedLatestCommit;
+  const needsSync = needsPackSync || hasLocalArtifactDrift;
+  const alreadySynced = !!manifest.data && hasSyncedLatestCommit && !hasLocalArtifactDrift;
   const syncSummary = buildSyncSummary(artifactPublishScan.data);
   const syncReviewTabs = buildSyncReviewTabs(artifactPublishScan.data);
   const syncReviewDefaultTab = syncReviewTabs.find((tab) => tab.count > 0)?.id ?? "mods";
@@ -315,6 +322,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     if (syncedIndex > 0) return syncedIndex;
     return entries.length;
   })();
+  const highlightChangelog = needsPackSync && newUpdateCount > 0;
   const changelogResetKey = `${packId}:${changelog.data?.length ?? 0}:${lastSyncedCommit ?? ""}`;
 
   useEffect(() => {
@@ -563,7 +571,21 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   function handleLaunchClick() {
+    if (needsPackSync) {
+      setLaunchSyncGateOpen(true);
+      return;
+    }
     setLaunchConfirmOpen(true);
+  }
+
+  function handleContinueLaunchAnyway() {
+    setLaunchSyncGateOpen(false);
+    setLaunchConfirmOpen(true);
+  }
+
+  function handleSyncFromLaunchGate() {
+    setLaunchSyncGateOpen(false);
+    handleSyncClick();
   }
 
   async function handleBrowseJavaPath() {
@@ -775,7 +797,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             FETCH
           </Button>
           <Button
-            variant="secondary"
+            variant={needsSync ? "default" : "secondary"}
             onClick={handleSyncClick}
             disabled={fetchPack.isPending || sync.isPending || !manifest.data || !prism.data}
           >
@@ -832,7 +854,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         onClick={() => setChangelogOpen(true)}
         className={cn(
           "h-auto w-full justify-between gap-4 px-5 py-4 text-left text-text-high",
-          newUpdateCount > 0 &&
+          highlightChangelog &&
             "border-brand-core/35 bg-brand-core/10 shadow-[0_0_24px_rgba(84,208,150,0.16)] hover:border-brand-core/45 hover:bg-brand-core/14 hover:text-text-high",
         )}
       >
@@ -840,7 +862,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <span
             className={cn(
               "cp-tactical-label text-[10px]",
-              newUpdateCount > 0 ? "text-brand-core" : "text-text-low",
+              highlightChangelog ? "text-brand-core" : "text-text-low",
             )}
           >
             PACK UPDATES
@@ -848,13 +870,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <span className="text-sm text-text-low">View what changed since last sync</span>
         </div>
         <div className="flex items-center gap-3">
-          {newUpdateCount > 0 && !changelog.isLoading ? (
+          {highlightChangelog && !changelog.isLoading ? (
             <span className="size-2 shrink-0 rounded-full bg-brand-core shadow-[0_0_12px_rgba(84,208,150,0.65)]" />
           ) : null}
           <span
             className={cn(
               "text-right text-[10px] uppercase tracking-[0.18em]",
-              newUpdateCount > 0 ? "text-brand-core" : "text-text-low",
+              highlightChangelog ? "text-brand-core" : "text-text-low",
             )}
           >
             {changelog.isLoading
@@ -865,7 +887,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <Loader2 className="size-4 animate-spin text-brand-core" />
           ) : (
             <ChevronRight
-              className={cn("size-4", newUpdateCount > 0 ? "text-brand-core" : "text-text-low")}
+              className={cn("size-4", highlightChangelog ? "text-brand-core" : "text-text-low")}
             />
           )}
         </div>
@@ -1165,6 +1187,49 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         }
       />
 
+      <Dialog open={launchSyncGateOpen} onOpenChange={setLaunchSyncGateOpen}>
+        <DialogContent className="max-w-xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>SYNC FIRST</DialogTitle>
+            <DialogDescription>
+              This pack has updates newer than the last synced version on this instance.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="grid gap-2 border border-line-soft/20 bg-surface-sunken/60 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                  LAST SYNC
+                </span>
+                <span className="font-mono text-xs text-text-high">
+                  {lastSyncedCommit?.slice(0, 10) ?? "never"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                  PACK HEAD
+                </span>
+                <span className="font-mono text-xs text-text-high">
+                  {latestPackCommit?.slice(0, 10) ?? "unknown"}
+                </span>
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={handleContinueLaunchAnyway}>
+              CONTINUE ANYWAY
+            </Button>
+            <Button
+              onClick={handleSyncFromLaunchGate}
+              disabled={sync.isPending || fetchPack.isPending}
+            >
+              {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              SYNC NOW
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
         <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
           <DialogHeader>
@@ -1175,8 +1240,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               <LaunchSetupPanel
                 packName={manifest.data?.pack.name ?? packId}
                 profile={launchProfileDraft}
-                packSynced={launchRiskCount === 0}
-                launchRiskCount={launchRiskCount}
+                packSynced={!needsSync}
+                launchRiskCount={totalLaunchRiskCount}
                 onChange={setLaunchProfileDraft}
                 onBrowseJavaPath={() => void handleBrowseJavaPath()}
                 onUsePrismAutoJava={handleUsePrismAutoJava}
@@ -1194,12 +1259,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               CLOSE
             </Button>
             <Button
-              variant={launchRiskCount > 0 ? "destructive" : "default"}
+              variant={needsSync || totalLaunchRiskCount > 0 ? "destructive" : "default"}
               onClick={handleLaunchSubmit}
               disabled={launch.isPending || !launchProfileDraft}
             >
               {launch.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
-              {launchRiskCount > 0 ? "LAUNCH ANYWAY" : "LAUNCH"}
+              {needsSync || totalLaunchRiskCount > 0 ? "LAUNCH ANYWAY" : "LAUNCH"}
             </Button>
           </DialogFooter>
         </DialogContent>
