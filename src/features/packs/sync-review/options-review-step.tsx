@@ -4,6 +4,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardStatus, CardWindowBar, CardWindowTab } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -15,7 +22,13 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatError } from "@/lib/format-error";
-import type { OptionsSyncPreview, ShaderSettingsPreview } from "@/lib/tauri";
+import {
+  NO_OPTION_PRESET_ID,
+  type OptionPresetSummary,
+  type OptionsSyncPreview,
+  PACK_DEFAULT_PRESET_ID,
+  type ShaderSettingsPreview,
+} from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { OptionsPreviewKey, OptionsPreviewValue } from "./option-value-cells";
 import {
@@ -41,6 +54,9 @@ type OptionsReviewStepProps = {
   shaderError: unknown;
   shaderDecision: ShaderDecision;
   onShaderDecisionChange: (decision: ShaderDecision) => void;
+  optionPresets: OptionPresetSummary[];
+  selectedOptionPresetId: string;
+  onOptionPresetChange: (presetId: string) => void;
 };
 
 export function OptionsReviewStep({
@@ -55,6 +71,9 @@ export function OptionsReviewStep({
   shaderError,
   shaderDecision,
   onShaderDecisionChange,
+  optionPresets,
+  selectedOptionPresetId,
+  onOptionPresetChange,
 }: OptionsReviewStepProps) {
   const [showIgnored, setShowIgnored] = useState(true);
   const hasShaderSettings = shaderLoading || !!shaderError || !!shaderPreview?.hasPackIrisFile;
@@ -119,6 +138,28 @@ export function OptionsReviewStep({
             <ScrollArea className="h-full px-4 py-4">
               <div className="flex flex-col gap-3">
                 <div className="grid gap-2">
+                  <div className="grid gap-2 border border-line-soft/20 bg-surface-sunken/60 px-3 py-2">
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                      PRESET
+                    </span>
+                    <Select
+                      value={selectedOptionPresetId}
+                      onValueChange={(value) => value && onOptionPresetChange(value)}
+                    >
+                      <SelectTrigger size="sm" className="h-8 bg-surface-panel/70">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={PACK_DEFAULT_PRESET_ID}>PACK DEFAULT</SelectItem>
+                        <SelectItem value={NO_OPTION_PRESET_ID}>NONE</SelectItem>
+                        {optionPresets.map((preset) => (
+                          <SelectItem key={preset.id} value={preset.id}>
+                            {preset.label.toUpperCase()}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Row k="PACK FILE" v={preview?.hasPackFile ? "FOUND" : "MISSING"} />
                   <Row k="INSTANCE FILE" v={preview?.hasInstanceFile ? "FOUND" : "MISSING"} />
                   <Row k="IGNORED KEYS" v={String(preview?.ignoredKeys.length ?? 0)} />

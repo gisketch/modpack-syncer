@@ -18,6 +18,11 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 12. Shader settings review MUST live as a separate tab inside options review. It MUST diff pack `configs/iris.properties` against instance `config/iris.properties` and MUST diff the active shader preset sidecar `shaderpacks/<shaderPack>.txt` when present.
 13. Shader settings review MUST expose an explicit `IGNORE SHADER SETTINGS` control when shader settings differ. When ignore is off, sync MUST copy pack `configs/iris.properties` to instance `config/iris.properties` and copy the matching shader preset sidecar when present. When ignore is on, sync MUST leave shader settings unchanged.
 14. Sync MUST support remote and repo-backed entries across mods, resourcepacks, and shaderpacks with the same SHA verification rules.
+15. Pack repos MAY include option preset JSON files under `presets/`. Each preset MUST be a patch over selected option keys grouped by video settings, keybinds, all other options, and optional shader settings.
+16. Publisher preset capture MUST read the current Prism instance and default to including video and shader settings while leaving keybinds and other options unselected until the publisher opts in.
+17. Sync review MUST let users choose Pack Default, None, or a pack preset before confirming options sync. A selected preset MUST affect options and shader previews before sync.
+18. Sync MUST apply selected preset keys after pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
+19. `IGNORE SHADER SETTINGS` MUST override the shader portion of a selected preset.
 
 ## See
 

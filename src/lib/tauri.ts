@@ -120,6 +120,46 @@ export type OptionsSyncPreview = {
   ignoredKeys: string[];
 };
 
+export const PACK_DEFAULT_PRESET_ID = "__pack-default";
+export const NO_OPTION_PRESET_ID = "__none";
+
+export type OptionPresetScope = "video" | "keybinds" | "other" | "shader-iris" | "shader-preset";
+
+export type OptionPresetCounts = {
+  video: number;
+  keybinds: number;
+  other: number;
+  shader: number;
+};
+
+export type OptionPresetSummary = {
+  id: string;
+  label: string;
+  description: string;
+  counts: OptionPresetCounts;
+};
+
+export type OptionPresetRow = {
+  scope: OptionPresetScope;
+  key: string;
+  value: string;
+  included: boolean;
+  source: string;
+};
+
+export type OptionPresetCapture = {
+  rows: OptionPresetRow[];
+  shaderPack?: string | null;
+};
+
+export type SaveOptionPresetDraft = {
+  id: string;
+  label: string;
+  description: string;
+  shaderPack?: string | null;
+  rows: OptionPresetRow[];
+};
+
 export type ShaderSettingsStatus =
   | "missing-pack-config"
   | "matched"
@@ -308,8 +348,18 @@ export const tauri = {
   installAdoptiumJava: (packId: string, major: number, imageType: string) =>
     invoke<InstalledJavaRuntime>("install_adoptium_java", { packId, major, imageType }),
   installManagedPrism: () => invoke<ManagedPrismInstall>("install_managed_prism"),
-  syncInstance: (packId: string, instanceName?: string, syncShaderSettings?: boolean) =>
-    invoke<SyncInstanceReport>("sync_instance", { packId, instanceName, syncShaderSettings }),
+  syncInstance: (
+    packId: string,
+    instanceName?: string,
+    syncShaderSettings?: boolean,
+    optionPresetId?: string,
+  ) =>
+    invoke<SyncInstanceReport>("sync_instance", {
+      packId,
+      instanceName,
+      syncShaderSettings,
+      optionPresetId,
+    }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   launchPack: (packId: string, instanceName?: string) =>
     invoke<void>("launch_pack", { packId, instanceName }),
@@ -337,12 +387,22 @@ export const tauri = {
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
   scanInstancePublish: (packId: string, instanceName?: string) =>
     invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
-  previewOptionsSync: (packId: string, instanceName?: string) =>
-    invoke<OptionsSyncPreview>("preview_options_sync", { packId, instanceName }),
-  previewShaderSettingsSync: (packId: string, instanceName?: string) =>
-    invoke<ShaderSettingsPreview>("preview_shader_settings_sync", { packId, instanceName }),
+  previewOptionsSync: (packId: string, instanceName?: string, optionPresetId?: string) =>
+    invoke<OptionsSyncPreview>("preview_options_sync", { packId, instanceName, optionPresetId }),
+  previewShaderSettingsSync: (packId: string, instanceName?: string, optionPresetId?: string) =>
+    invoke<ShaderSettingsPreview>("preview_shader_settings_sync", {
+      packId,
+      instanceName,
+      optionPresetId,
+    }),
   setOptionsSyncIgnored: (packId: string, key: string, ignored: boolean, instanceName?: string) =>
     invoke<string[]>("set_options_sync_ignored", { packId, key, ignored, instanceName }),
+  listOptionPresets: (packId: string) =>
+    invoke<OptionPresetSummary[]>("list_option_presets", { packId }),
+  captureOptionPreset: (packId: string, instanceName?: string) =>
+    invoke<OptionPresetCapture>("capture_option_preset", { packId, instanceName }),
+  saveOptionPreset: (packId: string, draft: SaveOptionPresetDraft) =>
+    invoke<OptionPresetSummary>("save_option_preset", { packId, draft }),
   applyInstancePublish: (packId: string, instanceName?: string, version?: string) =>
     invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName, version }),
   commitAndPushPublish: (packId: string, message: string) =>

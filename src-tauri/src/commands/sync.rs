@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::Emitter;
 
+use super::option_presets::resolve_option_preset_selection;
 use super::sync_review::{
     apply_options_sync, apply_shader_settings_sync, build_options_sync_preview,
     build_shader_settings_preview, set_options_ignored, OptionsSyncPreview, ShaderSettingsPreview,
@@ -33,6 +34,7 @@ pub async fn sync_instance(
     pack_id: String,
     instance_name: Option<String>,
     sync_shader_settings: Option<bool>,
+    option_preset_id: Option<String>,
 ) -> Result<SyncInstanceReport, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
@@ -118,6 +120,8 @@ pub async fn sync_instance(
     let manifest_clone = manifest.clone();
     let instance_name_clone = instance_name.clone();
     let apply_shader_settings = sync_shader_settings.unwrap_or(false);
+    let option_preset_selection =
+        resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     let inst_report = tokio::task::spawn_blocking(move || {
         let report = prism::write_instance(
             &instance_name_clone,
@@ -128,9 +132,17 @@ pub async fn sync_instance(
             &pack_dir_clone,
             Some(&launch_profile),
         )?;
-        apply_options_sync(&pack_dir_clone.join("options.txt"), &instance_name_clone)?;
+        apply_options_sync(
+            &pack_dir_clone.join("options.txt"),
+            &instance_name_clone,
+            &option_preset_selection,
+        )?;
         if apply_shader_settings {
-            apply_shader_settings_sync(&pack_dir_clone, &instance_name_clone)?;
+            apply_shader_settings_sync(
+                &pack_dir_clone,
+                &instance_name_clone,
+                &option_preset_selection,
+            )?;
         }
         Ok::<_, CommandError>(report)
     })
@@ -161,8 +173,10 @@ pub async fn sync_instance(
 pub async fn preview_options_sync(
     pack_id: String,
     instance_name: Option<String>,
+    option_preset_id: Option<String>,
 ) -> Result<OptionsSyncPreview, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let selection = resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let instance_root = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
@@ -171,6 +185,7 @@ pub async fn preview_options_sync(
         build_options_sync_preview(
             &pack_dir.join("options.txt"),
             &instance_root.join("options.txt"),
+            &selection,
         )
     })
     .await
@@ -197,15 +212,19 @@ pub async fn set_options_sync_ignored(
 pub async fn preview_shader_settings_sync(
     pack_id: String,
     instance_name: Option<String>,
+    option_preset_id: Option<String>,
 ) -> Result<ShaderSettingsPreview, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let selection = resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let instance_root = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
 
-    tokio::task::spawn_blocking(move || build_shader_settings_preview(&pack_dir, &instance_root))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))?
+    tokio::task::spawn_blocking(move || {
+        build_shader_settings_preview(&pack_dir, &instance_root, &selection)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
 }
 
 fn resolve_entries(

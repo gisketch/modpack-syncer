@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Rocket,
+  SlidersHorizontal,
   UploadCloudIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -53,6 +54,7 @@ import {
   AddModrinthEntryDialog,
   describeArtifactCategory,
 } from "@/features/packs/modrinth-admin/add-modrinth-entry-dialog";
+import { OptionPresetBuilderDialog } from "@/features/packs/presets/option-preset-builder-dialog";
 import { PublishPreviewPage } from "@/features/packs/publish-preview/publish-preview-page";
 import {
   buildSyncReviewTabs,
@@ -67,6 +69,7 @@ import {
   type LaunchProfile,
   type ManifestArtifactCategory,
   type ModStatusValue,
+  PACK_DEFAULT_PRESET_ID,
   type PublishScanReport,
   type SyncInstanceReport,
   type SyncProgressEvent,
@@ -81,7 +84,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const qc = useQueryClient();
   const adminMode = useAppStore((s) => s.adminModeByPack[packId] ?? false);
   const lastSyncedCommit = useAppStore((s) => s.lastSyncedCommitByPack[packId] ?? null);
+  const selectedOptionPresetId = useAppStore(
+    (s) => s.selectedOptionPresetByPack[packId] ?? PACK_DEFAULT_PRESET_ID,
+  );
   const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
+  const setSelectedOptionPreset = useAppStore((s) => s.setSelectedOptionPreset);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -117,6 +124,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [presetBuilderOpen, setPresetBuilderOpen] = useState(false);
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
@@ -125,6 +133,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     "undecided",
   );
   const [pendingShaderSync, setPendingShaderSync] = useState(false);
+  const [pendingOptionPresetId, setPendingOptionPresetId] = useState(PACK_DEFAULT_PRESET_ID);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -182,17 +191,27 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const hasTrackedOptionsFile = hasTrackedOptionsPreset(artifactPublishScan.data);
   const optionsSyncPreview = useQuery({
-    queryKey: ["options-sync-preview", packId],
-    queryFn: () => tauri.previewOptionsSync(packId),
-    enabled: syncReviewOpen && !!instanceDir.data && hasTrackedOptionsFile,
-    retry: false,
-  });
-  const shaderSettingsPreview = useQuery({
-    queryKey: ["shader-settings-preview", packId],
-    queryFn: () => tauri.previewShaderSettingsSync(packId),
+    queryKey: ["options-sync-preview", packId, selectedOptionPresetId],
+    queryFn: () => tauri.previewOptionsSync(packId, undefined, selectedOptionPresetId),
     enabled: syncReviewOpen && !!instanceDir.data,
     retry: false,
   });
+  const shaderSettingsPreview = useQuery({
+    queryKey: ["shader-settings-preview", packId, selectedOptionPresetId],
+    queryFn: () => tauri.previewShaderSettingsSync(packId, undefined, selectedOptionPresetId),
+    enabled: syncReviewOpen && !!instanceDir.data,
+    retry: false,
+  });
+  const optionPresets = useQuery({
+    queryKey: ["option-presets", packId],
+    queryFn: () => tauri.listOptionPresets(packId),
+    enabled: !!manifest.data,
+    retry: false,
+  });
+  const hasOptionsReviewSource =
+    hasTrackedOptionsFile ||
+    selectedOptionPresetId !== PACK_DEFAULT_PRESET_ID ||
+    (optionPresets.data?.length ?? 0) > 0;
   const changelog = useQuery({
     queryKey: ["pack-changelog", packId, lastSyncedCommit],
     queryFn: () => tauri.packChangelog(packId, 12),
@@ -351,8 +370,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const sync = useMutation({
-    mutationFn: ({ syncShaderSettings }: { syncShaderSettings: boolean }) =>
-      tauri.syncInstance(packId, undefined, syncShaderSettings),
+    mutationFn: ({
+      syncShaderSettings,
+      optionPresetId,
+    }: {
+      syncShaderSettings: boolean;
+      optionPresetId: string;
+    }) => tauri.syncInstance(packId, undefined, syncShaderSettings, optionPresetId),
     onMutate: () => {
       setSyncOpen(true);
       setProgress({
@@ -578,6 +602,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setSyncReviewStep("artifacts");
     setShaderSyncDecision("undecided");
     setPendingShaderSync(false);
+    setPendingOptionPresetId(selectedOptionPresetId);
     setSyncReviewOpen(true);
   }
 
@@ -586,6 +611,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setSyncReviewStep("artifacts");
     setShaderSyncDecision("undecided");
     setPendingShaderSync(false);
+    setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
   }
 
   function handleSyncReviewNext() {
@@ -598,6 +624,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       : false;
     handleCloseSyncReview();
     setPendingShaderSync(applyShaderSettings);
+    setPendingOptionPresetId(selectedOptionPresetId);
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
@@ -606,7 +633,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setSyncAlreadySyncedConfirmOpen(true);
       return;
     }
-    sync.mutate({ syncShaderSettings: applyShaderSettings });
+    sync.mutate({
+      syncShaderSettings: applyShaderSettings,
+      optionPresetId: selectedOptionPresetId,
+    });
   }
 
   function handleOpenAddEntry(category: ManifestArtifactCategory) {
@@ -705,6 +735,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             >
               {publishScan.isPending ? <Loader2 className="animate-spin" /> : <UploadCloudIcon />}
               PUBLISH
+            </Button>
+          )}
+          {adminMode && (
+            <Button
+              variant="outline"
+              onClick={() => setPresetBuilderOpen(true)}
+              disabled={!instanceDir.data || sync.isPending || fetchPack.isPending}
+            >
+              <SlidersHorizontal />
+              PRESETS
             </Button>
           )}
           <Button
@@ -1051,7 +1091,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         syncSummary={syncSummary}
         syncReviewTabs={syncReviewTabs}
         defaultTab={syncReviewDefaultTab}
-        hasTrackedOptionsFile={hasTrackedOptionsFile}
+        hasTrackedOptionsFile={hasOptionsReviewSource}
         optionsPreview={optionsSyncPreview.data}
         optionsLoading={optionsSyncPreview.isLoading || optionsSyncPreview.isFetching}
         optionsError={optionsSyncPreview.error}
@@ -1062,6 +1102,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         shaderError={shaderSettingsPreview.error}
         shaderDecision={shaderSyncDecision}
         onShaderDecisionChange={setShaderSyncDecision}
+        optionPresets={optionPresets.data ?? []}
+        selectedOptionPresetId={selectedOptionPresetId}
+        onOptionPresetChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
         syncPending={sync.isPending}
         onClose={handleCloseSyncReview}
         onNext={handleSyncReviewNext}
@@ -1074,6 +1117,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         onClose={() => setAddEntryDialogOpen(false)}
         packId={packId}
         category={addEntryCategory}
+      />
+
+      <OptionPresetBuilderDialog
+        packId={packId}
+        open={presetBuilderOpen}
+        onOpenChange={setPresetBuilderOpen}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ["option-presets", packId] });
+          void qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
+          void qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] });
+        }}
       />
 
       <ChangelogDialog
@@ -1274,7 +1328,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               variant="destructive"
               onClick={() => {
                 setSyncDeleteConfirmOpen(false);
-                sync.mutate({ syncShaderSettings: pendingShaderSync });
+                sync.mutate({
+                  syncShaderSettings: pendingShaderSync,
+                  optionPresetId: pendingOptionPresetId,
+                });
               }}
             >
               DELETE + SYNC
@@ -1308,7 +1365,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <Button
               onClick={() => {
                 setSyncAlreadySyncedConfirmOpen(false);
-                sync.mutate({ syncShaderSettings: pendingShaderSync });
+                sync.mutate({
+                  syncShaderSettings: pendingShaderSync,
+                  optionPresetId: pendingOptionPresetId,
+                });
               }}
             >
               SYNC AGAIN

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { OptionsSyncPreview, ShaderSettingsPreview } from "@/lib/tauri";
+import type { OptionPresetSummary, OptionsSyncPreview, ShaderSettingsPreview } from "@/lib/tauri";
 import { formatBytes } from "../artifact-status/artifact-status-rows";
 import { OptionsReviewStep } from "./options-review-step";
 import type { SyncCategorySummary, SyncReviewTab } from "./sync-artifact-preview";
@@ -47,6 +47,9 @@ type SyncReviewDialogProps = {
   shaderError: unknown;
   shaderDecision: ShaderDecision;
   onShaderDecisionChange: (decision: ShaderDecision) => void;
+  optionPresets: OptionPresetSummary[];
+  selectedOptionPresetId: string;
+  onOptionPresetChange: (presetId: string) => void;
   syncPending: boolean;
   onClose: () => void;
   onNext: () => void;
@@ -72,6 +75,9 @@ export function SyncReviewDialog({
   shaderError,
   shaderDecision,
   onShaderDecisionChange,
+  optionPresets,
+  selectedOptionPresetId,
+  onOptionPresetChange,
   syncPending,
   onClose,
   onNext,
@@ -116,6 +122,9 @@ export function SyncReviewDialog({
               shaderError={shaderError}
               shaderDecision={shaderDecision}
               onShaderDecisionChange={onShaderDecisionChange}
+              optionPresets={optionPresets}
+              selectedOptionPresetId={selectedOptionPresetId}
+              onOptionPresetChange={onOptionPresetChange}
             />
           )}
         </DialogBody>

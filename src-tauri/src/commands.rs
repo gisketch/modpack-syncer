@@ -7,6 +7,7 @@ use crate::{download, git, manifest, prism};
 
 pub(crate) mod changelog;
 pub(crate) mod modrinth;
+pub(crate) mod option_presets;
 pub(crate) mod packs;
 pub(crate) mod prism_control;
 pub(crate) mod publish;
