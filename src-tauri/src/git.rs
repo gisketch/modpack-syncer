@@ -83,7 +83,15 @@ pub fn head_sha(repo_dir: &Path) -> Result<String, GitError> {
     Ok(head.id().to_string())
 }
 
-pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result<String, GitError> {
+pub fn commit_and_push_with_filter<F>(
+    repo_dir: &Path,
+    message: &str,
+    auth: PushAuth,
+    should_include_path: F,
+) -> Result<String, GitError>
+where
+    F: Fn(&Path) -> bool,
+{
     eprintln!("[modsync] publish push: open repo {}", repo_dir.display());
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
@@ -98,12 +106,27 @@ pub fn commit_and_push(repo_dir: &Path, message: &str, auth: PushAuth) -> Result
         .include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
-    let has_changes = !repo.statuses(Some(&mut status_options))?.is_empty();
+    let statuses = repo.statuses(Some(&mut status_options))?;
+    let has_changes = statuses.iter().any(|status| {
+        status
+            .path()
+            .is_some_and(|path| should_include_path(Path::new(path)))
+    });
 
     let commit_sha = if has_changes {
         eprintln!("[modsync] publish push: create commit");
         let mut index = repo.index()?;
-        index.add_all(["*"], IndexAddOption::DEFAULT, None)?;
+        index.add_all(
+            ["*"],
+            IndexAddOption::DEFAULT,
+            Some(&mut |path, _matched| {
+                if should_include_path(path) {
+                    0
+                } else {
+                    1
+                }
+            }),
+        )?;
         index.write()?;
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;

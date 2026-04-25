@@ -386,8 +386,8 @@ export const tauri = {
   ) => invoke<void>("delete_instance_mod", { packId, filename, category, instanceName }),
   modStatuses: (packId: string, instanceName?: string) =>
     invoke<ModStatus[]>("mod_statuses", { packId, instanceName }),
-  scanInstancePublish: (packId: string, instanceName?: string) =>
-    invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName }),
+  scanInstancePublish: (packId: string, instanceName?: string, ignorePatterns?: string[]) =>
+    invoke<PublishScanReport>("scan_instance_publish", { packId, instanceName, ignorePatterns }),
   previewOptionsSync: (packId: string, instanceName?: string, optionPresetId?: string) =>
     invoke<OptionsSyncPreview>("preview_options_sync", { packId, instanceName, optionPresetId }),
   previewShaderSettingsSync: (packId: string, instanceName?: string, optionPresetId?: string) =>
@@ -404,10 +404,20 @@ export const tauri = {
     invoke<OptionPresetCapture>("capture_option_preset", { packId, instanceName }),
   saveOptionPreset: (packId: string, draft: SaveOptionPresetDraft) =>
     invoke<OptionPresetSummary>("save_option_preset", { packId, draft }),
-  applyInstancePublish: (packId: string, instanceName?: string, version?: string) =>
-    invoke<PublishApplyReport>("apply_instance_publish", { packId, instanceName, version }),
-  commitAndPushPublish: (packId: string, message: string) =>
-    invoke<PublishPushReport>("commit_and_push_publish", { packId, message }),
+  applyInstancePublish: (
+    packId: string,
+    instanceName?: string,
+    version?: string,
+    ignorePatterns?: string[],
+  ) =>
+    invoke<PublishApplyReport>("apply_instance_publish", {
+      packId,
+      instanceName,
+      version,
+      ignorePatterns,
+    }),
+  commitAndPushPublish: (packId: string, message: string, ignorePatterns?: string[]) =>
+    invoke<PublishPushReport>("commit_and_push_publish", { packId, message, ignorePatterns }),
 };
 
 export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted" | "unpublished";

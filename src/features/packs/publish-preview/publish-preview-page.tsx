@@ -14,9 +14,11 @@ import {
   CardWindowBar,
   CardWindowTab,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -42,6 +44,8 @@ type PublishPreviewPageProps = {
   report: PublishScanReport | null;
   publishing: boolean;
   publishLogs: string[];
+  ignorePatterns: string[];
+  onIgnorePatternsChange: (patterns: string[]) => void;
   onPublish: (message: string, version: string) => void;
 };
 
@@ -52,12 +56,22 @@ export function PublishPreviewPage({
   report,
   publishing,
   publishLogs,
+  ignorePatterns,
+  onIgnorePatternsChange,
   onPublish,
 }: PublishPreviewPageProps) {
-  const counts = summarizePublishReport(report);
+  const [showIgnored, setShowIgnored] = useState(true);
   const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
-  const hasChanges = changedItems.length > 0;
-  const publishTabs = buildPublishTabs(changedItems);
+  const publishableItems = changedItems.filter(
+    (item) => !isPublishItemIgnored(item, ignorePatterns),
+  );
+  const visibleChangedItems = changedItems.filter(
+    (item) => showIgnored || !isPublishItemIgnored(item, ignorePatterns),
+  );
+  const ignoredCount = changedItems.length - publishableItems.length;
+  const counts = summarizePublishItems(publishableItems);
+  const hasChanges = publishableItems.length > 0;
+  const publishTabs = buildPublishTabs(visibleChangedItems);
   const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
   const publishVersion = useQuery({
     queryKey: ["suggest-publish-version", packId],
@@ -71,6 +85,25 @@ export function PublishPreviewPage({
     if (!publishVersion.data) return;
     setCommitTitle(`Update ${publishVersion.data}`);
   }, [publishVersion.data]);
+
+  function addIgnorePattern(pattern: string) {
+    const cleaned = normalizePublishPattern(pattern);
+    if (!cleaned || cleaned.startsWith("#") || ignorePatterns.includes(cleaned)) return;
+    onIgnorePatternsChange([...ignorePatterns, cleaned]);
+  }
+
+  function setItemIgnored(item: PublishScanReport["items"][number], ignored: boolean) {
+    const pattern = ignorePatternForItem(item);
+    if (ignored) {
+      addIgnorePattern(pattern);
+      return;
+    }
+    const nextPatterns = ignorePatterns.filter(
+      (currentPattern) =>
+        !publishPatternMatches(currentPattern, item) && currentPattern !== pattern,
+    );
+    onIgnorePatternsChange(nextPatterns);
+  }
 
   return (
     <div className="flex min-h-screen flex-col gap-6 p-8">
@@ -169,13 +202,22 @@ export function PublishPreviewPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>CHANGES</CardTitle>
-              <CardDescription>
-                Only added, updated, removed entries shown. Grouped by publish area.
-              </CardDescription>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-2">
+                  <CardTitle>CHANGES</CardTitle>
+                  <CardDescription>
+                    Only added, updated, removed entries shown. Grouped by publish area.
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
+                  <span>SHOW IGNORED</span>
+                  <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                  <span className="font-mono tabular-nums">{ignoredCount}</span>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
-              {hasChanges ? (
+              {visibleChangedItems.length > 0 ? (
                 <Tabs defaultValue={defaultTab} className="gap-5">
                   <TabsList className="flex-wrap gap-2">
                     {publishTabs.map((tab) => (
@@ -214,32 +256,72 @@ export function PublishPreviewPage({
                                 <TableHead>ACTION</TableHead>
                                 <TableHead>SOURCE</TableHead>
                                 <TableHead className="text-right">SIZE</TableHead>
+                                <TableHead className="text-center">IGNORE</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {tab.items.map((item) => (
-                                <TableRow
-                                  key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
-                                >
-                                  <TableCell>
-                                    <Badge variant="outline">
-                                      {labelCategory(item.category, item.relativePath)}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="font-mono text-[10px] text-text-low">
-                                    {item.relativePath}
-                                  </TableCell>
-                                  <TableCell>
-                                    <PublishActionChip action={item.action} />
-                                  </TableCell>
-                                  <TableCell className="text-xs text-text-low">
-                                    {item.source ?? "instance-local"}
-                                  </TableCell>
-                                  <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
-                                    {typeof item.size === "number" ? formatBytes(item.size) : "--"}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
+                              {tab.items.map((item) => {
+                                const ignored = isPublishItemIgnored(item, ignorePatterns);
+                                return (
+                                  <TableRow
+                                    key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
+                                    className={cn(
+                                      "h-8 border-l-2",
+                                      publishActionRowTone(item.action),
+                                      ignored && "opacity-45",
+                                    )}
+                                  >
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <Badge variant="outline">
+                                        {labelCategory(item.category, item.relativePath)}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top font-mono text-[10px] text-text-low">
+                                      {item.relativePath}
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top">
+                                      <PublishActionChip action={item.action} />
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 align-top text-xs text-text-low">
+                                      {item.source ?? "instance-local"}
+                                    </TableCell>
+                                    <TableCell className="px-3 py-1.5 text-right align-top font-mono text-xs text-text-low tabular-nums">
+                                      {typeof item.size === "number"
+                                        ? formatBytes(item.size)
+                                        : "--"}
+                                    </TableCell>
+                                    <TableCell
+                                      className="cursor-pointer px-3 py-1.5 align-middle"
+                                      role="button"
+                                      tabIndex={publishing ? -1 : 0}
+                                      title={ignored ? "Stop ignoring file" : "Ignore file"}
+                                      onClick={() => {
+                                        if (!publishing) {
+                                          setItemIgnored(item, !ignored);
+                                        }
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (
+                                          (event.key === "Enter" || event.key === " ") &&
+                                          !publishing
+                                        ) {
+                                          event.preventDefault();
+                                          setItemIgnored(item, !ignored);
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex items-center justify-center">
+                                        <Checkbox
+                                          checked={ignored}
+                                          disabled={publishing}
+                                          aria-label={`Ignore ${item.relativePath}`}
+                                          className="pointer-events-none"
+                                        />
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
                             </TableBody>
                           </Table>
                         </ScrollArea>
@@ -254,7 +336,9 @@ export function PublishPreviewPage({
                   ))}
                 </Tabs>
               ) : (
-                <p className="text-sm text-text-low">No changed files to publish.</p>
+                <p className="text-sm text-text-low">
+                  {showIgnored ? "No changed files to publish." : "No visible files to publish."}
+                </p>
               )}
             </CardContent>
           </Card>
@@ -363,13 +447,20 @@ function PublishActionChip({ action }: { action: PublishAction }) {
   return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{action}</span>;
 }
 
-function summarizePublishReport(report: PublishScanReport | null) {
+function summarizePublishItems(items: PublishScanReport["items"]) {
   return {
-    add: report?.items.filter((item) => item.action === "add").length ?? 0,
-    update: report?.items.filter((item) => item.action === "update").length ?? 0,
-    remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
-    unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
+    add: items.filter((item) => item.action === "add").length,
+    update: items.filter((item) => item.action === "update").length,
+    remove: items.filter((item) => item.action === "remove").length,
+    unchanged: items.filter((item) => item.action === "unchanged").length,
   };
+}
+
+function publishActionRowTone(action: PublishAction) {
+  if (action === "add") return "border-brand-core/50";
+  if (action === "update") return "border-signal-warn/50";
+  if (action === "remove") return "border-signal-alert/50";
+  return "border-line-soft/30";
 }
 
 function buildCommitMessage(title: string, description: string) {
@@ -392,6 +483,68 @@ function labelCategory(category: PublishCategory, relativePath?: string) {
     return "ROOT";
   }
   return category.toUpperCase();
+}
+
+function ignorePatternForItem(item: PublishScanReport["items"][number]) {
+  const path = normalizePublishPattern(item.relativePath);
+  if (item.category === "mods") return `mods/${path}`;
+  if (item.category === "resourcepacks") return `resourcepacks/${path}`;
+  if (item.category === "shaderpacks") return `shaderpacks/${path}`;
+  if (item.category === "shader-settings") {
+    return path === "iris.properties" ? `config/${path}` : `shaderpacks/${path}`;
+  }
+  if (item.category === "option-presets") {
+    return path.startsWith("presets/") ? path : `presets/${path}`;
+  }
+  if (item.category === "config") return `config/${path}`;
+  if (item.category === "kubejs") return `kubejs/${path}`;
+  return path;
+}
+
+function isPublishItemIgnored(item: PublishScanReport["items"][number], patterns: string[]) {
+  return patterns.some((pattern) => publishPatternMatches(pattern, item));
+}
+
+function publishPatternMatches(pattern: string, item: PublishScanReport["items"][number]) {
+  const normalizedPattern = normalizePublishPattern(pattern);
+  if (!normalizedPattern || normalizedPattern.startsWith("#")) return false;
+  const path = normalizePublishPattern(item.relativePath);
+  const basename = path.split("/").pop() ?? path;
+  const candidates = [path, basename, ignorePatternForItem(item)];
+
+  return candidates.some((candidate) => {
+    const normalizedCandidate = normalizePublishPattern(candidate);
+    if (normalizedPattern.endsWith("/")) {
+      const prefix = normalizedPattern.slice(0, -1);
+      return normalizedCandidate === prefix || normalizedCandidate.startsWith(`${prefix}/`);
+    }
+    if (normalizedPattern.includes("*") || normalizedPattern.includes("?")) {
+      return wildcardMatch(normalizedPattern, normalizedCandidate);
+    }
+    if (normalizedPattern.includes("/")) {
+      return normalizedCandidate === normalizedPattern;
+    }
+    return (
+      normalizedCandidate === normalizedPattern ||
+      normalizedCandidate.endsWith(`/${normalizedPattern}`)
+    );
+  });
+}
+
+function normalizePublishPattern(pattern: string) {
+  const trimmed = pattern.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  const directoryPattern = trimmed.endsWith("/");
+  const normalized = trimmed
+    .split("/")
+    .filter((part) => part && part !== ".")
+    .join("/");
+  return directoryPattern && normalized ? `${normalized}/` : normalized;
+}
+
+function wildcardMatch(pattern: string, value: string) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+  return regex.test(value);
 }
 
 function PreviewRow({ k, v }: { k: string; v: string }) {

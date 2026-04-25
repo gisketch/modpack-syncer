@@ -22,10 +22,12 @@ type AppState = {
   adminModeByPack: Record<string, boolean>;
   lastSyncedCommitByPack: Record<string, string>;
   selectedOptionPresetByPack: Record<string, string>;
+  publishIgnorePatternsByPack: Record<string, string[]>;
   setActiveProfile: (name: string | null) => void;
   setPackAdminMode: (packId: string, adminMode: boolean) => void;
   setLastSyncedCommit: (packId: string, commitSha: string) => void;
   setSelectedOptionPreset: (packId: string, presetId: string) => void;
+  setPublishIgnorePatterns: (packId: string, patterns: string[]) => void;
   isPackAdminMode: (packId: string) => boolean;
   addPack: (pack: Pack) => void;
 };
@@ -39,6 +41,7 @@ export const useAppStore = create<AppState>()(
       adminModeByPack: {},
       lastSyncedCommitByPack: {},
       selectedOptionPresetByPack: {},
+      publishIgnorePatternsByPack: {},
       setActiveProfile: (name) => set({ activeProfile: name }),
       setPackAdminMode: (packId, adminMode) =>
         set((state) => ({
@@ -61,6 +64,13 @@ export const useAppStore = create<AppState>()(
             [packId]: presetId,
           },
         })),
+      setPublishIgnorePatterns: (packId, patterns) =>
+        set((state) => ({
+          publishIgnorePatternsByPack: {
+            ...state.publishIgnorePatternsByPack,
+            [packId]: patterns,
+          },
+        })),
       isPackAdminMode: (packId) => get().adminModeByPack[packId] ?? false,
       addPack: (pack) => set((s) => ({ packs: [...s.packs, pack] })),
     }),
@@ -71,6 +81,7 @@ export const useAppStore = create<AppState>()(
         adminModeByPack: state.adminModeByPack,
         lastSyncedCommitByPack: state.lastSyncedCommitByPack,
         selectedOptionPresetByPack: state.selectedOptionPresetByPack,
+        publishIgnorePatternsByPack: state.publishIgnorePatternsByPack,
       }),
     },
   ),

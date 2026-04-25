@@ -14,6 +14,7 @@ Authoring and pack-publish behavior exposed by the app today.
 8. Publish preview MUST categorize changes into tabs for mods, shaderpacks, resourcepacks, configs, options, shader settings, option presets, and other files.
 9. Shader settings publish MUST treat `config/iris.properties` from the instance as pack `configs/iris.properties` and shader preset sidecars as `shaderpacks/*.txt`. These files MUST NOT be treated as generic config rows or shaderpack artifact entries.
 10. Unpublished local status rows MUST include staged local mods, resourcepacks, and shaderpacks before publish commits them into the manifest.
+11. Admin publish preview MUST support app-local ignore patterns per pack. Ignored files MUST be omitted from publish scan output and MUST NOT be copied, removed, committed, or written into `manifest.json` during apply publish.
 
 ## See
 

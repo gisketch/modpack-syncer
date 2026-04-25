@@ -17,6 +17,7 @@ pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandE
 pub async fn scan_instance_publish(
     pack_id: String,
     instance_name: Option<String>,
+    ignore_patterns: Option<Vec<String>>,
 ) -> Result<PublishScanReport, CommandError> {
     use std::collections::HashSet;
 
@@ -33,6 +34,7 @@ pub async fn scan_instance_publish(
     let instance_dir = prism::instance_minecraft_dir(&instance_name)
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
     let instance_dir_for_scan = instance_dir.clone();
+    let ignore_matcher = PublishIgnoreMatcher::new(ignore_patterns.unwrap_or_default());
 
     tokio::task::spawn_blocking(move || -> Result<PublishScanReport, CommandError> {
         let mut items = Vec::new();
@@ -40,40 +42,48 @@ pub async fn scan_instance_publish(
             PublishCategory::Mods,
             &instance_dir_for_scan.join("mods"),
             &manifest.mods,
+            &ignore_matcher,
         )?);
         items.extend(scan_artifact_dir(
             PublishCategory::Resourcepacks,
             &instance_dir_for_scan.join("resourcepacks"),
             &manifest.resourcepacks,
+            &ignore_matcher,
         )?);
         items.extend(scan_artifact_dir(
             PublishCategory::Shaderpacks,
             &instance_dir_for_scan.join("shaderpacks"),
             &manifest.shaderpacks,
+            &ignore_matcher,
         )?);
         items.extend(scan_tree_dir(
             PublishCategory::Config,
             &instance_dir_for_scan.join("config"),
             &pack_dir.join("configs"),
+            &ignore_matcher,
         )?);
         items.extend(scan_shader_settings_publish(
             &instance_dir_for_scan,
             &pack_dir,
+            &ignore_matcher,
         )?);
         items.extend(scan_repo_status_dir(
             PublishCategory::OptionPresets,
             &pack_dir,
             "presets",
+            &ignore_matcher,
         )?);
         items.extend(scan_tree_dir(
             PublishCategory::Kubejs,
             &instance_dir_for_scan.join("kubejs"),
             &pack_dir.join("kubejs"),
+            &ignore_matcher,
         )?);
         items.extend(scan_root_files(
             &instance_dir_for_scan,
             &pack_dir,
             &["options.txt"],
+            &ignore_matcher,
         )?);
 
         let mut seen = HashSet::new();
@@ -94,6 +104,7 @@ pub async fn scan_instance_publish(
 pub async fn commit_and_push_publish(
     pack_id: String,
     message: String,
+    ignore_patterns: Option<Vec<String>>,
 ) -> Result<PublishPushReport, CommandError> {
     eprintln!("[modsync] publish push command: start for {pack_id}");
     let pack_dir = paths::packs_dir()?.join(&pack_id);
@@ -119,10 +130,15 @@ pub async fn commit_and_push_publish(
             )))
         }
     };
+    let ignore_matcher = PublishIgnoreMatcher::new(ignore_patterns.unwrap_or_default());
 
     let commit_sha = tokio::time::timeout(
         std::time::Duration::from_secs(45),
-        tokio::task::spawn_blocking(move || git::commit_and_push(&pack_dir, &message, auth)),
+        tokio::task::spawn_blocking(move || {
+            git::commit_and_push_with_filter(&pack_dir, &message, auth, |path| {
+                !ignore_matcher.is_repo_path_ignored(path)
+            })
+        }),
     )
     .await
     .map_err(|_| CommandError::Git("publish push timed out after 45s".to_string()))?
@@ -137,6 +153,7 @@ pub async fn apply_instance_publish(
     pack_id: String,
     instance_name: Option<String>,
     version: Option<String>,
+    ignore_patterns: Option<Vec<String>>,
 ) -> Result<PublishApplyReport, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
@@ -152,6 +169,7 @@ pub async fn apply_instance_publish(
         .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
     let unpublished_modrinth =
         modrinth::read_unpublished_modrinth_state(&instance_dir.join("mods"))?;
+    let ignore_matcher = PublishIgnoreMatcher::new(ignore_patterns.unwrap_or_default());
 
     tokio::task::spawn_blocking(move || -> Result<PublishApplyReport, CommandError> {
         let mut manifest = manifest;
@@ -173,6 +191,7 @@ pub async fn apply_instance_publish(
             Some(&unpublished_modrinth),
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
         apply_artifact_dir(
             &instance_dir.join("resourcepacks"),
@@ -182,6 +201,7 @@ pub async fn apply_instance_publish(
             None,
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
         apply_artifact_dir(
             &instance_dir.join("shaderpacks"),
@@ -191,6 +211,7 @@ pub async fn apply_instance_publish(
             None,
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
 
         apply_tree_dir(
@@ -198,18 +219,21 @@ pub async fn apply_instance_publish(
             &pack_dir.join("configs"),
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
         apply_shader_settings_publish(
             &instance_dir,
             &pack_dir,
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
         apply_tree_dir(
             &instance_dir.join("kubejs"),
             &pack_dir.join("kubejs"),
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
         apply_root_files(
             &instance_dir,
@@ -217,6 +241,7 @@ pub async fn apply_instance_publish(
             &["options.txt"],
             &mut repo_files_written,
             &mut repo_files_removed,
+            &ignore_matcher,
         )?;
 
         let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(anyhow::Error::from)?;
@@ -234,10 +259,179 @@ pub async fn apply_instance_publish(
     .map_err(|e| CommandError::Other(e.to_string()))?
 }
 
+#[derive(Debug, Clone)]
+struct PublishIgnoreMatcher {
+    patterns: Vec<String>,
+}
+
+impl PublishIgnoreMatcher {
+    fn new(patterns: Vec<String>) -> Self {
+        let patterns = patterns
+            .into_iter()
+            .map(|pattern| normalize_publish_pattern(&pattern))
+            .filter(|pattern| !pattern.is_empty() && !pattern.starts_with('#'))
+            .collect();
+        Self { patterns }
+    }
+
+    fn is_ignored(&self, category: &PublishCategory, relative_path: &str) -> bool {
+        if self.patterns.is_empty() {
+            return false;
+        }
+
+        let relative_path = normalize_publish_path(relative_path);
+        let mut candidates = vec![relative_path.clone()];
+        if let Some(file_name) = relative_path.rsplit('/').next() {
+            candidates.push(file_name.to_string());
+        }
+        candidates.extend(category_publish_paths(category, &relative_path));
+
+        self.patterns.iter().any(|pattern| {
+            candidates
+                .iter()
+                .any(|candidate| publish_pattern_matches(pattern, candidate))
+        })
+    }
+
+    fn is_ignored_for_repo_prefix(&self, repo_prefix: &str, relative_path: &str) -> bool {
+        self.is_ignored(
+            &publish_category_from_repo_prefix(repo_prefix),
+            relative_path,
+        )
+    }
+
+    fn is_ignored_for_repo_dir(&self, repo_dir: &std::path::Path, relative_path: &str) -> bool {
+        let category = repo_dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(publish_category_from_repo_prefix)
+            .unwrap_or(PublishCategory::Root);
+        self.is_ignored(&category, relative_path)
+    }
+
+    fn is_repo_path_ignored(&self, repo_path: &std::path::Path) -> bool {
+        let relative_path = normalize_publish_path(&repo_path.to_string_lossy());
+        if relative_path == "manifest.json" {
+            return false;
+        }
+        if let Some((prefix, path)) = relative_path.split_once('/') {
+            return self.is_ignored_for_repo_prefix(prefix, path);
+        }
+        self.is_ignored(&PublishCategory::Root, &relative_path)
+    }
+}
+
+fn normalize_publish_path(path: &str) -> String {
+    path.trim()
+        .trim_start_matches('/')
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn normalize_publish_pattern(pattern: &str) -> String {
+    let trimmed = pattern.trim().trim_start_matches('/');
+    let directory_pattern = trimmed.ends_with('/');
+    let normalized = normalize_publish_path(trimmed);
+    if directory_pattern && !normalized.is_empty() {
+        format!("{normalized}/")
+    } else {
+        normalized
+    }
+}
+
+fn category_publish_paths(category: &PublishCategory, relative_path: &str) -> Vec<String> {
+    match category {
+        PublishCategory::Mods => vec![format!("mods/{relative_path}")],
+        PublishCategory::Resourcepacks => vec![format!("resourcepacks/{relative_path}")],
+        PublishCategory::Shaderpacks => vec![format!("shaderpacks/{relative_path}")],
+        PublishCategory::ShaderSettings if relative_path == "iris.properties" => vec![
+            format!("config/{relative_path}"),
+            format!("configs/{relative_path}"),
+        ],
+        PublishCategory::ShaderSettings => vec![format!("shaderpacks/{relative_path}")],
+        PublishCategory::OptionPresets if relative_path.starts_with("presets/") => {
+            vec![relative_path.to_string()]
+        }
+        PublishCategory::OptionPresets => vec![format!("presets/{relative_path}")],
+        PublishCategory::Config => vec![
+            format!("config/{relative_path}"),
+            format!("configs/{relative_path}"),
+        ],
+        PublishCategory::Kubejs => vec![format!("kubejs/{relative_path}")],
+        PublishCategory::Root => Vec::new(),
+    }
+}
+
+fn publish_category_from_repo_prefix(repo_prefix: &str) -> PublishCategory {
+    match repo_prefix {
+        "mods" => PublishCategory::Mods,
+        "resourcepacks" => PublishCategory::Resourcepacks,
+        "shaderpacks" => PublishCategory::Shaderpacks,
+        "configs" | "config" => PublishCategory::Config,
+        "kubejs" => PublishCategory::Kubejs,
+        "presets" => PublishCategory::OptionPresets,
+        _ => PublishCategory::Root,
+    }
+}
+
+fn publish_pattern_matches(pattern: &str, candidate: &str) -> bool {
+    let pattern = normalize_publish_pattern(pattern);
+    let candidate = normalize_publish_path(candidate);
+    if pattern.is_empty() || candidate.is_empty() {
+        return false;
+    }
+    if let Some(prefix) = pattern.strip_suffix('/') {
+        return candidate == prefix || candidate.starts_with(&format!("{prefix}/"));
+    }
+    if pattern.contains('*') || pattern.contains('?') {
+        return wildcard_match(&pattern, &candidate);
+    }
+    if pattern.contains('/') {
+        candidate == pattern
+    } else {
+        candidate == pattern || candidate.ends_with(&format!("/{pattern}"))
+    }
+}
+
+fn wildcard_match(pattern: &str, candidate: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let candidate = candidate.as_bytes();
+    let mut matches = vec![vec![false; candidate.len() + 1]; pattern.len() + 1];
+    matches[0][0] = true;
+
+    for pattern_index in 1..=pattern.len() {
+        if pattern[pattern_index - 1] == b'*' {
+            matches[pattern_index][0] = matches[pattern_index - 1][0];
+        }
+    }
+
+    for pattern_index in 1..=pattern.len() {
+        for candidate_index in 1..=candidate.len() {
+            matches[pattern_index][candidate_index] = match pattern[pattern_index - 1] {
+                b'*' => {
+                    matches[pattern_index - 1][candidate_index]
+                        || matches[pattern_index][candidate_index - 1]
+                }
+                b'?' => matches[pattern_index - 1][candidate_index - 1],
+                value => {
+                    value == candidate[candidate_index - 1]
+                        && matches[pattern_index - 1][candidate_index - 1]
+                }
+            };
+        }
+    }
+
+    matches[pattern.len()][candidate.len()]
+}
+
 fn scan_artifact_dir(
     category: PublishCategory,
     instance_dir: &std::path::Path,
     entries: &[manifest::Entry],
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     use std::collections::{HashMap, HashSet};
 
@@ -254,7 +448,9 @@ fn scan_artifact_dir(
             .and_then(|name| name.to_str())
             .ok_or_else(|| CommandError::Other("invalid unicode filename".to_string()))?
             .to_string();
-        if should_skip_artifact_publish(&category, &filename) {
+        if should_skip_artifact_publish(&category, &filename)
+            || ignore_matcher.is_ignored(&category, &filename)
+        {
             continue;
         }
         let sha1 = cache::file_sha1_hex(&path)?;
@@ -281,7 +477,9 @@ fn scan_artifact_dir(
     }
 
     for entry in entries {
-        if should_skip_artifact_publish(&category, &entry.filename) {
+        if should_skip_artifact_publish(&category, &entry.filename)
+            || ignore_matcher.is_ignored(&category, &entry.filename)
+        {
             continue;
         }
         if !seen.contains(&entry.filename) {
@@ -303,16 +501,21 @@ fn scan_tree_dir(
     category: PublishCategory,
     instance_dir: &std::path::Path,
     repo_dir: &std::path::Path,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     use std::collections::{HashMap, HashSet};
 
     let instance = list_relative_regular_files(instance_dir)?
         .into_iter()
-        .filter(|(rel, _)| !should_skip_tree_publish(&category, rel))
+        .filter(|(rel, _)| {
+            !should_skip_tree_publish(&category, rel) && !ignore_matcher.is_ignored(&category, rel)
+        })
         .collect::<Vec<_>>();
     let repo = list_relative_regular_files(repo_dir)?
         .into_iter()
-        .filter(|(rel, _)| !should_skip_tree_publish(&category, rel))
+        .filter(|(rel, _)| {
+            !should_skip_tree_publish(&category, rel) && !ignore_matcher.is_ignored(&category, rel)
+        })
         .collect::<Vec<_>>();
     let repo_map = repo.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
@@ -357,9 +560,13 @@ fn scan_root_files(
     instance_root: &std::path::Path,
     repo_root: &std::path::Path,
     whitelist: &[&str],
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     let mut out = Vec::new();
     for rel in whitelist {
+        if ignore_matcher.is_ignored(&PublishCategory::Root, rel) {
+            continue;
+        }
         let instance_path = instance_root.join(rel);
         let repo_path = repo_root.join(rel);
         match (instance_path.exists(), repo_path.exists()) {
@@ -405,6 +612,7 @@ fn scan_repo_status_dir(
     category: PublishCategory,
     repo_root: &std::path::Path,
     prefix: &str,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     let repo = git2::Repository::open(repo_root)?;
     let mut options = git2::StatusOptions::new();
@@ -424,6 +632,9 @@ fn scan_repo_status_dir(
             continue;
         }
         let relative_path = path.to_string();
+        if ignore_matcher.is_ignored(&category, &relative_path) {
+            continue;
+        }
         let full_path = repo_root.join(path);
         let action = publish_action_from_git_status(status.status());
         out.push(PublishScanItem {
@@ -555,6 +766,7 @@ fn apply_artifact_dir(
     unpublished_modrinth: Option<&[modrinth::UnpublishedModrinthState]>,
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<(), CommandError> {
     use std::collections::{HashMap, HashSet};
 
@@ -563,7 +775,10 @@ fn apply_artifact_dir(
         .filter(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| !should_skip_artifact_publish_prefix(repo_prefix, name))
+                .is_some_and(|name| {
+                    !should_skip_artifact_publish_prefix(repo_prefix, name)
+                        && !ignore_matcher.is_ignored_for_repo_prefix(repo_prefix, name)
+                })
         })
         .collect::<Vec<_>>();
     let mut existing_by_filename = entries
@@ -666,6 +881,10 @@ fn apply_artifact_dir(
     }
 
     for entry in existing_by_filename.into_values() {
+        if ignore_matcher.is_ignored_for_repo_prefix(repo_prefix, &entry.filename) {
+            next_entries.push(entry);
+            continue;
+        }
         if seen_filenames.contains(&entry.filename) {
             continue;
         }
@@ -687,16 +906,23 @@ fn apply_tree_dir(
     repo_dir: &std::path::Path,
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<(), CommandError> {
     use std::collections::{HashMap, HashSet};
 
     let instance_files = list_relative_regular_files(instance_dir)?
         .into_iter()
-        .filter(|(rel, _)| !should_skip_tree_publish_prefix(repo_dir, rel))
+        .filter(|(rel, _)| {
+            !should_skip_tree_publish_prefix(repo_dir, rel)
+                && !ignore_matcher.is_ignored_for_repo_dir(repo_dir, rel)
+        })
         .collect::<Vec<_>>();
     let repo_files = list_relative_regular_files(repo_dir)?
         .into_iter()
-        .filter(|(rel, _)| !should_skip_tree_publish_prefix(repo_dir, rel))
+        .filter(|(rel, _)| {
+            !should_skip_tree_publish_prefix(repo_dir, rel)
+                && !ignore_matcher.is_ignored_for_repo_dir(repo_dir, rel)
+        })
         .collect::<Vec<_>>();
     let repo_map = repo_files.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
@@ -725,8 +951,12 @@ fn apply_root_files(
     whitelist: &[&str],
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<(), CommandError> {
     for rel in whitelist {
+        if ignore_matcher.is_ignored(&PublishCategory::Root, rel) {
+            continue;
+        }
         let instance_path = instance_root.join(rel);
         let repo_path = repo_root.join(rel);
         if instance_path.exists() {
@@ -769,12 +999,14 @@ fn should_skip_tree_publish_prefix(repo_dir: &std::path::Path, relative_path: &s
 fn scan_shader_settings_publish(
     instance_root: &std::path::Path,
     repo_root: &std::path::Path,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     let mut items = scan_root_files_with_category(
         PublishCategory::ShaderSettings,
         &instance_root.join("config"),
         &repo_root.join("configs"),
         &["iris.properties"],
+        ignore_matcher,
     )?;
 
     let instance_shader_dir = instance_root.join("shaderpacks");
@@ -783,6 +1015,7 @@ fn scan_shader_settings_publish(
         PublishCategory::ShaderSettings,
         &instance_shader_dir,
         &repo_shader_dir,
+        ignore_matcher,
         |rel| rel.ends_with(".txt"),
     )?;
     items.append(&mut shader_items);
@@ -794,6 +1027,7 @@ fn apply_shader_settings_publish(
     repo_root: &std::path::Path,
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<(), CommandError> {
     apply_root_files(
         &instance_root.join("config"),
@@ -801,12 +1035,14 @@ fn apply_shader_settings_publish(
         &["iris.properties"],
         repo_files_written,
         repo_files_removed,
+        ignore_matcher,
     )?;
     apply_tree_dir_filtered(
         &instance_root.join("shaderpacks"),
         &repo_root.join("shaderpacks"),
         repo_files_written,
         repo_files_removed,
+        ignore_matcher,
         |rel| rel.ends_with(".txt"),
     )
 }
@@ -816,9 +1052,13 @@ fn scan_root_files_with_category(
     instance_root: &std::path::Path,
     repo_root: &std::path::Path,
     whitelist: &[&str],
+    ignore_matcher: &PublishIgnoreMatcher,
 ) -> Result<Vec<PublishScanItem>, CommandError> {
     let mut out = Vec::new();
     for rel in whitelist {
+        if ignore_matcher.is_ignored(&category, rel) {
+            continue;
+        }
         let instance_path = instance_root.join(rel);
         let repo_path = repo_root.join(rel);
         match (instance_path.exists(), repo_path.exists()) {
@@ -864,6 +1104,7 @@ fn scan_tree_dir_filtered<F>(
     category: PublishCategory,
     instance_dir: &std::path::Path,
     repo_dir: &std::path::Path,
+    ignore_matcher: &PublishIgnoreMatcher,
     include: F,
 ) -> Result<Vec<PublishScanItem>, CommandError>
 where
@@ -873,11 +1114,11 @@ where
 
     let instance = list_relative_regular_files(instance_dir)?
         .into_iter()
-        .filter(|(rel, _)| include(rel))
+        .filter(|(rel, _)| include(rel) && !ignore_matcher.is_ignored(&category, rel))
         .collect::<Vec<_>>();
     let repo = list_relative_regular_files(repo_dir)?
         .into_iter()
-        .filter(|(rel, _)| include(rel))
+        .filter(|(rel, _)| include(rel) && !ignore_matcher.is_ignored(&category, rel))
         .collect::<Vec<_>>();
     let repo_map = repo.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
@@ -923,6 +1164,7 @@ fn apply_tree_dir_filtered<F>(
     repo_dir: &std::path::Path,
     repo_files_written: &mut usize,
     repo_files_removed: &mut usize,
+    ignore_matcher: &PublishIgnoreMatcher,
     include: F,
 ) -> Result<(), CommandError>
 where
@@ -932,11 +1174,11 @@ where
 
     let instance_files = list_relative_regular_files(instance_dir)?
         .into_iter()
-        .filter(|(rel, _)| include(rel))
+        .filter(|(rel, _)| include(rel) && !ignore_matcher.is_ignored_for_repo_dir(repo_dir, rel))
         .collect::<Vec<_>>();
     let repo_files = list_relative_regular_files(repo_dir)?
         .into_iter()
-        .filter(|(rel, _)| include(rel))
+        .filter(|(rel, _)| include(rel) && !ignore_matcher.is_ignored_for_repo_dir(repo_dir, rel))
         .collect::<Vec<_>>();
     let repo_map = repo_files.into_iter().collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();

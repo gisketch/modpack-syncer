@@ -80,6 +80,8 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
 import { useNav } from "@/stores/nav-store";
 
+const EMPTY_PUBLISH_IGNORE_PATTERNS: string[] = [];
+
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
   const qc = useQueryClient();
@@ -92,8 +94,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     rawSelectedOptionPresetId === NO_OPTION_PRESET_ID
       ? PACK_DEFAULT_PRESET_ID
       : rawSelectedOptionPresetId;
+  const publishIgnorePatterns = useAppStore(
+    (s) => s.publishIgnorePatternsByPack[packId] ?? EMPTY_PUBLISH_IGNORE_PATTERNS,
+  );
   const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
   const setSelectedOptionPreset = useAppStore((s) => s.setSelectedOptionPreset);
+  const setPublishIgnorePatterns = useAppStore((s) => s.setPublishIgnorePatterns);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -189,8 +195,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     retry: false,
   });
   const artifactPublishScan = useQuery({
-    queryKey: ["artifact-publish-scan", packId],
-    queryFn: () => tauri.scanInstancePublish(packId),
+    queryKey: ["artifact-publish-scan", packId, publishIgnorePatterns],
+    queryFn: () => tauri.scanInstancePublish(packId, undefined, publishIgnorePatterns),
     enabled: !!manifest.data && !!instanceDir.data,
     retry: false,
   });
@@ -474,7 +480,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const showJavaInstallProgress = installJava.isPending;
 
   const publishScan = useMutation({
-    mutationFn: () => tauri.scanInstancePublish(packId),
+    mutationFn: () => tauri.scanInstancePublish(packId, undefined, publishIgnorePatterns),
     onMutate: () => {
       setPublishOpen(true);
       setPublishReport(null);
@@ -517,13 +523,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const publishPush = useMutation({
     mutationFn: async ({ message, version }: { message: string; version: string }) => {
       setPublishLogs((current) => [...current, "> apply manifest changes"]);
-      const applied = await tauri.applyInstancePublish(packId, undefined, version);
+      const applied = await tauri.applyInstancePublish(
+        packId,
+        undefined,
+        version,
+        publishIgnorePatterns,
+      );
       setPublishLogs((current) => [
         ...current,
         `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
         "> commit + push origin",
       ]);
-      const pushed = await tauri.commitAndPushPublish(packId, message);
+      const pushed = await tauri.commitAndPushPublish(packId, message, publishIgnorePatterns);
       setPublishLogs((current) => [
         ...current,
         `push done :: ${pushed.commitSha.slice(0, 10)} via ${pushed.method.toUpperCase()}`,
@@ -679,6 +690,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={publishReport}
         publishing={publishPush.isPending}
         publishLogs={publishLogs}
+        ignorePatterns={publishIgnorePatterns}
+        onIgnorePatternsChange={(patterns) => setPublishIgnorePatterns(packId, patterns)}
         onPublish={(message, version) => publishPush.mutate({ message, version })}
       />
     );
