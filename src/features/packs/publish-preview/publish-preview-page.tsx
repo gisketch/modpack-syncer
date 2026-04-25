@@ -1,7 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, FolderGit2, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, FolderGit2, Loader2, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +15,14 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Pagination,
+  PaginationControls,
+  PaginationIndicator,
+  PaginationInfo,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -30,12 +37,16 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  type ManifestEntry,
   type PublishAction,
   type PublishCategory,
+  type PublishScanItem,
   type PublishScanReport,
   tauri,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+
+const PUBLISH_PAGE_SIZE = 15;
 
 type PublishPreviewPageProps = {
   packId: string;
@@ -60,7 +71,22 @@ export function PublishPreviewPage({
   onIgnorePatternsChange,
   onPublish,
 }: PublishPreviewPageProps) {
+  const qc = useQueryClient();
   const [showIgnored, setShowIgnored] = useState(true);
+  const [showAllMods, setShowAllMods] = useState(false);
+  const [tabSearch, setTabSearch] = useState<Record<string, string>>({});
+  const [tabPage, setTabPage] = useState<Record<string, number>>({});
+  const [pendingOptionalMods, setPendingOptionalMods] = useState<Record<string, boolean>>({});
+  const publishVersion = useQuery({
+    queryKey: ["suggest-publish-version", packId],
+    queryFn: () => tauri.suggestPublishVersion(packId),
+    retry: false,
+  });
+  const manifest = useQuery({
+    queryKey: ["manifest", packId],
+    queryFn: () => tauri.loadManifest(packId),
+    retry: false,
+  });
   const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
   const publishableItems = changedItems.filter(
     (item) => !isPublishItemIgnored(item, ignorePatterns),
@@ -71,12 +97,31 @@ export function PublishPreviewPage({
   const ignoredCount = changedItems.length - publishableItems.length;
   const counts = summarizePublishItems(publishableItems);
   const hasChanges = publishableItems.length > 0;
-  const publishTabs = buildPublishTabs(visibleChangedItems);
+  const visiblePublishItems = showAllMods
+    ? withAllManifestMods(visibleChangedItems, manifest.data?.mods ?? [])
+    : visibleChangedItems;
+  const publishTabs = buildPublishTabs(visiblePublishItems);
   const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
-  const publishVersion = useQuery({
-    queryKey: ["suggest-publish-version", packId],
-    queryFn: () => tauri.suggestPublishVersion(packId),
-    retry: false,
+  const optionalByFilename = useMemo(
+    () => new Map((manifest.data?.mods ?? []).map((entry) => [entry.filename, entry.optional])),
+    [manifest.data?.mods],
+  );
+  const setModOptional = useMutation({
+    mutationFn: ({ filename, optional }: { filename: string; optional: boolean }) =>
+      tauri.setManifestModOptional(packId, filename, optional),
+    onMutate: (variables) => {
+      setPendingOptionalMods((current) => ({ ...current, [variables.filename]: true }));
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["manifest", packId] });
+    },
+    onSettled: (_data, _error, variables) => {
+      setPendingOptionalMods((current) => {
+        const next = { ...current };
+        delete next[variables.filename];
+        return next;
+      });
+    },
   });
   const [commitTitle, setCommitTitle] = useState("Publish instance changes");
   const [commitDescription, setCommitDescription] = useState("");
@@ -206,18 +251,24 @@ export function PublishPreviewPage({
                 <div className="flex flex-col gap-2">
                   <CardTitle>CHANGES</CardTitle>
                   <CardDescription>
-                    Only added, updated, removed entries shown. Grouped by publish area.
+                    Only changed entries shown unless all mods are enabled. Grouped by publish area.
                   </CardDescription>
                 </div>
-                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-low">
-                  <span>SHOW IGNORED</span>
-                  <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
-                  <span className="font-mono tabular-nums">{ignoredCount}</span>
+                <div className="flex flex-wrap items-center justify-end gap-4 text-[10px] uppercase tracking-[0.18em] text-text-low">
+                  <div className="flex items-center gap-2">
+                    <span>SHOW ALL MODS</span>
+                    <Switch checked={showAllMods} onCheckedChange={setShowAllMods} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>SHOW IGNORED</span>
+                    <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
+                    <span className="font-mono tabular-nums">{ignoredCount}</span>
+                  </div>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {visibleChangedItems.length > 0 ? (
+              {visiblePublishItems.length > 0 ? (
                 <Tabs defaultValue={defaultTab} className="gap-5">
                   <TabsList className="flex-wrap gap-2">
                     {publishTabs.map((tab) => (
@@ -231,107 +282,213 @@ export function PublishPreviewPage({
                   </TabsList>
                   {publishTabs.map((tab) => (
                     <TabsContent key={tab.id} value={tab.id} className="outline-none">
-                      <Card className="mb-4">
-                        <CardContent className="flex items-center justify-between gap-3 p-4">
-                          <div className="flex flex-col gap-1">
-                            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                              {tab.label}
-                            </span>
-                            <span className="text-xs text-text-low [text-wrap:pretty]">
-                              {tab.description}
-                            </span>
-                          </div>
-                          <div className="text-right font-mono text-xs tabular-nums text-text-low">
-                            {tab.count} {tab.count === 1 ? "change" : "changes"}
-                          </div>
-                        </CardContent>
-                      </Card>
-                      {tab.items.length > 0 ? (
-                        <ScrollArea className="h-[calc(100vh-27rem)]">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>CATEGORY</TableHead>
-                                <TableHead>PATH</TableHead>
-                                <TableHead>ACTION</TableHead>
-                                <TableHead>SOURCE</TableHead>
-                                <TableHead className="text-right">SIZE</TableHead>
-                                <TableHead className="text-center">IGNORE</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {tab.items.map((item) => {
-                                const ignored = isPublishItemIgnored(item, ignorePatterns);
-                                return (
-                                  <TableRow
-                                    key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
-                                    className={cn(
-                                      "h-8 border-l-2",
-                                      publishActionRowTone(item.action),
-                                      ignored && "opacity-45",
-                                    )}
-                                  >
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <Badge variant="outline">
-                                        {labelCategory(item.category, item.relativePath)}
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top font-mono text-[10px] text-text-low">
-                                      {item.relativePath}
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top">
-                                      <PublishActionChip action={item.action} />
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 align-top text-xs text-text-low">
-                                      {item.source ?? "instance-local"}
-                                    </TableCell>
-                                    <TableCell className="px-3 py-1.5 text-right align-top font-mono text-xs text-text-low tabular-nums">
-                                      {typeof item.size === "number"
-                                        ? formatBytes(item.size)
-                                        : "--"}
-                                    </TableCell>
-                                    <TableCell
-                                      className="cursor-pointer px-3 py-1.5 align-middle"
-                                      role="button"
-                                      tabIndex={publishing ? -1 : 0}
-                                      title={ignored ? "Stop ignoring file" : "Ignore file"}
-                                      onClick={() => {
-                                        if (!publishing) {
-                                          setItemIgnored(item, !ignored);
-                                        }
-                                      }}
-                                      onKeyDown={(event) => {
-                                        if (
-                                          (event.key === "Enter" || event.key === " ") &&
-                                          !publishing
-                                        ) {
-                                          event.preventDefault();
-                                          setItemIgnored(item, !ignored);
-                                        }
-                                      }}
-                                    >
-                                      <div className="flex items-center justify-center">
-                                        <Checkbox
-                                          checked={ignored}
-                                          disabled={publishing}
-                                          aria-label={`Ignore ${item.relativePath}`}
-                                          className="pointer-events-none"
-                                        />
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </ScrollArea>
-                      ) : (
-                        <Card>
-                          <CardContent className="px-4 py-8 text-center text-sm text-text-low">
-                            No changed files in {tab.label.toLowerCase()}.
-                          </CardContent>
-                        </Card>
-                      )}
+                      {(() => {
+                        const search = tabSearch[tab.id] ?? "";
+                        const filteredItems = filterPublishItems(tab.items, search);
+                        const totalPages = pageCount(filteredItems.length);
+                        const page = Math.min(tabPage[tab.id] ?? 1, totalPages);
+                        const pagedItems = paginatePublishItems(filteredItems, page);
+                        return (
+                          <>
+                            <Card className="mb-4">
+                              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                                    {tab.label}
+                                  </span>
+                                  <span className="text-xs text-text-low [text-wrap:pretty]">
+                                    {tab.description}
+                                  </span>
+                                </div>
+                                <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                                  <PublishSearchBox
+                                    value={search}
+                                    placeholder={`SEARCH ${tab.label}`}
+                                    onChange={(value) => {
+                                      setTabSearch((current) => ({ ...current, [tab.id]: value }));
+                                      setTabPage((current) => ({ ...current, [tab.id]: 1 }));
+                                    }}
+                                  />
+                                  <div className="text-right font-mono text-xs tabular-nums text-text-low">
+                                    {filteredItems.length} / {tab.count}
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                            {filteredItems.length > 0 ? (
+                              <div className="space-y-3">
+                                <ScrollArea>
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>NAME</TableHead>
+                                        <TableHead>ACTION</TableHead>
+                                        {tab.id === "mods" ? <TableHead>OPTIONAL</TableHead> : null}
+                                        <TableHead>SOURCE</TableHead>
+                                        <TableHead className="text-right">SIZE</TableHead>
+                                        <TableHead className="text-center">IGNORE</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {pagedItems.map((item) => {
+                                        const ignored = isPublishItemIgnored(item, ignorePatterns);
+                                        const canSetOptional =
+                                          tab.id === "mods" &&
+                                          optionalByFilename.has(item.relativePath);
+                                        const optional =
+                                          optionalByFilename.get(item.relativePath) ?? false;
+                                        const optionalPending =
+                                          !!pendingOptionalMods[item.relativePath];
+                                        return (
+                                          <TableRow
+                                            key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
+                                            className={cn(
+                                              "h-8 border-l-2",
+                                              publishActionRowTone(item.action),
+                                              ignored && "opacity-45",
+                                            )}
+                                          >
+                                            <TableCell className="px-3 py-1.5 align-top">
+                                              <span
+                                                className="block max-w-[24rem] truncate text-xs text-text-high"
+                                                title={item.relativePath}
+                                              >
+                                                {publishDisplayName(item)}
+                                              </span>
+                                            </TableCell>
+                                            <TableCell className="px-3 py-1.5 align-top">
+                                              <PublishActionChip action={item.action} />
+                                            </TableCell>
+                                            {tab.id === "mods" ? (
+                                              <TableCell
+                                                className={cn(
+                                                  "px-3 py-1.5 text-center align-middle",
+                                                  canSetOptional && !publishing && !optionalPending
+                                                    ? "cursor-pointer"
+                                                    : "cursor-not-allowed",
+                                                )}
+                                                role={canSetOptional ? "button" : undefined}
+                                                tabIndex={
+                                                  canSetOptional && !publishing && !optionalPending
+                                                    ? 0
+                                                    : -1
+                                                }
+                                                onClick={() => {
+                                                  if (
+                                                    publishing ||
+                                                    optionalPending ||
+                                                    !canSetOptional
+                                                  ) {
+                                                    return;
+                                                  }
+                                                  setModOptional.mutate({
+                                                    filename: item.relativePath,
+                                                    optional: !optional,
+                                                  });
+                                                }}
+                                                onKeyDown={(event) => {
+                                                  if (
+                                                    (event.key === "Enter" || event.key === " ") &&
+                                                    !publishing &&
+                                                    !optionalPending &&
+                                                    canSetOptional
+                                                  ) {
+                                                    event.preventDefault();
+                                                    setModOptional.mutate({
+                                                      filename: item.relativePath,
+                                                      optional: !optional,
+                                                    });
+                                                  }
+                                                }}
+                                              >
+                                                <div className="flex items-center justify-center gap-2">
+                                                  {optionalPending ? (
+                                                    <Loader2 className="size-3 animate-spin text-text-low" />
+                                                  ) : null}
+                                                  <Checkbox
+                                                    checked={optional}
+                                                    disabled={
+                                                      publishing ||
+                                                      optionalPending ||
+                                                      !canSetOptional
+                                                    }
+                                                    aria-label={`Optional ${item.relativePath}`}
+                                                    className="pointer-events-none"
+                                                  />
+                                                </div>
+                                              </TableCell>
+                                            ) : null}
+                                            <TableCell className="px-3 py-1.5 align-top text-xs text-text-low">
+                                              {item.source ?? "instance-local"}
+                                            </TableCell>
+                                            <TableCell className="px-3 py-1.5 text-right align-top font-mono text-xs text-text-low tabular-nums">
+                                              {typeof item.size === "number"
+                                                ? formatBytes(item.size)
+                                                : "--"}
+                                            </TableCell>
+                                            <TableCell
+                                              className="cursor-pointer px-3 py-1.5 align-middle"
+                                              role="button"
+                                              tabIndex={publishing ? -1 : 0}
+                                              title={ignored ? "Stop ignoring file" : "Ignore file"}
+                                              onClick={() => {
+                                                if (!publishing) {
+                                                  setItemIgnored(item, !ignored);
+                                                }
+                                              }}
+                                              onKeyDown={(event) => {
+                                                if (
+                                                  (event.key === "Enter" || event.key === " ") &&
+                                                  !publishing
+                                                ) {
+                                                  event.preventDefault();
+                                                  setItemIgnored(item, !ignored);
+                                                }
+                                              }}
+                                            >
+                                              <div className="flex items-center justify-center">
+                                                <Checkbox
+                                                  checked={ignored}
+                                                  disabled={publishing}
+                                                  aria-label={`Ignore ${item.relativePath}`}
+                                                  className="pointer-events-none"
+                                                />
+                                              </div>
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                </ScrollArea>
+                                <PublishPager
+                                  page={page}
+                                  totalPages={totalPages}
+                                  totalItems={filteredItems.length}
+                                  onPrevious={() =>
+                                    setTabPage((current) => ({
+                                      ...current,
+                                      [tab.id]: Math.max(page - 1, 1),
+                                    }))
+                                  }
+                                  onNext={() =>
+                                    setTabPage((current) => ({
+                                      ...current,
+                                      [tab.id]: Math.min(page + 1, totalPages),
+                                    }))
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <Card>
+                                <CardContent className="px-4 py-8 text-center text-sm text-text-low">
+                                  No changed files in {tab.label.toLowerCase()}.
+                                </CardContent>
+                              </Card>
+                            )}
+                          </>
+                        );
+                      })()}
                     </TabsContent>
                   ))}
                 </Tabs>
@@ -360,11 +517,11 @@ type PublishTabDefinition = {
     | "others";
   label: string;
   description: string;
-  items: PublishScanReport["items"];
+  items: PublishScanItem[];
   count: number;
 };
 
-function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefinition[] {
+function buildPublishTabs(items: PublishScanItem[]): PublishTabDefinition[] {
   const tabs: Array<
     Omit<PublishTabDefinition, "items" | "count"> & {
       match: (item: PublishScanReport["items"][number]) => boolean;
@@ -434,6 +591,106 @@ function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefiniti
   });
 }
 
+function PublishSearchBox({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-text-low" />
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-9 pl-9 text-xs"
+      />
+    </div>
+  );
+}
+
+function PublishPager({
+  page,
+  totalPages,
+  totalItems,
+  onPrevious,
+  onNext,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <Pagination className="justify-between">
+      <PaginationInfo>{totalItems} SHOWN BY FILTER</PaginationInfo>
+      <PaginationControls>
+        <PaginationPrevious onClick={onPrevious} disabled={page <= 1} />
+        <PaginationIndicator page={page} total={totalPages} />
+        <PaginationNext onClick={onNext} disabled={page >= totalPages} />
+      </PaginationControls>
+    </Pagination>
+  );
+}
+
+function filterPublishItems(items: PublishScanItem[], query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter((item) =>
+    [publishDisplayName(item), item.relativePath, item.category, item.action, item.source ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle),
+  );
+}
+
+function paginatePublishItems(items: PublishScanItem[], page: number) {
+  const start = (Math.max(page, 1) - 1) * PUBLISH_PAGE_SIZE;
+  return items.slice(start, start + PUBLISH_PAGE_SIZE);
+}
+
+function pageCount(totalItems: number) {
+  return Math.max(1, Math.ceil(totalItems / PUBLISH_PAGE_SIZE));
+}
+
+function withAllManifestMods(items: PublishScanItem[], mods: ManifestEntry[]) {
+  const existing = new Set(
+    items.filter((item) => item.category === "mods").map((item) => item.relativePath),
+  );
+  const unchangedMods = mods
+    .filter((entry) => !existing.has(entry.filename))
+    .map<PublishScanItem>((entry) => ({
+      category: "mods",
+      relativePath: entry.filename,
+      size: entry.size,
+      sha1: entry.sha1,
+      action: "unchanged",
+      source: entry.source,
+    }));
+  return [...items, ...unchangedMods];
+}
+
+function publishDisplayName(item: PublishScanReport["items"][number]) {
+  if (isArtifactCategory(item.category)) {
+    return (
+      item.relativePath
+        .split("/")
+        .pop()
+        ?.replace(/\.(jar|zip)$/i, "") ?? item.relativePath
+    );
+  }
+  return item.relativePath;
+}
+
+function isArtifactCategory(category: PublishCategory) {
+  return category === "mods" || category === "resourcepacks" || category === "shaderpacks";
+}
+
 function PublishActionChip({ action }: { action: PublishAction }) {
   const text =
     action === "add"
@@ -467,22 +724,6 @@ function buildCommitMessage(title: string, description: string) {
   const cleanTitle = title.trim() || "Publish instance changes";
   const cleanDescription = description.trim();
   return cleanDescription ? `${cleanTitle}\n\n${cleanDescription}` : cleanTitle;
-}
-
-function labelCategory(category: PublishCategory, relativePath?: string) {
-  if (category === "root" && relativePath === "options.txt") {
-    return "OPTIONS";
-  }
-  if (category === "shader-settings") {
-    return "SHADER SETTINGS";
-  }
-  if (category === "option-presets") {
-    return "PRESETS";
-  }
-  if (category === "root") {
-    return "ROOT";
-  }
-  return category.toUpperCase();
 }
 
 function ignorePatternForItem(item: PublishScanReport["items"][number]) {

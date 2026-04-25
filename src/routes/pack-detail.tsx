@@ -4,7 +4,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { exeExtension } from "@tauri-apps/plugin-os";
 import {
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
   ChevronRight,
   Download,
   FolderGit2,
@@ -15,10 +18,11 @@ import {
   Plus,
   RefreshCw,
   Rocket,
+  Search,
   SlidersHorizontal,
   UploadCloudIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PackIcon } from "@/components/pack-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -34,12 +38,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Pagination,
+  PaginationControls,
+  PaginationIndicator,
+  PaginationInfo,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   buildArtifactStatusMap,
   DeletedModRow,
+  entryDisplayName,
   ModRow,
   UnpublishedModRow,
 } from "@/features/packs/artifact-status/artifact-status-rows";
@@ -68,6 +82,7 @@ import {
   type JavaInstallProgressEvent,
   type LaunchProfile,
   type ManifestArtifactCategory,
+  type ManifestEntry,
   type ModStatusValue,
   NO_OPTION_PRESET_ID,
   type OptionsSyncCategory,
@@ -82,7 +97,21 @@ import { useAppStore } from "@/stores/app-store";
 import { useNav } from "@/stores/nav-store";
 
 const EMPTY_PUBLISH_IGNORE_PATTERNS: string[] = [];
+const EMPTY_DISABLED_ARTIFACTS: Record<string, string[]> = {};
 const DEFAULT_OPTION_SYNC_CATEGORIES: OptionsSyncCategory[] = ["keybinds", "video", "other"];
+const ARTIFACT_PAGE_SIZE = 15;
+
+type ArtifactSortKey = "name" | "source" | "side" | "status" | "enabled";
+type ArtifactSort = {
+  key: ArtifactSortKey;
+  direction: "asc" | "desc";
+};
+
+const DEFAULT_ARTIFACT_SORT: Record<ManifestArtifactCategory, ArtifactSort> = {
+  mods: { key: "name", direction: "asc" },
+  resourcepacks: { key: "name", direction: "asc" },
+  shaderpacks: { key: "name", direction: "asc" },
+};
 
 export function PackDetailRoute({ packId }: { packId: string }) {
   const go = useNav((s) => s.go);
@@ -102,6 +131,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
   const setSelectedOptionPreset = useAppStore((s) => s.setSelectedOptionPreset);
   const setPublishIgnorePatterns = useAppStore((s) => s.setPublishIgnorePatterns);
+  const disabledArtifactsForPack = useAppStore(
+    (s) => s.disabledArtifactsByPack[packId] ?? EMPTY_DISABLED_ARTIFACTS,
+  );
+  const setArtifactDisabled = useAppStore((s) => s.setArtifactDisabled);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -154,6 +187,19 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [pendingOptionSyncCategories, setPendingOptionSyncCategories] = useState<
     OptionsSyncCategory[]
   >(DEFAULT_OPTION_SYNC_CATEGORIES);
+  const [artifactSearch, setArtifactSearch] = useState<Record<ManifestArtifactCategory, string>>({
+    mods: "",
+    resourcepacks: "",
+    shaderpacks: "",
+  });
+  const [artifactPage, setArtifactPage] = useState<Record<ManifestArtifactCategory, number>>({
+    mods: 1,
+    resourcepacks: 1,
+    shaderpacks: 1,
+  });
+  const [artifactSort, setArtifactSort] =
+    useState<Record<ManifestArtifactCategory, ArtifactSort>>(DEFAULT_ARTIFACT_SORT);
+  const [pendingArtifactToggles, setPendingArtifactToggles] = useState<Record<string, boolean>>({});
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
@@ -252,6 +298,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Ignore update failed", { description: formatError(error) });
     },
   });
+  const modrinthMap = useModrinthProjects(
+    manifest.data
+      ? [...manifest.data.mods, ...manifest.data.resourcepacks, ...manifest.data.shaderpacks]
+      : [],
+  );
   const statusMap = new Map<string, ModStatusValue>(
     (statuses.data ?? [])
       .filter((s) => s.status !== "deleted" && s.status !== "unpublished")
@@ -284,16 +335,91 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const visibleShaderpacks = (manifest.data?.shaderpacks ?? []).filter(
     (entry) => !entry.filename.endsWith(".txt"),
   );
+  const disabledArtifactSets = useMemo(
+    () => ({
+      mods: new Set(disabledArtifactsForPack.mods ?? []),
+      resourcepacks: new Set(disabledArtifactsForPack.resourcepacks ?? []),
+      shaderpacks: new Set(disabledArtifactsForPack.shaderpacks ?? []),
+    }),
+    [disabledArtifactsForPack],
+  );
+  const filteredMods = filterArtifactEntries(
+    manifest.data?.mods ?? [],
+    artifactSearch.mods,
+    modrinthMap,
+  );
+  const filteredResourcepacks = filterArtifactEntries(
+    manifest.data?.resourcepacks ?? [],
+    artifactSearch.resourcepacks,
+    modrinthMap,
+  );
+  const filteredShaderpacks = filterArtifactEntries(
+    visibleShaderpacks,
+    artifactSearch.shaderpacks,
+    modrinthMap,
+  );
+  const sortedMods = sortArtifactEntries(
+    filteredMods,
+    artifactSort.mods,
+    modrinthMap,
+    (entry) =>
+      disabledArtifactSets.mods.has(entry.filename) || statusMap.get(entry.filename) === "disabled"
+        ? "disabled"
+        : (statusMap.get(entry.filename) ?? "missing"),
+    (entry) =>
+      !(
+        disabledArtifactSets.mods.has(entry.filename) ||
+        statusMap.get(entry.filename) === "disabled"
+      ),
+  );
+  const sortedResourcepacks = sortArtifactEntries(
+    filteredResourcepacks,
+    artifactSort.resourcepacks,
+    modrinthMap,
+    (entry) =>
+      disabledArtifactSets.resourcepacks.has(entry.filename)
+        ? "disabled"
+        : (resourcepackStatusMap.get(entry.filename) ?? "missing"),
+    (entry) => !disabledArtifactSets.resourcepacks.has(entry.filename),
+  );
+  const sortedShaderpacks = sortArtifactEntries(
+    filteredShaderpacks,
+    artifactSort.shaderpacks,
+    modrinthMap,
+    (entry) =>
+      disabledArtifactSets.shaderpacks.has(entry.filename)
+        ? "disabled"
+        : (shaderpackStatusMap.get(entry.filename) ?? "missing"),
+    (entry) => !disabledArtifactSets.shaderpacks.has(entry.filename),
+  );
+  const pagedMods = paginateArtifacts(sortedMods, artifactPage.mods);
+  const pagedResourcepacks = paginateArtifacts(sortedResourcepacks, artifactPage.resourcepacks);
+  const pagedShaderpacks = paginateArtifacts(sortedShaderpacks, artifactPage.shaderpacks);
+  const modPageCount = pageCount(filteredMods.length);
+  const resourcepackPageCount = pageCount(filteredResourcepacks.length);
+  const shaderpackPageCount = pageCount(filteredShaderpacks.length);
+  const disabledOptionalModCount = (manifest.data?.mods ?? []).filter(
+    (entry) =>
+      entry.optional &&
+      (disabledArtifactSets.mods.has(entry.filename) ||
+        statusMap.get(entry.filename) === "disabled"),
+  ).length;
   const launchRiskCount = (statuses.data ?? []).filter(
-    (s) => s.status === "missing" || s.status === "outdated",
+    (s) =>
+      (s.status === "missing" || s.status === "outdated") &&
+      !disabledArtifactSets.mods.has(s.filename),
   ).length;
   const resourcepackRiskCount = manifest.data
     ? manifest.data.resourcepacks.filter(
-        (entry) => resourcepackStatusMap.get(entry.filename) !== "synced",
+        (entry) =>
+          !disabledArtifactSets.resourcepacks.has(entry.filename) &&
+          resourcepackStatusMap.get(entry.filename) !== "synced",
       ).length
     : 0;
   const shaderpackRiskCount = visibleShaderpacks.filter(
-    (entry) => shaderpackStatusMap.get(entry.filename) !== "synced",
+    (entry) =>
+      !disabledArtifactSets.shaderpacks.has(entry.filename) &&
+      shaderpackStatusMap.get(entry.filename) !== "synced",
   ).length;
   const totalLaunchRiskCount = launchRiskCount + resourcepackRiskCount + shaderpackRiskCount;
   const stagedArtifactCount =
@@ -303,6 +429,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     manifest.data?.pack.loader,
   );
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
+  const acceptedModCount = syncedModCount + disabledOptionalModCount;
   const hasLocalArtifactDrift =
     !!manifest.data &&
     !!statuses.data &&
@@ -311,7 +438,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       shaderpackRiskCount > 0 ||
       deletedMods.length > 0 ||
       stagedArtifactCount > 0 ||
-      syncedModCount !== manifest.data.mods.length);
+      acceptedModCount !== manifest.data.mods.length);
   const latestPackCommit = pack.data?.head_sha ?? null;
   const hasSyncedLatestCommit = !!latestPackCommit && lastSyncedCommit === latestPackCommit;
   const needsPackSync = !!latestPackCommit && !hasSyncedLatestCommit;
@@ -349,11 +476,6 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setSelectedJavaChoiceId(javaChoices[0].id);
   }, [javaChoices, selectedJavaChoiceId]);
 
-  const modrinthMap = useModrinthProjects(
-    manifest.data
-      ? [...manifest.data.mods, ...manifest.data.resourcepacks, ...manifest.data.shaderpacks]
-      : [],
-  );
   const activeChangelogEntry = changelog.data?.[activeChangelogIndex] ?? null;
   const progressEntry = progress?.filename
     ? ([
@@ -397,6 +519,41 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
   });
 
+  const toggleArtifactDisabled = useMutation({
+    mutationFn: ({
+      category,
+      filename,
+      disabled,
+    }: {
+      category: ManifestArtifactCategory;
+      filename: string;
+      disabled: boolean;
+    }) => tauri.setInstanceArtifactDisabled(packId, category, filename, disabled, instanceName),
+    onMutate: (variables) => {
+      setPendingArtifactToggles((current) => ({
+        ...current,
+        [artifactToggleKey(variables.category, variables.filename)]: true,
+      }));
+    },
+    onSuccess: async (_, variables) => {
+      setArtifactDisabled(packId, variables.category, variables.filename, variables.disabled);
+      await Promise.all([
+        statuses.refetch(),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error("Artifact toggle failed", { description: formatError(error) });
+    },
+    onSettled: (_data, _error, variables) => {
+      setPendingArtifactToggles((current) => {
+        const next = { ...current };
+        delete next[artifactToggleKey(variables.category, variables.filename)];
+        return next;
+      });
+    },
+  });
+
   const sync = useMutation({
     mutationFn: ({
       syncShaderSettings,
@@ -437,6 +594,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       if (syncHeadSha) {
         setLastSyncedCommit(packId, syncHeadSha);
       }
+      await applyDisabledArtifacts();
       await Promise.all([
         statuses.refetch(),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
@@ -453,6 +611,20 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Sync failed", { description: formatError(e) });
     },
   });
+
+  async function applyDisabledArtifacts() {
+    const categories: ManifestArtifactCategory[] = ["mods", "resourcepacks", "shaderpacks"];
+    const results = await Promise.allSettled(
+      categories.flatMap((category) =>
+        (disabledArtifactsForPack[category] ?? []).map((filename) =>
+          tauri.setInstanceArtifactDisabled(packId, category, filename, true, instanceName),
+        ),
+      ),
+    );
+    if (results.some((result) => result.status === "rejected")) {
+      toast.warning("Some disabled artifacts could not be restored after sync");
+    }
+  }
 
   const launch = useMutation({
     mutationFn: async (profile: LaunchProfile) => {
@@ -715,6 +887,32 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setAddEntryDialogOpen(true);
   }
 
+  function handleArtifactSearch(category: ManifestArtifactCategory, value: string) {
+    setArtifactSearch((current) => ({ ...current, [category]: value }));
+    setArtifactPage((current) => ({ ...current, [category]: 1 }));
+  }
+
+  function handleArtifactPage(category: ManifestArtifactCategory, page: number, total: number) {
+    setArtifactPage((current) => ({
+      ...current,
+      [category]: Math.min(Math.max(page, 1), total),
+    }));
+  }
+
+  function handleArtifactSort(category: ManifestArtifactCategory, key: ArtifactSortKey) {
+    setArtifactSort((current) => {
+      const existing = current[category];
+      return {
+        ...current,
+        [category]: {
+          key,
+          direction: existing.key === key && existing.direction === "asc" ? "desc" : "asc",
+        },
+      };
+    });
+    setArtifactPage((current) => ({ ...current, [category]: 1 }));
+  }
+
   async function handleOpenInstanceFolder() {
     if (!instanceDir.data) return;
     try {
@@ -938,24 +1136,58 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   {deletedMods.length > 0 ? ` · ${deletedMods.length} deleted in instance` : ""}
                 </CardDescription>
               </div>
-              {adminMode ? (
-                <Button variant="outline" onClick={() => handleOpenAddEntry("mods")}>
-                  <Plus /> ADD MODS
-                </Button>
-              ) : null}
+              <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                <ArtifactSearchBox
+                  value={artifactSearch.mods}
+                  placeholder="SEARCH MODS"
+                  onChange={(value) => handleArtifactSearch("mods", value)}
+                />
+                {adminMode ? (
+                  <Button variant="outline" onClick={() => handleOpenAddEntry("mods")}>
+                    <Plus /> ADD MODS
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-[420px]">
+          <CardContent className="space-y-3">
+            <ScrollArea>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
-                    <TableHead>NAME</TableHead>
-                    <TableHead>SOURCE</TableHead>
-                    <TableHead>SIDE</TableHead>
-                    <TableHead>STATUS</TableHead>
-                    <TableHead className="text-right">SIZE</TableHead>
+                    <ArtifactSortableHead
+                      label="NAME"
+                      sortKey="name"
+                      sort={artifactSort.mods}
+                      onSort={() => handleArtifactSort("mods", "name")}
+                    />
+                    <ArtifactSortableHead
+                      label="SOURCE"
+                      sortKey="source"
+                      sort={artifactSort.mods}
+                      onSort={() => handleArtifactSort("mods", "source")}
+                    />
+                    <ArtifactSortableHead
+                      label="SIDE"
+                      sortKey="side"
+                      sort={artifactSort.mods}
+                      onSort={() => handleArtifactSort("mods", "side")}
+                    />
+                    <ArtifactSortableHead
+                      label="STATUS"
+                      sortKey="status"
+                      sort={artifactSort.mods}
+                      align="right"
+                      onSort={() => handleArtifactSort("mods", "status")}
+                    />
+                    <ArtifactSortableHead
+                      label="ENABLED"
+                      sortKey="enabled"
+                      sort={artifactSort.mods}
+                      align="right"
+                      onSort={() => handleArtifactSort("mods", "enabled")}
+                    />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -970,30 +1202,54 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       }
                     />
                   ))}
-                  {manifest.data.mods.map((m) => (
-                    <ModRow
-                      key={m.id}
-                      entry={m}
-                      icon={
-                        m.source === "modrinth" && m.projectId
-                          ? (modrinthMap.get(m.projectId)?.icon_url ?? null)
-                          : null
-                      }
-                      title={
-                        m.source === "modrinth" && m.projectId
-                          ? (modrinthMap.get(m.projectId)?.title ?? null)
-                          : null
-                      }
-                      status={statusMap.get(m.filename) ?? null}
-                      loading={statuses.isLoading || statuses.isFetching}
-                    />
-                  ))}
+                  {pagedMods.map((m) => {
+                    const disabled =
+                      disabledArtifactSets.mods.has(m.filename) ||
+                      statusMap.get(m.filename) === "disabled";
+                    return (
+                      <ModRow
+                        key={m.id}
+                        entry={m}
+                        icon={
+                          m.source === "modrinth" && m.projectId
+                            ? (modrinthMap.get(m.projectId)?.icon_url ?? null)
+                            : null
+                        }
+                        title={
+                          m.source === "modrinth" && m.projectId
+                            ? (modrinthMap.get(m.projectId)?.title ?? null)
+                            : null
+                        }
+                        status={statusMap.get(m.filename) ?? null}
+                        loading={statuses.isLoading || statuses.isFetching}
+                        disabled={disabled}
+                        canDisable={m.optional}
+                        togglingDisabled={
+                          !!pendingArtifactToggles[artifactToggleKey("mods", m.filename)]
+                        }
+                        onToggleDisabled={(nextDisabled) =>
+                          toggleArtifactDisabled.mutate({
+                            category: "mods",
+                            filename: m.filename,
+                            disabled: nextDisabled,
+                          })
+                        }
+                      />
+                    );
+                  })}
                   {deletedMods.map((m) => (
                     <DeletedModRow key={`deleted:${m.filename}`} mod={m} />
                   ))}
                 </TableBody>
               </Table>
             </ScrollArea>
+            <ArtifactPager
+              page={artifactPage.mods}
+              totalPages={modPageCount}
+              totalItems={filteredMods.length}
+              onPrevious={() => handleArtifactPage("mods", artifactPage.mods - 1, modPageCount)}
+              onNext={() => handleArtifactPage("mods", artifactPage.mods + 1, modPageCount)}
+            />
           </CardContent>
         </Card>
       )}
@@ -1013,24 +1269,58 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                     : ""}
                 </CardDescription>
               </div>
-              {adminMode ? (
-                <Button variant="outline" onClick={() => handleOpenAddEntry("resourcepacks")}>
-                  <Plus /> ADD RESOURCEPACK
-                </Button>
-              ) : null}
+              <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                <ArtifactSearchBox
+                  value={artifactSearch.resourcepacks}
+                  placeholder="SEARCH RESOURCEPACKS"
+                  onChange={(value) => handleArtifactSearch("resourcepacks", value)}
+                />
+                {adminMode ? (
+                  <Button variant="outline" onClick={() => handleOpenAddEntry("resourcepacks")}>
+                    <Plus /> ADD RESOURCEPACK
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-[320px]">
+          <CardContent className="space-y-3">
+            <ScrollArea>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
-                    <TableHead>NAME</TableHead>
-                    <TableHead>SOURCE</TableHead>
-                    <TableHead>SIDE</TableHead>
-                    <TableHead>STATUS</TableHead>
-                    <TableHead className="text-right">SIZE</TableHead>
+                    <ArtifactSortableHead
+                      label="NAME"
+                      sortKey="name"
+                      sort={artifactSort.resourcepacks}
+                      onSort={() => handleArtifactSort("resourcepacks", "name")}
+                    />
+                    <ArtifactSortableHead
+                      label="SOURCE"
+                      sortKey="source"
+                      sort={artifactSort.resourcepacks}
+                      onSort={() => handleArtifactSort("resourcepacks", "source")}
+                    />
+                    <ArtifactSortableHead
+                      label="SIDE"
+                      sortKey="side"
+                      sort={artifactSort.resourcepacks}
+                      onSort={() => handleArtifactSort("resourcepacks", "side")}
+                    />
+                    <ArtifactSortableHead
+                      label="STATUS"
+                      sortKey="status"
+                      sort={artifactSort.resourcepacks}
+                      align="right"
+                      onSort={() => handleArtifactSort("resourcepacks", "status")}
+                    />
+                    <ArtifactSortableHead
+                      label="ENABLED"
+                      sortKey="enabled"
+                      sort={artifactSort.resourcepacks}
+                      align="right"
+                      onSort={() => handleArtifactSort("resourcepacks", "enabled")}
+                    />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1048,27 +1338,63 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       }
                     />
                   ))}
-                  {manifest.data.resourcepacks.map((entry) => (
-                    <ModRow
-                      key={entry.id}
-                      entry={entry}
-                      icon={
-                        entry.source === "modrinth" && entry.projectId
-                          ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
-                          : null
-                      }
-                      title={
-                        entry.source === "modrinth" && entry.projectId
-                          ? (modrinthMap.get(entry.projectId)?.title ?? null)
-                          : null
-                      }
-                      status={resourcepackStatusMap.get(entry.filename) ?? null}
-                      loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
-                    />
-                  ))}
+                  {pagedResourcepacks.map((entry) => {
+                    const disabled = disabledArtifactSets.resourcepacks.has(entry.filename);
+                    return (
+                      <ModRow
+                        key={entry.id}
+                        entry={entry}
+                        icon={
+                          entry.source === "modrinth" && entry.projectId
+                            ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
+                            : null
+                        }
+                        title={
+                          entry.source === "modrinth" && entry.projectId
+                            ? (modrinthMap.get(entry.projectId)?.title ?? null)
+                            : null
+                        }
+                        status={resourcepackStatusMap.get(entry.filename) ?? null}
+                        loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
+                        disabled={disabled}
+                        canDisable
+                        togglingDisabled={
+                          !!pendingArtifactToggles[
+                            artifactToggleKey("resourcepacks", entry.filename)
+                          ]
+                        }
+                        onToggleDisabled={(nextDisabled) =>
+                          toggleArtifactDisabled.mutate({
+                            category: "resourcepacks",
+                            filename: entry.filename,
+                            disabled: nextDisabled,
+                          })
+                        }
+                      />
+                    );
+                  })}
                 </TableBody>
               </Table>
             </ScrollArea>
+            <ArtifactPager
+              page={artifactPage.resourcepacks}
+              totalPages={resourcepackPageCount}
+              totalItems={filteredResourcepacks.length}
+              onPrevious={() =>
+                handleArtifactPage(
+                  "resourcepacks",
+                  artifactPage.resourcepacks - 1,
+                  resourcepackPageCount,
+                )
+              }
+              onNext={() =>
+                handleArtifactPage(
+                  "resourcepacks",
+                  artifactPage.resourcepacks + 1,
+                  resourcepackPageCount,
+                )
+              }
+            />
           </CardContent>
         </Card>
       )}
@@ -1088,24 +1414,58 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                     : ""}
                 </CardDescription>
               </div>
-              {adminMode ? (
-                <Button variant="outline" onClick={() => handleOpenAddEntry("shaderpacks")}>
-                  <Plus /> ADD SHADERPACK
-                </Button>
-              ) : null}
+              <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+                <ArtifactSearchBox
+                  value={artifactSearch.shaderpacks}
+                  placeholder="SEARCH SHADERPACKS"
+                  onChange={(value) => handleArtifactSearch("shaderpacks", value)}
+                />
+                {adminMode ? (
+                  <Button variant="outline" onClick={() => handleOpenAddEntry("shaderpacks")}>
+                    <Plus /> ADD SHADERPACK
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <ScrollArea className="max-h-[320px]">
+          <CardContent className="space-y-3">
+            <ScrollArea>
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
-                    <TableHead>NAME</TableHead>
-                    <TableHead>SOURCE</TableHead>
-                    <TableHead>SIDE</TableHead>
-                    <TableHead>STATUS</TableHead>
-                    <TableHead className="text-right">SIZE</TableHead>
+                    <ArtifactSortableHead
+                      label="NAME"
+                      sortKey="name"
+                      sort={artifactSort.shaderpacks}
+                      onSort={() => handleArtifactSort("shaderpacks", "name")}
+                    />
+                    <ArtifactSortableHead
+                      label="SOURCE"
+                      sortKey="source"
+                      sort={artifactSort.shaderpacks}
+                      onSort={() => handleArtifactSort("shaderpacks", "source")}
+                    />
+                    <ArtifactSortableHead
+                      label="SIDE"
+                      sortKey="side"
+                      sort={artifactSort.shaderpacks}
+                      onSort={() => handleArtifactSort("shaderpacks", "side")}
+                    />
+                    <ArtifactSortableHead
+                      label="STATUS"
+                      sortKey="status"
+                      sort={artifactSort.shaderpacks}
+                      align="right"
+                      onSort={() => handleArtifactSort("shaderpacks", "status")}
+                    />
+                    <ArtifactSortableHead
+                      label="ENABLED"
+                      sortKey="enabled"
+                      sort={artifactSort.shaderpacks}
+                      align="right"
+                      onSort={() => handleArtifactSort("shaderpacks", "enabled")}
+                    />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1123,27 +1483,53 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                       }
                     />
                   ))}
-                  {visibleShaderpacks.map((entry) => (
-                    <ModRow
-                      key={entry.id}
-                      entry={entry}
-                      icon={
-                        entry.source === "modrinth" && entry.projectId
-                          ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
-                          : null
-                      }
-                      title={
-                        entry.source === "modrinth" && entry.projectId
-                          ? (modrinthMap.get(entry.projectId)?.title ?? null)
-                          : null
-                      }
-                      status={shaderpackStatusMap.get(entry.filename) ?? null}
-                      loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
-                    />
-                  ))}
+                  {pagedShaderpacks.map((entry) => {
+                    const disabled = disabledArtifactSets.shaderpacks.has(entry.filename);
+                    return (
+                      <ModRow
+                        key={entry.id}
+                        entry={entry}
+                        icon={
+                          entry.source === "modrinth" && entry.projectId
+                            ? (modrinthMap.get(entry.projectId)?.icon_url ?? null)
+                            : null
+                        }
+                        title={
+                          entry.source === "modrinth" && entry.projectId
+                            ? (modrinthMap.get(entry.projectId)?.title ?? null)
+                            : null
+                        }
+                        status={shaderpackStatusMap.get(entry.filename) ?? null}
+                        loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
+                        disabled={disabled}
+                        canDisable
+                        togglingDisabled={
+                          !!pendingArtifactToggles[artifactToggleKey("shaderpacks", entry.filename)]
+                        }
+                        onToggleDisabled={(nextDisabled) =>
+                          toggleArtifactDisabled.mutate({
+                            category: "shaderpacks",
+                            filename: entry.filename,
+                            disabled: nextDisabled,
+                          })
+                        }
+                      />
+                    );
+                  })}
                 </TableBody>
               </Table>
             </ScrollArea>
+            <ArtifactPager
+              page={artifactPage.shaderpacks}
+              totalPages={shaderpackPageCount}
+              totalItems={filteredShaderpacks.length}
+              onPrevious={() =>
+                handleArtifactPage("shaderpacks", artifactPage.shaderpacks - 1, shaderpackPageCount)
+              }
+              onNext={() =>
+                handleArtifactPage("shaderpacks", artifactPage.shaderpacks + 1, shaderpackPageCount)
+              }
+            />
           </CardContent>
         </Card>
       )}
@@ -1504,4 +1890,176 @@ function hasTrackedOptionsPreset(report: PublishScanReport | null | undefined) {
   return (report?.items ?? []).some(
     (item) => item.category === "root" && item.relativePath === "options.txt",
   );
+}
+
+function ArtifactSearchBox({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-text-low" />
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="h-9 pl-9 text-xs"
+      />
+    </div>
+  );
+}
+
+function ArtifactPager({
+  page,
+  totalPages,
+  totalItems,
+  onPrevious,
+  onNext,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <Pagination className="justify-between">
+      <PaginationInfo>{totalItems} SHOWN BY FILTER</PaginationInfo>
+      <PaginationControls>
+        <PaginationPrevious onClick={onPrevious} disabled={page <= 1} />
+        <PaginationIndicator page={page} total={totalPages} />
+        <PaginationNext onClick={onNext} disabled={page >= totalPages} />
+      </PaginationControls>
+    </Pagination>
+  );
+}
+
+function ArtifactSortableHead({
+  label,
+  sortKey,
+  sort,
+  align = "left",
+  onSort,
+}: {
+  label: string;
+  sortKey: ArtifactSortKey;
+  sort: ArtifactSort;
+  align?: "left" | "right";
+  onSort: () => void;
+}) {
+  const active = sort.key === sortKey;
+  const SortIcon = active ? (sort.direction === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <TableHead className={cn(align === "right" && "text-right")}>
+      <button
+        type="button"
+        onClick={onSort}
+        className={cn(
+          "inline-flex w-full items-center gap-1 text-[10px] uppercase tracking-[0.18em] transition-colors hover:text-text-high",
+          align === "right" ? "justify-end" : "justify-start",
+          active ? "text-brand-core" : "text-text-low",
+        )}
+      >
+        <span>{label}</span>
+        <span className="inline-flex size-3.5 shrink-0 items-center justify-center">
+          <SortIcon className="size-3" />
+        </span>
+      </button>
+    </TableHead>
+  );
+}
+
+function filterArtifactEntries(
+  entries: ManifestEntry[],
+  query: string,
+  modrinthMap: Map<string, { title?: string | null }>,
+) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter((entry) => {
+    const title =
+      entry.source === "modrinth" && entry.projectId
+        ? (modrinthMap.get(entry.projectId)?.title ?? "")
+        : "";
+    return [title, entryDisplayName(entry.filename), entry.id, entry.source, entry.side]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
+}
+
+function sortArtifactEntries(
+  entries: ManifestEntry[],
+  sort: ArtifactSort,
+  modrinthMap: Map<string, { title?: string | null }>,
+  getStatus: (entry: ManifestEntry) => ModStatusValue,
+  getEnabled: (entry: ManifestEntry) => boolean,
+) {
+  return [...entries].sort((left, right) => {
+    const leftName = artifactSortName(left, modrinthMap);
+    const rightName = artifactSortName(right, modrinthMap);
+    const nameResult = leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+    let result = nameResult;
+    if (sort.key === "source") {
+      result = left.source.localeCompare(right.source, undefined, { sensitivity: "base" });
+    } else if (sort.key === "side") {
+      result = artifactSideRank(left.side) - artifactSideRank(right.side);
+    } else if (sort.key === "status") {
+      result = artifactStatusRank(getStatus(left)) - artifactStatusRank(getStatus(right));
+    } else if (sort.key === "enabled") {
+      result = Number(getEnabled(right)) - Number(getEnabled(left));
+    }
+    result ||= nameResult;
+    return sort.direction === "asc" ? result : -result;
+  });
+}
+
+function artifactSortName(
+  entry: ManifestEntry,
+  modrinthMap: Map<string, { title?: string | null }>,
+) {
+  return (
+    (entry.source === "modrinth" && entry.projectId
+      ? modrinthMap.get(entry.projectId)?.title
+      : null) ?? entryDisplayName(entry.filename)
+  ).toLowerCase();
+}
+
+function artifactStatusRank(status: ModStatusValue) {
+  const order: Record<ModStatusValue, number> = {
+    synced: 0,
+    outdated: 1,
+    missing: 2,
+    disabled: 3,
+    deleted: 4,
+    unpublished: 5,
+  };
+  return order[status];
+}
+
+function artifactSideRank(side: ManifestEntry["side"]) {
+  const order: Record<ManifestEntry["side"], number> = {
+    both: 0,
+    client: 1,
+    server: 2,
+  };
+  return order[side];
+}
+
+function paginateArtifacts(entries: ManifestEntry[], page: number) {
+  const start = (Math.max(page, 1) - 1) * ARTIFACT_PAGE_SIZE;
+  return entries.slice(start, start + ARTIFACT_PAGE_SIZE);
+}
+
+function pageCount(totalItems: number) {
+  return Math.max(1, Math.ceil(totalItems / ARTIFACT_PAGE_SIZE));
+}
+
+function artifactToggleKey(category: ManifestArtifactCategory, filename: string) {
+  return `${category}:${filename}`;
 }

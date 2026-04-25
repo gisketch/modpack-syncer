@@ -195,6 +195,11 @@ const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: st
     dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
     text: "text-signal-warn",
   },
+  disabled: {
+    label: "DISABLED",
+    dot: "bg-text-low",
+    text: "text-text-low",
+  },
 };
 
 function StatusChip({

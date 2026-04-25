@@ -101,6 +101,30 @@ pub async fn scan_instance_publish(
 }
 
 #[tauri::command]
+pub async fn set_manifest_mod_optional(
+    pack_id: String,
+    filename: String,
+    optional: bool,
+) -> Result<manifest::Entry, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let entry = manifest
+            .mods
+            .iter_mut()
+            .find(|entry| entry.filename == filename)
+            .ok_or_else(|| CommandError::Manifest(format!("mod not found: {filename}")))?;
+        entry.optional = optional;
+        let updated = entry.clone();
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(anyhow::Error::from)?;
+        std::fs::write(&manifest_path, manifest_bytes)?;
+        Ok(updated)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
 pub async fn commit_and_push_publish(
     pack_id: String,
     message: String,
@@ -482,6 +506,9 @@ fn scan_artifact_dir(
         {
             continue;
         }
+        if disabled_artifact_path(instance_dir, &entry.filename).exists() {
+            continue;
+        }
         if !seen.contains(&entry.filename) {
             out.push(PublishScanItem {
                 category: category.clone(),
@@ -686,7 +713,7 @@ fn list_regular_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>,
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| !name.starts_with('.'))
+                .is_some_and(|name| !name.starts_with('.') && !is_disabled_artifact_filename(name))
         {
             out.push(path);
         }
@@ -715,7 +742,7 @@ fn collect_relative_regular_files(
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name.starts_with('.') {
+        if name.starts_with('.') || is_disabled_artifact_filename(&name) {
             continue;
         }
         if path.is_dir() {
@@ -740,6 +767,14 @@ fn source_label(source: manifest::Source) -> String {
         manifest::Source::Repo => "repo",
     }
     .to_string()
+}
+
+fn is_disabled_artifact_filename(filename: &str) -> bool {
+    filename.ends_with(".disabled")
+}
+
+fn disabled_artifact_path(instance_dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    instance_dir.join(format!("{filename}.disabled"))
 }
 
 fn read_publish_auth_settings() -> Result<PublishAuthSettings, CommandError> {
@@ -904,6 +939,10 @@ fn apply_artifact_dir(
 
     for entry in existing_by_filename.into_values() {
         if ignore_matcher.is_ignored_for_repo_prefix(repo_prefix, &entry.filename) {
+            next_entries.push(entry);
+            continue;
+        }
+        if disabled_artifact_path(instance_dir, &entry.filename).exists() {
             next_entries.push(entry);
             continue;
         }

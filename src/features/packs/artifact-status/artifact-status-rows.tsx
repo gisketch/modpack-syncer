@@ -1,7 +1,9 @@
 import { AlertTriangle, Globe, Loader2, Package, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { TableCell, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ManifestEntry, ModStatus, ModStatusValue, PublishScanReport } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
@@ -21,18 +23,39 @@ export function ModRow({
   title,
   status,
   loading,
+  disabled = false,
+  canDisable = false,
+  togglingDisabled = false,
+  onToggleDisabled,
 }: {
   entry: ManifestEntry;
   icon: string | null;
   title: string | null;
   status: ModStatusValue | null;
   loading: boolean;
+  disabled?: boolean;
+  canDisable?: boolean;
+  togglingDisabled?: boolean;
+  onToggleDisabled?: (disabled: boolean) => void;
 }) {
   const displayName = title ?? entryDisplayName(entry.filename);
+  const enabled = !disabled;
+  const toggleEnabled = () => {
+    if (!canDisable || togglingDisabled) return;
+    onToggleDisabled?.(enabled);
+  };
+  const enabledControl = (
+    <Checkbox
+      checked={enabled}
+      disabled={!canDisable || togglingDisabled}
+      aria-label={`Enabled ${entry.filename}`}
+      className={cn("pointer-events-none", !canDisable && "opacity-45")}
+    />
+  );
   return (
-    <TableRow>
-      <TableCell>
-        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
+    <TableRow className={cn("h-9", disabled && "opacity-45")}>
+      <TableCell className="py-1.5">
+        <div className="flex size-7 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
           {icon ? (
             <img src={icon} alt="" className="size-full object-cover" loading="lazy" />
           ) : (
@@ -40,24 +63,59 @@ export function ModRow({
           )}
         </div>
       </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-text-high text-xs">{displayName}</span>
-          <span className="font-mono text-[10px] text-text-low">{entry.filename}</span>
-        </div>
+      <TableCell className="py-1.5">
+        <span
+          className={cn(
+            "block max-w-[22rem] truncate text-xs",
+            disabled ? "text-text-low line-through" : "text-text-high",
+          )}
+          title={entry.filename}
+        >
+          {displayName}
+        </span>
       </TableCell>
-      <TableCell>
+      <TableCell className="py-1.5">
         <Badge variant="outline">
           {entry.source === "url" ? <Globe className="size-3" /> : null}
           {entry.source.toUpperCase()}
         </Badge>
       </TableCell>
-      <TableCell className="text-text-low text-xs uppercase">{entry.side}</TableCell>
-      <TableCell>
-        <StatusChip status={status} loading={loading && status === null} />
+      <TableCell className="py-1.5 text-text-low text-xs uppercase">{entry.side}</TableCell>
+      <TableCell className="py-1.5 text-right">
+        <StatusChip status={disabled ? "disabled" : status} loading={loading && status === null} />
       </TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
-        {formatBytes(entry.size)}
+      <TableCell
+        className={cn(
+          "py-1.5 text-center",
+          canDisable && !togglingDisabled ? "cursor-pointer" : "cursor-not-allowed",
+        )}
+        role={canDisable ? "button" : undefined}
+        tabIndex={canDisable && !togglingDisabled ? 0 : -1}
+        onClick={toggleEnabled}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && canDisable && !togglingDisabled) {
+            event.preventDefault();
+            toggleEnabled();
+          }
+        }}
+      >
+        <div className="flex items-center justify-center">
+          {togglingDisabled && canDisable ? (
+            <Loader2 className="mr-2 size-3 animate-spin text-text-low" />
+          ) : null}
+          {!canDisable ? (
+            <TooltipProvider delay={0}>
+              <Tooltip>
+                <TooltipTrigger render={<span className="inline-flex" />}>
+                  {enabledControl}
+                </TooltipTrigger>
+                <TooltipContent>CANT DISABLE REQUIRED MOD</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            enabledControl
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -66,28 +124,28 @@ export function ModRow({
 export function DeletedModRow({ mod }: { mod: ModStatus }) {
   const displayName = entryDisplayName(mod.filename);
   return (
-    <TableRow className="opacity-45">
-      <TableCell>
-        <div className="flex size-8 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
+    <TableRow className="h-9 opacity-45">
+      <TableCell className="py-1.5">
+        <div className="flex size-7 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
           <Package className="size-4 text-text-low" />
         </div>
       </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-text-low text-xs line-through">{displayName}</span>
-          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
-        </div>
+      <TableCell className="py-1.5">
+        <span
+          className="block max-w-[22rem] truncate text-text-low text-xs line-through"
+          title={mod.filename}
+        >
+          {displayName}
+        </span>
       </TableCell>
       <TableCell>
         <Badge variant="outline">REMOVED</Badge>
       </TableCell>
       <TableCell className="text-text-low text-xs uppercase">--</TableCell>
-      <TableCell>
+      <TableCell className="text-right">
         <StatusChip status="deleted" />
       </TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
-        {typeof mod.size === "number" ? formatBytes(mod.size) : "--"}
-      </TableCell>
+      <TableCell className="text-right text-text-low text-xs">--</TableCell>
     </TableRow>
   );
 }
@@ -106,11 +164,11 @@ export function UnpublishedModRow({
   const displayName = entryDisplayName(mod.filename);
   const warningMode = !adminMode;
   return (
-    <TableRow className={cn(warningMode ? "bg-signal-alert/8" : "bg-signal-warn/6")}>
-      <TableCell>
+    <TableRow className={cn("h-9", warningMode ? "bg-signal-alert/8" : "bg-signal-warn/6")}>
+      <TableCell className="py-1.5">
         <div
           className={cn(
-            "flex size-8 items-center justify-center overflow-hidden rounded bg-surface-base",
+            "flex size-7 items-center justify-center overflow-hidden rounded bg-surface-base",
             warningMode ? "border border-signal-alert/40" : "border border-signal-warn/40",
           )}
         >
@@ -121,22 +179,26 @@ export function UnpublishedModRow({
           )}
         </div>
       </TableCell>
-      <TableCell>
-        <div className="flex flex-col gap-0.5">
-          <span className={cn("text-xs", warningMode ? "text-signal-alert" : "text-text-high")}>
-            {displayName}
-          </span>
-          <span className="font-mono text-[10px] text-text-low">{mod.filename}</span>
-        </div>
+      <TableCell className="py-1.5">
+        <span
+          className={cn(
+            "block max-w-[22rem] truncate text-xs",
+            warningMode ? "text-signal-alert" : "text-text-high",
+          )}
+          title={mod.filename}
+        >
+          {displayName}
+        </span>
       </TableCell>
       <TableCell>
         <Badge variant="outline">{warningMode ? "WARNING" : "INSTANCE"}</Badge>
       </TableCell>
       <TableCell className="text-text-low text-xs uppercase">local</TableCell>
-      <TableCell>{warningMode ? <StrayModChip /> : <StatusChip status="unpublished" />}</TableCell>
-      <TableCell className="text-right font-mono text-text-low text-xs">
+      <TableCell className="text-right">
+        {warningMode ? <StrayModChip /> : <StatusChip status="unpublished" />}
+      </TableCell>
+      <TableCell className="text-right text-text-low text-xs">
         <div className="flex items-center justify-end gap-2">
-          <span>{typeof mod.size === "number" ? formatBytes(mod.size) : "--"}</span>
           <Button size="sm" variant="outline" onClick={onDelete} disabled={deleting}>
             {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
             DELETE
@@ -181,6 +243,11 @@ const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: st
     label: "UNPUBLISHED",
     dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",
     text: "text-signal-warn",
+  },
+  disabled: {
+    label: "DISABLED",
+    dot: "bg-text-low",
+    text: "text-text-low",
   },
 };
 

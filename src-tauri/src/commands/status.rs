@@ -85,6 +85,7 @@ pub async fn mod_statuses(
                 None => "missing",
                 Some(dir) => {
                     let path = dir.join(&entry.filename);
+                    let disabled_path = dir.join(format!("{}.disabled", entry.filename));
                     if path.exists() {
                         match std::fs::read(&path) {
                             Ok(bytes) => {
@@ -97,6 +98,8 @@ pub async fn mod_statuses(
                             }
                             Err(_) => "missing",
                         }
+                    } else if disabled_path.exists() && entry.optional {
+                        "disabled"
                     } else if let Some(previous) = previous_by_id.get(entry.id.as_str()) {
                         if dir.join(&previous.filename).exists() {
                             "outdated"
@@ -134,6 +137,7 @@ pub async fn mod_statuses(
                     .to_string();
 
                 if manifest_filenames.contains(&filename)
+                    || filename.ends_with(".disabled")
                     || updated_old_filenames.contains(&filename)
                     || !seen_extra_filenames.insert(filename.clone())
                 {

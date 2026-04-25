@@ -12,6 +12,15 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 6. The app MUST NOT collect Microsoft credentials. Microsoft authentication remains Prism's responsibility whenever offline launch is not being used.
 7. Launch MUST execute the resolved Prism binary with `--launch <instanceName>`. If a saved Prism data-dir override exists, launch MUST also pass `--dir <dataDir>`. The app does not wait for Prism to exit after spawn.
 8. If the current pack head differs from the last synced commit, launching from pack detail MUST show a sync-first gate with `SYNC NOW` and `CONTINUE ANYWAY` choices.
+9. Pack detail artifact lists MUST support local user-side disabling by renaming instance artifacts with a `.disabled` suffix. Mods MAY only be disabled when their manifest entry is optional; resourcepacks and shaderpacks MAY be disabled by filename.
+
+## UI Requirements
+
+1. Pack detail artifact lists for mods, resourcepacks, and shaderpacks MUST be compact, searchable, and paginated to 15 manifest entries per page.
+2. Artifact list rows MUST display clean artifact names without a second filename line; the full filename MAY remain available as hover/title text.
+3. Artifact list rows MUST align status on the right and expose an `ENABLED` checkbox; checked means the instance artifact is active, unchecked means it is renamed with `.disabled`.
+4. Disabled artifact rows MUST be visually muted and struck through. Non-optional mods MUST show a disabled checked `ENABLED` control.
+5. Pack detail artifact table data headers MUST sort their table when clicked and MUST show fixed-size direction icons without changing header layout.
 
 ## See
 

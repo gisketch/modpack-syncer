@@ -1,8 +1,8 @@
 use serde::Serialize;
 use tauri::Emitter;
 
-use super::CommandError;
-use crate::prism;
+use super::{CommandError, ManifestArtifactCategory};
+use crate::{manifest, paths, prism};
 
 pub type LaunchProfile = prism::LaunchProfile;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
@@ -171,6 +171,79 @@ pub async fn launch_pack(
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_instance_artifact_disabled(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    filename: String,
+    disabled: bool,
+    instance_name: Option<String>,
+) -> Result<(), CommandError> {
+    tokio::task::spawn_blocking(move || {
+        set_instance_artifact_disabled_blocking(
+            &pack_id,
+            category,
+            &filename,
+            disabled,
+            instance_name,
+        )
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+fn set_instance_artifact_disabled_blocking(
+    pack_id: &str,
+    category: ManifestArtifactCategory,
+    filename: &str,
+    disabled: bool,
+    instance_name: Option<String>,
+) -> Result<(), CommandError> {
+    if filename.contains('/') || filename.contains('\\') || filename.trim().is_empty() {
+        return Err(CommandError::Other("invalid artifact filename".to_string()));
+    }
+
+    let pack_dir = paths::packs_dir()?.join(pack_id);
+    let manifest = manifest::load_from_path(&pack_dir.join("manifest.json"))?;
+    let entries = match category {
+        ManifestArtifactCategory::Mods => &manifest.mods,
+        ManifestArtifactCategory::Resourcepacks => &manifest.resourcepacks,
+        ManifestArtifactCategory::Shaderpacks => &manifest.shaderpacks,
+    };
+    let entry = entries
+        .iter()
+        .find(|entry| entry.filename == filename)
+        .ok_or_else(|| CommandError::Manifest(format!("artifact not found: {filename}")))?;
+
+    if category == ManifestArtifactCategory::Mods && !entry.optional {
+        return Err(CommandError::Other(
+            "only optional mods can be disabled".to_string(),
+        ));
+    }
+
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let minecraft_dir = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let artifact_dir = match category {
+        ManifestArtifactCategory::Mods => minecraft_dir.join("mods"),
+        ManifestArtifactCategory::Resourcepacks => minecraft_dir.join("resourcepacks"),
+        ManifestArtifactCategory::Shaderpacks => minecraft_dir.join("shaderpacks"),
+    };
+    std::fs::create_dir_all(&artifact_dir)?;
+    let enabled_path = artifact_dir.join(filename);
+    let disabled_path = artifact_dir.join(format!("{filename}.disabled"));
+
+    if disabled {
+        if enabled_path.exists() {
+            std::fs::rename(enabled_path, disabled_path)?;
+        }
+    } else if disabled_path.exists() {
+        std::fs::rename(disabled_path, enabled_path)?;
+    }
+
     Ok(())
 }
 

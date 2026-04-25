@@ -333,6 +333,8 @@ export const tauri = {
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
+  setManifestModOptional: (packId: string, filename: string, optional: boolean) =>
+    invoke<ManifestEntry>("set_manifest_mod_optional", { packId, filename, optional }),
   getPublishAuthSettings: () => invoke<PublishAuthSettings>("get_publish_auth_settings"),
   setPublishAuthMethod: (method?: string | null) =>
     invoke<PublishAuthSettings>("set_publish_auth_method", { method }),
@@ -374,6 +376,20 @@ export const tauri = {
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
   launchPack: (packId: string, instanceName?: string) =>
     invoke<void>("launch_pack", { packId, instanceName }),
+  setInstanceArtifactDisabled: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    filename: string,
+    disabled: boolean,
+    instanceName?: string,
+  ) =>
+    invoke<void>("set_instance_artifact_disabled", {
+      packId,
+      category,
+      filename,
+      disabled,
+      instanceName,
+    }),
   getInstanceMinecraftDir: (instanceName: string) =>
     invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
   packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>
@@ -430,7 +446,13 @@ export const tauri = {
     invoke<PublishPushReport>("commit_and_push_publish", { packId, message, ignorePatterns }),
 };
 
-export type ModStatusValue = "synced" | "outdated" | "missing" | "deleted" | "unpublished";
+export type ModStatusValue =
+  | "synced"
+  | "outdated"
+  | "missing"
+  | "deleted"
+  | "unpublished"
+  | "disabled";
 export type ModStatus = {
   id?: string | null;
   filename: string;

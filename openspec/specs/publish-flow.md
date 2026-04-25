@@ -16,6 +16,10 @@ Authoring and pack-publish behavior exposed by the app today.
 10. Unpublished local status rows MUST include staged local mods, resourcepacks, and shaderpacks before publish commits them into the manifest.
 11. Admin publish preview MUST support app-local ignore patterns per pack. Ignored files MUST be omitted from publish scan output and MUST NOT be copied, removed, committed, or written into `manifest.json` during apply publish.
 12. Apply publish MUST repair repo-backed shaderpack manifest SHA/size when preserving a same-name shaderpack entry, using an existing valid repo zip or copying the same-name instance zip if the repo copy is empty or invalid.
+13. Publish preview artifact tabs for mods, resourcepacks, and shaderpacks MUST use compact searchable paginated lists consistent with pack detail artifact lists.
+14. Publish preview mod rows MUST allow admins to mark existing manifest mods optional or required. This control MUST update the mod entry's `optional` field in `manifest.json`.
+15. Publish preview MUST provide a show-all-mods mode so unchanged manifest mods can be displayed and edited for optional status.
+16. Publish scan and apply publish MUST ignore local files ending with `.disabled`.
 
 ## See
 
