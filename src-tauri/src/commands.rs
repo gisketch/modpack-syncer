@@ -27,6 +27,8 @@ pub enum CommandError {
     Other(String),
 }
 
+pub(crate) mod app_settings;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PublishCategory {

@@ -29,6 +29,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             greet,
+            commands::app_settings::get_install_directory,
+            commands::app_settings::set_install_directory,
             commands::packs::add_pack,
             commands::packs::list_packs,
             commands::packs::update_pack,

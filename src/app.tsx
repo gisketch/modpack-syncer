@@ -40,19 +40,47 @@ export function App() {
 }
 
 function RootGate() {
-  const packs = useQuery({
-    queryKey: ["packs"],
-    queryFn: () => tauri.listPacks(),
+  const installDirectory = useQuery({
+    queryKey: ["install-directory"],
+    queryFn: () => tauri.getInstallDirectory(),
+    retry: false,
   });
+  const managedJava = useQuery({
+    queryKey: ["managed-java", 21],
+    queryFn: () => tauri.hasManagedJava(21),
+    retry: false,
+  });
+  const prism = useQuery({
+    queryKey: ["prism"],
+    queryFn: () => tauri.detectPrism(),
+    retry: false,
+  });
+  const prismSettings = useQuery({
+    queryKey: ["prism-settings"],
+    queryFn: () => tauri.getPrismSettings(),
+    retry: false,
+  });
+  const loading =
+    installDirectory.isLoading ||
+    managedJava.isLoading ||
+    prism.isLoading ||
+    prismSettings.isLoading;
+  const setupReady =
+    !!installDirectory.data?.defaultDir &&
+    !!managedJava.data &&
+    !!prism.data &&
+    !!prismSettings.data?.binaryPath &&
+    !!prismSettings.data?.dataDir &&
+    !!prismSettings.data?.offlineUsername?.trim();
 
-  if (packs.isLoading) {
+  if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center text-[--text-low]">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     );
   }
-  if (!packs.data || packs.data.length === 0) {
+  if (!setupReady) {
     return (
       <main className="flex-1 overflow-auto">
         <OnboardingRoute />

@@ -233,6 +233,11 @@ export type PrismSettings = {
   offlineUsername?: string | null;
 };
 
+export type InstallDirectorySettings = {
+  defaultDir?: string | null;
+  effectiveDir: string;
+};
+
 export type PrismAccountStatus = {
   state: string;
   displayName?: string | null;
@@ -321,6 +326,9 @@ export type PrismInstallProgressEvent = {
  */
 export const tauri = {
   greet: (name: string) => invoke<string>("greet", { name }),
+  getInstallDirectory: () => invoke<InstallDirectorySettings>("get_install_directory"),
+  setInstallDirectory: (defaultDir?: string | null) =>
+    invoke<InstallDirectorySettings>("set_install_directory", { defaultDir }),
   addPack: (url: string) => invoke<PackSummary>("add_pack", { url }),
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
