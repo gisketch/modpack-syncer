@@ -73,7 +73,7 @@ function DialogContent({
             "fixed top-1/2 left-1/2 z-50 w-full max-w-[calc(100%-2rem)] sm:max-w-lg",
             "bg-surface-panel-strong border border-line-soft/25 border-t-2 clip-diagonal-btn-secondary scanlines-overlay",
             "font-body text-sm text-text-high outline-none",
-            "dialog-pop-animate",
+            "dialog-pop-animate dialog-stagger-children",
             variantTopBorder[variant],
             variantShadow[variant],
             className,

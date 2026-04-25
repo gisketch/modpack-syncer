@@ -1,6 +1,9 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Loader2, Package, Settings } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import { useRef } from "react";
 import { TitleBar } from "@/components/title-bar";
+import { AnimatedPage } from "@/components/ui/motion";
 import {
   Sidebar,
   SidebarContent,
@@ -83,7 +86,9 @@ function RootGate() {
   if (!setupReady) {
     return (
       <main className="flex-1 overflow-auto">
-        <OnboardingRoute />
+        <AnimatedPage>
+          <OnboardingRoute />
+        </AnimatedPage>
       </main>
     );
   }
@@ -100,6 +105,18 @@ function Shell() {
   });
 
   const onPacks = view.kind === "packs" || view.kind === "pack";
+  const routeKey = view.kind === "pack" ? `pack:${view.id}` : view.kind;
+  const initialRouteKey = useRef(routeKey);
+  const route =
+    view.kind === "packs" ? (
+      <HomeRoute />
+    ) : view.kind === "pack" ? (
+      <PackDetailRoute packId={view.id} />
+    ) : view.kind === "settings" ? (
+      <SettingsRoute />
+    ) : (
+      <OnboardingRoute openedFromSettings />
+    );
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -168,10 +185,11 @@ function Shell() {
         </SidebarFooter>
       </Sidebar>
       <main className="flex-1 overflow-auto scrollbar-tactical">
-        {view.kind === "packs" && <HomeRoute />}
-        {view.kind === "pack" && <PackDetailRoute packId={view.id} />}
-        {view.kind === "settings" && <SettingsRoute />}
-        {view.kind === "onboarding" && <OnboardingRoute openedFromSettings />}
+        <AnimatePresence mode="wait" initial={false}>
+          <AnimatedPage key={routeKey} stagger={routeKey !== initialRouteKey.current}>
+            {route}
+          </AnimatedPage>
+        </AnimatePresence>
       </main>
     </div>
   );

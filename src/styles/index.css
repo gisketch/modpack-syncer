@@ -883,8 +883,87 @@
   }
 
   .scrollbar-tactical {
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--line-soft) transparent;
+  }
+
+  .motion-page-stagger > * > * {
+    animation: motion-page-item-enter 320ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  .motion-page-stagger > * > :nth-child(1) {
+    animation-delay: 20ms;
+  }
+
+  .motion-page-stagger > * > :nth-child(2) {
+    animation-delay: 70ms;
+  }
+
+  .motion-page-stagger > * > :nth-child(3) {
+    animation-delay: 120ms;
+  }
+
+  .motion-page-stagger > * > :nth-child(4) {
+    animation-delay: 170ms;
+  }
+
+  .motion-page-stagger > * > :nth-child(n + 5) {
+    animation-delay: 220ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-header"],
+  .cp-sidebar-shell [data-slot="sidebar-content"] > *,
+  .cp-sidebar-shell [data-slot="sidebar-submenu"] > *,
+  .cp-sidebar-shell [data-slot="sidebar-footer"] > * {
+    animation: motion-sidebar-item-enter 300ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-header"] {
+    animation-delay: 20ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-content"] > :nth-child(1) {
+    animation-delay: 80ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-content"] > :nth-child(2) {
+    animation-delay: 130ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-submenu"] > :nth-child(1) {
+    animation-delay: 150ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-submenu"] > :nth-child(2) {
+    animation-delay: 190ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-submenu"] > :nth-child(n + 3) {
+    animation-delay: 230ms;
+  }
+
+  .cp-sidebar-shell [data-slot="sidebar-footer"] > * {
+    animation-delay: 260ms;
+  }
+
+  .dialog-stagger-children[data-open] [data-slot="dialog-header"],
+  .dialog-stagger-children[data-open] [data-slot="dialog-body"],
+  .dialog-stagger-children[data-open] [data-slot="dialog-footer"] {
+    animation: motion-dialog-section-enter 280ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  .dialog-stagger-children[data-open] [data-slot="dialog-header"] {
+    animation-delay: 35ms;
+  }
+
+  .dialog-stagger-children[data-open] [data-slot="dialog-body"] {
+    animation-delay: 85ms;
+  }
+
+  .dialog-stagger-children[data-open] [data-slot="dialog-footer"] {
+    animation-delay: 135ms;
   }
 
   .scrollbar-tactical::-webkit-scrollbar {
@@ -969,6 +1048,39 @@
   }
 }
 
+@keyframes motion-page-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-sidebar-item-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes motion-dialog-section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer utilities {
   .dialog-pop-animate {
     transform: translate(-50%, -50%) scaleY(1);
@@ -991,6 +1103,17 @@
       10px 100%,
       0 calc(100% - 10px)
     );
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
