@@ -852,8 +852,9 @@ fn apply_artifact_dir(
                 .repo_path
                 .clone()
                 .unwrap_or_else(|| format!("{repo_prefix}/{filename}"));
-            copy_file_to_repo(&path, &repo_dir.join(&filename))?;
-            *repo_files_written += 1;
+            if copy_file_to_repo(&path, &repo_dir.join(&filename))? {
+                *repo_files_written += 1;
+            }
             entry.source = manifest::Source::Repo;
             entry.project_id = None;
             entry.version_id = None;
@@ -907,8 +908,9 @@ fn apply_tree_dir(
 
     for (rel, path) in instance_files {
         seen.insert(rel.clone());
-        copy_file_to_repo(&path, &repo_dir.join(&rel))?;
-        *repo_files_written += 1;
+        if copy_file_to_repo(&path, &repo_dir.join(&rel))? {
+            *repo_files_written += 1;
+        }
     }
 
     for (rel, path) in repo_map {
@@ -934,8 +936,9 @@ fn apply_root_files(
         let instance_path = instance_root.join(rel);
         let repo_path = repo_root.join(rel);
         if instance_path.exists() {
-            copy_file_to_repo(&instance_path, &repo_path)?;
-            *repo_files_written += 1;
+            if copy_file_to_repo(&instance_path, &repo_path)? {
+                *repo_files_written += 1;
+            }
         } else if remove_path_if_exists(&repo_path)? {
             *repo_files_removed += 1;
         }
@@ -1252,8 +1255,9 @@ where
 
     for (rel, path) in instance_files {
         seen.insert(rel.clone());
-        copy_file_to_repo(&path, &repo_dir.join(&rel))?;
-        *repo_files_written += 1;
+        if copy_file_to_repo(&path, &repo_dir.join(&rel))? {
+            *repo_files_written += 1;
+        }
     }
 
     for (rel, path) in repo_map {
@@ -1268,9 +1272,12 @@ where
     Ok(())
 }
 
-fn copy_file_to_repo(src: &std::path::Path, dst: &std::path::Path) -> Result<(), CommandError> {
+fn copy_file_to_repo(src: &std::path::Path, dst: &std::path::Path) -> Result<bool, CommandError> {
     if same_existing_file(src, dst) {
-        return Ok(());
+        return Ok(false);
+    }
+    if same_content(src, dst)? {
+        return Ok(false);
     }
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
@@ -1279,7 +1286,17 @@ fn copy_file_to_repo(src: &std::path::Path, dst: &std::path::Path) -> Result<(),
         &format!("copy {} -> {}", src.display(), dst.display()),
         || std::fs::copy(src, dst),
     )?;
-    Ok(())
+    Ok(true)
+}
+
+fn same_content(src: &std::path::Path, dst: &std::path::Path) -> Result<bool, CommandError> {
+    if !src.exists() || !dst.exists() {
+        return Ok(false);
+    }
+    if src.metadata()?.len() != dst.metadata()?.len() {
+        return Ok(false);
+    }
+    Ok(cache::file_sha1_hex(src)? == cache::file_sha1_hex(dst)?)
 }
 
 fn same_existing_file(left: &std::path::Path, right: &std::path::Path) -> bool {
