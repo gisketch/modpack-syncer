@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FolderGit2, GitCommitHorizontal, Loader2, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, FolderGit2, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -15,17 +16,8 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import {
-  Pagination,
-  PaginationControls,
-  PaginationIndicator,
-  PaginationInfo,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -37,28 +29,26 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  type ManifestEntry,
   type PublishAction,
   type PublishCategory,
-  type PublishScanItem,
+  type PublishPushProgressEvent,
   type PublishScanProgressEvent,
   type PublishScanReport,
   tauri,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
-const PUBLISH_PAGE_SIZE = 15;
-
 type PublishPreviewPageProps = {
   packId: string;
   onClose: () => void;
   pending: boolean;
   report: PublishScanReport | null;
-  scanProgress: PublishScanProgressEvent | null;
+  scanProgress?: PublishScanProgressEvent | null;
+  pushProgress?: PublishPushProgressEvent | null;
   publishing: boolean;
   publishLogs: string[];
-  ignorePatterns: string[];
-  onIgnorePatternsChange: (patterns: string[]) => void;
+  ignorePatterns?: string[];
+  onIgnorePatternsChange?: (patterns: string[]) => void;
   onPublish: (message: string, version: string, amendPrevious: boolean) => void;
 };
 
@@ -68,108 +58,29 @@ export function PublishPreviewPage({
   pending,
   report,
   scanProgress,
+  pushProgress,
   publishing,
   publishLogs,
-  ignorePatterns,
-  onIgnorePatternsChange,
   onPublish,
 }: PublishPreviewPageProps) {
-  const qc = useQueryClient();
-  const [showIgnored, setShowIgnored] = useState(true);
-  const [showAllMods, setShowAllMods] = useState(false);
-  const [tabSearch, setTabSearch] = useState<Record<string, string>>({});
-  const [tabPage, setTabPage] = useState<Record<string, number>>({});
-  const [pendingOptionalMods, setPendingOptionalMods] = useState<Record<string, boolean>>({});
+  const counts = summarizePublishReport(report);
+  const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
+  const hasChanges = changedItems.length > 0;
+  const publishTabs = buildPublishTabs(changedItems);
+  const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
   const publishVersion = useQuery({
     queryKey: ["suggest-publish-version", packId],
     queryFn: () => tauri.suggestPublishVersion(packId),
     retry: false,
   });
-  const manifest = useQuery({
-    queryKey: ["manifest", packId],
-    queryFn: () => tauri.loadManifest(packId),
-    retry: false,
-  });
-  const changedItems = report?.items.filter((item) => item.action !== "unchanged") ?? [];
-  const publishableItems = changedItems.filter(
-    (item) => !isPublishItemIgnored(item, ignorePatterns),
-  );
-  const visibleChangedItems = changedItems.filter(
-    (item) => showIgnored || !isPublishItemIgnored(item, ignorePatterns),
-  );
-  const ignoredCount = changedItems.length - publishableItems.length;
-  const counts = summarizePublishItems(publishableItems);
-  const hasChanges = publishableItems.length > 0;
-  const visiblePublishItems = showAllMods
-    ? withAllManifestMods(visibleChangedItems, manifest.data?.mods ?? [])
-    : visibleChangedItems;
-  const publishTabs = buildPublishTabs(visiblePublishItems);
-  const defaultTab = publishTabs.find((tab) => tab.count > 0)?.id ?? publishTabs[0]?.id ?? "mods";
-  const optionalByFilename = useMemo(
-    () => new Map((manifest.data?.mods ?? []).map((entry) => [entry.filename, entry.optional])),
-    [manifest.data?.mods],
-  );
-  const setModOptional = useMutation({
-    mutationFn: ({ filename, optional }: { filename: string; optional: boolean }) =>
-      tauri.setManifestModOptional(packId, filename, optional),
-    onMutate: (variables) => {
-      setPendingOptionalMods((current) => ({ ...current, [variables.filename]: true }));
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["manifest", packId] });
-    },
-    onSettled: (_data, _error, variables) => {
-      setPendingOptionalMods((current) => {
-        const next = { ...current };
-        delete next[variables.filename];
-        return next;
-      });
-    },
-  });
   const [commitTitle, setCommitTitle] = useState("Publish instance changes");
   const [commitDescription, setCommitDescription] = useState("");
   const [amendPrevious, setAmendPrevious] = useState(false);
-  const latestChangelog = useQuery({
-    queryKey: ["pack-changelog", packId, "latest-for-amend"],
-    queryFn: () => tauri.packChangelog(packId, 1),
-    enabled: !!report && amendPrevious,
-    retry: false,
-  });
-  const publishVersionValue = amendPrevious
-    ? (manifest.data?.pack.version ?? "")
-    : (publishVersion.data ?? "");
 
   useEffect(() => {
-    if (!publishVersion.data || amendPrevious) return;
+    if (!publishVersion.data) return;
     setCommitTitle(`Update ${publishVersion.data}`);
-  }, [amendPrevious, publishVersion.data]);
-
-  useEffect(() => {
-    if (!amendPrevious) return;
-    const latest = latestChangelog.data?.[0];
-    if (!latest) return;
-    setCommitTitle(latest.title || "Publish instance changes");
-    setCommitDescription(latest.description || "");
-  }, [amendPrevious, latestChangelog.data]);
-
-  function addIgnorePattern(pattern: string) {
-    const cleaned = normalizePublishPattern(pattern);
-    if (!cleaned || cleaned.startsWith("#") || ignorePatterns.includes(cleaned)) return;
-    onIgnorePatternsChange([...ignorePatterns, cleaned]);
-  }
-
-  function setItemIgnored(item: PublishScanReport["items"][number], ignored: boolean) {
-    const pattern = ignorePatternForItem(item);
-    if (ignored) {
-      addIgnorePattern(pattern);
-      return;
-    }
-    const nextPatterns = ignorePatterns.filter(
-      (currentPattern) =>
-        !publishPatternMatches(currentPattern, item) && currentPattern !== pattern,
-    );
-    onIgnorePatternsChange(nextPatterns);
-  }
+  }, [publishVersion.data]);
 
   return (
     <div className="flex min-h-screen flex-col gap-6 p-8">
@@ -196,38 +107,30 @@ export function PublishPreviewPage({
 
       {pending && (
         <Card>
-          <CardContent className="flex flex-col gap-4 p-6 text-text-low">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <Loader2 className="size-4 shrink-0 animate-spin text-brand-core" />
-                <div className="min-w-0">
-                  <p className="text-sm text-text-high">
-                    {scanProgress?.stage?.toUpperCase() ?? "READING INSTANCE"}
-                  </p>
-                  <p className="truncate font-mono text-[10px] text-text-low">
-                    {scanProgress?.currentPath ?? "Preparing scan"}
-                  </p>
-                </div>
-              </div>
-              <span className="font-mono text-xs tabular-nums">
-                {scanProgress?.completed ?? 0}/{scanProgress?.total ?? 1}
+          <CardContent className="space-y-3 p-6 text-text-low">
+            <div className="flex items-center gap-3">
+              <Loader2 className="size-4 animate-spin text-brand-core" />
+              <span className="text-sm">
+                {scanProgress
+                  ? `Scanning ${scanProgress.stage.replace(/-/g, " ")}`
+                  : "Reading instance folders"}
               </span>
+              {scanProgress ? (
+                <span className="ml-auto font-mono text-xs tabular-nums">
+                  {scanProgress.completed} / {scanProgress.total}
+                </span>
+              ) : null}
             </div>
-            <div className="h-2 overflow-hidden bg-surface-sunken">
-              <div
-                className="h-full bg-brand-core transition-[width] duration-300 ease-out"
-                style={{
-                  width: `${Math.max(
-                    6,
-                    Math.min(
-                      100,
-                      ((scanProgress?.completed ?? 0) / Math.max(scanProgress?.total ?? 1, 1)) *
-                        100,
-                    ),
-                  )}%`,
-                }}
-              />
-            </div>
+            {scanProgress ? (
+              <div className="h-2 overflow-hidden rounded bg-surface-base shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+                <div
+                  className="h-full rounded bg-brand-core transition-[width] duration-300 ease-out"
+                  style={{
+                    width: `${Math.min(100, (scanProgress.completed / Math.max(scanProgress.total, 1)) * 100)}%`,
+                  }}
+                />
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       )}
@@ -236,23 +139,7 @@ export function PublishPreviewPage({
         <>
           <Card>
             <CardContent className="flex flex-col gap-4 p-6">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                <Input value={publishVersionValue} placeholder="Pack version" disabled />
-                <Button
-                  variant={amendPrevious ? "default" : "outline"}
-                  onClick={() => setAmendPrevious((current) => !current)}
-                  disabled={publishing}
-                >
-                  <GitCommitHorizontal />
-                  AMEND PREVIOUS UPDATE
-                </Button>
-              </div>
-              {amendPrevious ? (
-                <div className="border border-signal-warn/25 bg-signal-warn/8 px-4 py-3 text-sm text-signal-warn [text-wrap:pretty]">
-                  Current changes will be folded into previous publish commit, then pushed with
-                  amended title and description.
-                </div>
-              ) : null}
+              <Input value={publishVersion.data ?? ""} placeholder="Pack version" disabled />
               <Input
                 value={commitTitle}
                 onChange={(event) => setCommitTitle(event.target.value)}
@@ -269,37 +156,43 @@ export function PublishPreviewPage({
                 <PreviewRow k="UPDATE" v={String(counts.update)} />
                 <PreviewRow k="REMOVE" v={String(counts.remove)} />
               </div>
-              <div className="flex justify-end">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={() => setAmendPrevious((current) => !current)}
+                  className="flex min-h-10 items-center gap-3 text-left text-[10px] uppercase tracking-[0.18em] text-text-low transition-colors hover:text-text-high"
+                >
+                  <Checkbox checked={amendPrevious} className="pointer-events-none" />
+                  AMEND PREVIOUS + FORCE PUSH
+                </button>
                 <Button
                   variant="default"
                   onClick={() =>
                     onPublish(
                       buildCommitMessage(commitTitle, commitDescription),
-                      publishVersionValue,
+                      publishVersion.data ?? "",
                       amendPrevious,
                     )
                   }
                   disabled={
-                    publishing ||
-                    (!hasChanges && !amendPrevious) ||
-                    !commitTitle.trim() ||
-                    (!amendPrevious && (publishVersion.isLoading || !!publishVersion.error))
+                    publishing || !hasChanges || publishVersion.isLoading || !!publishVersion.error
                   }
                 >
                   {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-                  {amendPrevious ? "AMEND + PUSH" : "COMMIT + PUSH"}
+                  {amendPrevious ? "AMEND + FORCE PUSH" : "COMMIT + PUSH"}
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          {publishLogs.length > 0 ? (
+          {publishLogs.length > 0 || pushProgress ? (
             <Card variant="window">
               <CardWindowBar>
                 <CardWindowTab>PUBLISH TERMINAL</CardWindowTab>
                 <CardStatus>{publishing ? "Streaming" : "Idle"}</CardStatus>
               </CardWindowBar>
-              <CardContent className="px-0 py-0">
+              <CardContent className="space-y-0 px-0 py-0">
+                {pushProgress ? <PublishProgressView progress={pushProgress} /> : null}
                 <ScrollArea className="h-56 px-4 py-4">
                   <div className="flex flex-col gap-2 font-mono text-xs text-text-low">
                     {publishLogs.map((line) => (
@@ -317,28 +210,13 @@ export function PublishPreviewPage({
 
           <Card>
             <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-col gap-2">
-                  <CardTitle>CHANGES</CardTitle>
-                  <CardDescription>
-                    Only changed entries shown unless all mods are enabled. Grouped by publish area.
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-4 text-[10px] uppercase tracking-[0.18em] text-text-low">
-                  <div className="flex items-center gap-2">
-                    <span>SHOW ALL MODS</span>
-                    <Switch checked={showAllMods} onCheckedChange={setShowAllMods} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>SHOW IGNORED</span>
-                    <Switch checked={showIgnored} onCheckedChange={setShowIgnored} />
-                    <span className="font-mono tabular-nums">{ignoredCount}</span>
-                  </div>
-                </div>
-              </div>
+              <CardTitle>CHANGES</CardTitle>
+              <CardDescription>
+                Only added, updated, removed entries shown. Grouped by publish area.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              {visiblePublishItems.length > 0 ? (
+              {hasChanges ? (
                 <Tabs defaultValue={defaultTab} className="gap-5">
                   <TabsList className="flex-wrap gap-2">
                     {publishTabs.map((tab) => (
@@ -352,220 +230,72 @@ export function PublishPreviewPage({
                   </TabsList>
                   {publishTabs.map((tab) => (
                     <TabsContent key={tab.id} value={tab.id} className="outline-none">
-                      {(() => {
-                        const search = tabSearch[tab.id] ?? "";
-                        const filteredItems = filterPublishItems(tab.items, search);
-                        const totalPages = pageCount(filteredItems.length);
-                        const page = Math.min(tabPage[tab.id] ?? 1, totalPages);
-                        const pagedItems = paginatePublishItems(filteredItems, page);
-                        return (
-                          <>
-                            <Card className="mb-4">
-                              <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex flex-col gap-1">
-                                  <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                                    {tab.label}
-                                  </span>
-                                  <span className="text-xs text-text-low [text-wrap:pretty]">
-                                    {tab.description}
-                                  </span>
-                                </div>
-                                <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
-                                  <PublishSearchBox
-                                    value={search}
-                                    placeholder={`SEARCH ${tab.label}`}
-                                    onChange={(value) => {
-                                      setTabSearch((current) => ({ ...current, [tab.id]: value }));
-                                      setTabPage((current) => ({ ...current, [tab.id]: 1 }));
-                                    }}
-                                  />
-                                  <div className="text-right font-mono text-xs tabular-nums text-text-low">
-                                    {filteredItems.length} / {tab.count}
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                            {filteredItems.length > 0 ? (
-                              <div className="space-y-3">
-                                <ScrollArea>
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableHead>NAME</TableHead>
-                                        <TableHead>ACTION</TableHead>
-                                        {tab.id === "mods" ? <TableHead>OPTIONAL</TableHead> : null}
-                                        <TableHead>SOURCE</TableHead>
-                                        <TableHead className="text-right">SIZE</TableHead>
-                                        <TableHead className="text-center">IGNORE</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {pagedItems.map((item) => {
-                                        const ignored = isPublishItemIgnored(item, ignorePatterns);
-                                        const canSetOptional =
-                                          tab.id === "mods" &&
-                                          optionalByFilename.has(item.relativePath);
-                                        const optional =
-                                          optionalByFilename.get(item.relativePath) ?? false;
-                                        const optionalPending =
-                                          !!pendingOptionalMods[item.relativePath];
-                                        return (
-                                          <TableRow
-                                            key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
-                                            className={cn(
-                                              "h-8 border-l-2",
-                                              publishActionRowTone(item.action),
-                                              ignored && "opacity-45",
-                                            )}
-                                          >
-                                            <TableCell className="px-3 py-1.5 align-top">
-                                              <span
-                                                className="block max-w-[24rem] truncate text-xs text-text-high"
-                                                title={item.relativePath}
-                                              >
-                                                {publishDisplayName(item)}
-                                              </span>
-                                            </TableCell>
-                                            <TableCell className="px-3 py-1.5 align-top">
-                                              <PublishActionChip action={item.action} />
-                                            </TableCell>
-                                            {tab.id === "mods" ? (
-                                              <TableCell
-                                                className={cn(
-                                                  "px-3 py-1.5 text-center align-middle",
-                                                  canSetOptional && !publishing && !optionalPending
-                                                    ? "cursor-pointer"
-                                                    : "cursor-not-allowed",
-                                                )}
-                                                role={canSetOptional ? "button" : undefined}
-                                                tabIndex={
-                                                  canSetOptional && !publishing && !optionalPending
-                                                    ? 0
-                                                    : -1
-                                                }
-                                                onClick={() => {
-                                                  if (
-                                                    publishing ||
-                                                    optionalPending ||
-                                                    !canSetOptional
-                                                  ) {
-                                                    return;
-                                                  }
-                                                  setModOptional.mutate({
-                                                    filename: item.relativePath,
-                                                    optional: !optional,
-                                                  });
-                                                }}
-                                                onKeyDown={(event) => {
-                                                  if (
-                                                    (event.key === "Enter" || event.key === " ") &&
-                                                    !publishing &&
-                                                    !optionalPending &&
-                                                    canSetOptional
-                                                  ) {
-                                                    event.preventDefault();
-                                                    setModOptional.mutate({
-                                                      filename: item.relativePath,
-                                                      optional: !optional,
-                                                    });
-                                                  }
-                                                }}
-                                              >
-                                                <div className="flex items-center justify-center gap-2">
-                                                  {optionalPending ? (
-                                                    <Loader2 className="size-3 animate-spin text-text-low" />
-                                                  ) : null}
-                                                  <Checkbox
-                                                    checked={optional}
-                                                    disabled={
-                                                      publishing ||
-                                                      optionalPending ||
-                                                      !canSetOptional
-                                                    }
-                                                    aria-label={`Optional ${item.relativePath}`}
-                                                    className="pointer-events-none"
-                                                  />
-                                                </div>
-                                              </TableCell>
-                                            ) : null}
-                                            <TableCell className="px-3 py-1.5 align-top text-xs text-text-low">
-                                              {publishSourceLabel(item)}
-                                            </TableCell>
-                                            <TableCell className="px-3 py-1.5 text-right align-top font-mono text-xs text-text-low tabular-nums">
-                                              {typeof item.size === "number"
-                                                ? formatBytes(item.size)
-                                                : "--"}
-                                            </TableCell>
-                                            <TableCell
-                                              className="cursor-pointer px-3 py-1.5 align-middle"
-                                              role="button"
-                                              tabIndex={publishing ? -1 : 0}
-                                              title={ignored ? "Stop ignoring file" : "Ignore file"}
-                                              onClick={() => {
-                                                if (!publishing) {
-                                                  setItemIgnored(item, !ignored);
-                                                }
-                                              }}
-                                              onKeyDown={(event) => {
-                                                if (
-                                                  (event.key === "Enter" || event.key === " ") &&
-                                                  !publishing
-                                                ) {
-                                                  event.preventDefault();
-                                                  setItemIgnored(item, !ignored);
-                                                }
-                                              }}
-                                            >
-                                              <div className="flex items-center justify-center">
-                                                <Checkbox
-                                                  checked={ignored}
-                                                  disabled={publishing}
-                                                  aria-label={`Ignore ${item.relativePath}`}
-                                                  className="pointer-events-none"
-                                                />
-                                              </div>
-                                            </TableCell>
-                                          </TableRow>
-                                        );
-                                      })}
-                                    </TableBody>
-                                  </Table>
-                                </ScrollArea>
-                                <PublishPager
-                                  page={page}
-                                  totalPages={totalPages}
-                                  totalItems={filteredItems.length}
-                                  onPrevious={() =>
-                                    setTabPage((current) => ({
-                                      ...current,
-                                      [tab.id]: Math.max(page - 1, 1),
-                                    }))
-                                  }
-                                  onNext={() =>
-                                    setTabPage((current) => ({
-                                      ...current,
-                                      [tab.id]: Math.min(page + 1, totalPages),
-                                    }))
-                                  }
-                                />
-                              </div>
-                            ) : (
-                              <Card>
-                                <CardContent className="px-4 py-8 text-center text-sm text-text-low">
-                                  No changed files in {tab.label.toLowerCase()}.
-                                </CardContent>
-                              </Card>
-                            )}
-                          </>
-                        );
-                      })()}
+                      <Card className="mb-4">
+                        <CardContent className="flex items-center justify-between gap-3 p-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                              {tab.label}
+                            </span>
+                            <span className="text-xs text-text-low [text-wrap:pretty]">
+                              {tab.description}
+                            </span>
+                          </div>
+                          <div className="text-right font-mono text-xs tabular-nums text-text-low">
+                            {tab.count} {tab.count === 1 ? "change" : "changes"}
+                          </div>
+                        </CardContent>
+                      </Card>
+                      {tab.items.length > 0 ? (
+                        <ScrollArea className="h-[calc(100vh-27rem)]">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>CATEGORY</TableHead>
+                                <TableHead>PATH</TableHead>
+                                <TableHead>ACTION</TableHead>
+                                <TableHead>SOURCE</TableHead>
+                                <TableHead className="text-right">SIZE</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {tab.items.map((item) => (
+                                <TableRow
+                                  key={`${tab.id}:${item.category}:${item.relativePath}:${item.action}`}
+                                >
+                                  <TableCell>
+                                    <Badge variant="outline">
+                                      {labelCategory(item.category, item.relativePath)}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="font-mono text-[10px] text-text-low">
+                                    {item.relativePath}
+                                  </TableCell>
+                                  <TableCell>
+                                    <PublishActionChip action={item.action} />
+                                  </TableCell>
+                                  <TableCell className="text-xs text-text-low">
+                                    {item.source ?? "instance-local"}
+                                  </TableCell>
+                                  <TableCell className="text-right font-mono text-xs text-text-low tabular-nums">
+                                    {typeof item.size === "number" ? formatBytes(item.size) : "--"}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </ScrollArea>
+                      ) : (
+                        <Card>
+                          <CardContent className="px-4 py-8 text-center text-sm text-text-low">
+                            No changed files in {tab.label.toLowerCase()}.
+                          </CardContent>
+                        </Card>
+                      )}
                     </TabsContent>
                   ))}
                 </Tabs>
               ) : (
-                <p className="text-sm text-text-low">
-                  {showIgnored ? "No changed files to publish." : "No visible files to publish."}
-                </p>
+                <p className="text-sm text-text-low">No changed files to publish.</p>
               )}
             </CardContent>
           </Card>
@@ -587,11 +317,11 @@ type PublishTabDefinition = {
     | "others";
   label: string;
   description: string;
-  items: PublishScanItem[];
+  items: PublishScanReport["items"];
   count: number;
 };
 
-function buildPublishTabs(items: PublishScanItem[]): PublishTabDefinition[] {
+function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefinition[] {
   const tabs: Array<
     Omit<PublishTabDefinition, "items" | "count"> & {
       match: (item: PublishScanReport["items"][number]) => boolean;
@@ -661,125 +391,6 @@ function buildPublishTabs(items: PublishScanItem[]): PublishTabDefinition[] {
   });
 }
 
-function PublishSearchBox({
-  value,
-  placeholder,
-  onChange,
-}: {
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="relative w-full sm:w-64">
-      <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-text-low" />
-      <Input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="h-9 pl-9 text-xs"
-      />
-    </div>
-  );
-}
-
-function PublishPager({
-  page,
-  totalPages,
-  totalItems,
-  onPrevious,
-  onNext,
-}: {
-  page: number;
-  totalPages: number;
-  totalItems: number;
-  onPrevious: () => void;
-  onNext: () => void;
-}) {
-  return (
-    <Pagination className="justify-between">
-      <PaginationInfo>{totalItems} SHOWN BY FILTER</PaginationInfo>
-      <PaginationControls>
-        <PaginationPrevious onClick={onPrevious} disabled={page <= 1} />
-        <PaginationIndicator page={page} total={totalPages} />
-        <PaginationNext onClick={onNext} disabled={page >= totalPages} />
-      </PaginationControls>
-    </Pagination>
-  );
-}
-
-function filterPublishItems(items: PublishScanItem[], query: string) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return items;
-  return items.filter((item) =>
-    [publishDisplayName(item), item.relativePath, item.category, item.action, item.source ?? ""]
-      .join(" ")
-      .toLowerCase()
-      .includes(needle),
-  );
-}
-
-function paginatePublishItems(items: PublishScanItem[], page: number) {
-  const start = (Math.max(page, 1) - 1) * PUBLISH_PAGE_SIZE;
-  return items.slice(start, start + PUBLISH_PAGE_SIZE);
-}
-
-function pageCount(totalItems: number) {
-  return Math.max(1, Math.ceil(totalItems / PUBLISH_PAGE_SIZE));
-}
-
-function withAllManifestMods(items: PublishScanItem[], mods: ManifestEntry[]) {
-  const existing = new Set(
-    items.filter((item) => item.category === "mods").map((item) => item.relativePath),
-  );
-  const unchangedMods = mods
-    .filter((entry) => !existing.has(entry.filename))
-    .map<PublishScanItem>((entry) => ({
-      category: "mods",
-      relativePath: entry.filename,
-      size: entry.size,
-      sha1: entry.sha1,
-      action: "unchanged",
-      source: entry.source,
-    }));
-  return [...items, ...unchangedMods];
-}
-
-function publishDisplayName(item: PublishScanReport["items"][number]) {
-  const base =
-    item.relativePath
-      .split("/")
-      .pop()
-      ?.replace(/\.(jar|zip)$/i, "") ?? item.relativePath;
-  if (item.source === "manifest-removed") return `${base} removed from mod list`;
-  if (item.source === "manifest-added") return `${base} added to mod list`;
-  if (item.source?.startsWith("manifest-optional:")) {
-    const next = item.source.endsWith(":optional") ? "optional" : "required";
-    return `${base} now ${next}`;
-  }
-  if (item.source === "manifest-edited") return `${base} manifest changed`;
-  if (item.source === "manifest-version") return item.relativePath;
-  if (isArtifactCategory(item.category)) {
-    return base;
-  }
-  return item.relativePath;
-}
-
-function publishSourceLabel(item: PublishScanReport["items"][number]) {
-  if (item.source === "manifest-removed") return "manifest remove";
-  if (item.source === "manifest-added") return "manifest add";
-  if (item.source?.startsWith("manifest-optional:")) {
-    return item.source.endsWith(":optional") ? "manifest optional" : "manifest required";
-  }
-  if (item.source === "manifest-edited") return "manifest edit";
-  if (item.source === "manifest-version") return "manifest version";
-  return item.source ?? "instance-local";
-}
-
-function isArtifactCategory(category: PublishCategory) {
-  return category === "mods" || category === "resourcepacks" || category === "shaderpacks";
-}
-
 function PublishActionChip({ action }: { action: PublishAction }) {
   const text =
     action === "add"
@@ -793,20 +404,13 @@ function PublishActionChip({ action }: { action: PublishAction }) {
   return <span className={cn("text-[10px] uppercase tracking-[0.18em]", text)}>{action}</span>;
 }
 
-function summarizePublishItems(items: PublishScanReport["items"]) {
+function summarizePublishReport(report: PublishScanReport | null) {
   return {
-    add: items.filter((item) => item.action === "add").length,
-    update: items.filter((item) => item.action === "update").length,
-    remove: items.filter((item) => item.action === "remove").length,
-    unchanged: items.filter((item) => item.action === "unchanged").length,
+    add: report?.items.filter((item) => item.action === "add").length ?? 0,
+    update: report?.items.filter((item) => item.action === "update").length ?? 0,
+    remove: report?.items.filter((item) => item.action === "remove").length ?? 0,
+    unchanged: report?.items.filter((item) => item.action === "unchanged").length ?? 0,
   };
-}
-
-function publishActionRowTone(action: PublishAction) {
-  if (action === "add") return "border-brand-core/50";
-  if (action === "update") return "border-signal-warn/50";
-  if (action === "remove") return "border-signal-alert/50";
-  return "border-line-soft/30";
 }
 
 function buildCommitMessage(title: string, description: string) {
@@ -815,66 +419,20 @@ function buildCommitMessage(title: string, description: string) {
   return cleanDescription ? `${cleanTitle}\n\n${cleanDescription}` : cleanTitle;
 }
 
-function ignorePatternForItem(item: PublishScanReport["items"][number]) {
-  const path = normalizePublishPattern(item.relativePath);
-  if (item.category === "mods") return `mods/${path}`;
-  if (item.category === "resourcepacks") return `resourcepacks/${path}`;
-  if (item.category === "shaderpacks") return `shaderpacks/${path}`;
-  if (item.category === "shader-settings") {
-    return path === "iris.properties" ? `config/${path}` : `shaderpacks/${path}`;
+function labelCategory(category: PublishCategory, relativePath?: string) {
+  if (category === "root" && relativePath === "options.txt") {
+    return "OPTIONS";
   }
-  if (item.category === "option-presets") {
-    return path.startsWith("presets/") ? path : `presets/${path}`;
+  if (category === "shader-settings") {
+    return "SHADER SETTINGS";
   }
-  if (item.category === "config") return `config/${path}`;
-  if (item.category === "kubejs") return `kubejs/${path}`;
-  return path;
-}
-
-function isPublishItemIgnored(item: PublishScanReport["items"][number], patterns: string[]) {
-  return patterns.some((pattern) => publishPatternMatches(pattern, item));
-}
-
-function publishPatternMatches(pattern: string, item: PublishScanReport["items"][number]) {
-  const normalizedPattern = normalizePublishPattern(pattern);
-  if (!normalizedPattern || normalizedPattern.startsWith("#")) return false;
-  const path = normalizePublishPattern(item.relativePath);
-  const basename = path.split("/").pop() ?? path;
-  const candidates = [path, basename, ignorePatternForItem(item)];
-
-  return candidates.some((candidate) => {
-    const normalizedCandidate = normalizePublishPattern(candidate);
-    if (normalizedPattern.endsWith("/")) {
-      const prefix = normalizedPattern.slice(0, -1);
-      return normalizedCandidate === prefix || normalizedCandidate.startsWith(`${prefix}/`);
-    }
-    if (normalizedPattern.includes("*") || normalizedPattern.includes("?")) {
-      return wildcardMatch(normalizedPattern, normalizedCandidate);
-    }
-    if (normalizedPattern.includes("/")) {
-      return normalizedCandidate === normalizedPattern;
-    }
-    return (
-      normalizedCandidate === normalizedPattern ||
-      normalizedCandidate.endsWith(`/${normalizedPattern}`)
-    );
-  });
-}
-
-function normalizePublishPattern(pattern: string) {
-  const trimmed = pattern.trim().replace(/\\/g, "/").replace(/^\/+/, "");
-  const directoryPattern = trimmed.endsWith("/");
-  const normalized = trimmed
-    .split("/")
-    .filter((part) => part && part !== ".")
-    .join("/");
-  return directoryPattern && normalized ? `${normalized}/` : normalized;
-}
-
-function wildcardMatch(pattern: string, value: string) {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
-  return regex.test(value);
+  if (category === "option-presets") {
+    return "PRESETS";
+  }
+  if (category === "root") {
+    return "ROOT";
+  }
+  return category.toUpperCase();
 }
 
 function PreviewRow({ k, v }: { k: string; v: string }) {
@@ -882,6 +440,35 @@ function PreviewRow({ k, v }: { k: string; v: string }) {
     <div className="flex items-center justify-between border-line-soft/30 border-b pb-1">
       <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">{k}</span>
       <span className="font-mono text-xs text-text-high">{v}</span>
+    </div>
+  );
+}
+
+function PublishProgressView({ progress }: { progress: PublishPushProgressEvent }) {
+  const percent =
+    progress.total > 0 ? Math.min(100, (progress.completed / progress.total) * 100) : 0;
+  const detail = progress.currentPath
+    ? progress.currentPath
+    : progress.bytes
+      ? `${formatBytes(progress.bytes)} uploaded`
+      : progress.total > 0
+        ? `${progress.completed} / ${progress.total}`
+        : (progress.message ?? "waiting for remote");
+
+  return (
+    <div className="border-line-soft/30 border-b px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.18em]">
+        <span className="text-brand-core">{progress.stage.replace(/-/g, " ")}</span>
+        <span className="max-w-[26rem] truncate text-right font-mono text-text-low tabular-nums">
+          {detail}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded bg-surface-base shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+        <div
+          className="h-full rounded bg-brand-core transition-[width] duration-300 ease-out"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
     </div>
   );
 }

@@ -83,6 +83,16 @@ export type PublishScanProgressEvent = {
   total: number;
 };
 
+export type PublishPushProgressEvent = {
+  packId: string;
+  stage: string;
+  currentPath?: string | null;
+  completed: number;
+  total: number;
+  bytes?: number | null;
+  message?: string | null;
+};
+
 export type PublishAuthSettings = {
   method?: string | null;
   hasPat: boolean;

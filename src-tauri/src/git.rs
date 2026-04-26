@@ -2,6 +2,7 @@
 //! Handles: clone, fetch, pull, diff, commit, push.
 //! No system git required.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use git2::{
@@ -12,6 +13,16 @@ use git2::{
 pub enum PushAuth {
     Pat(String),
     Ssh,
+}
+
+#[derive(Debug, Clone)]
+pub struct PushProgress {
+    pub stage: &'static str,
+    pub current_path: Option<String>,
+    pub completed: usize,
+    pub total: usize,
+    pub bytes: Option<usize>,
+    pub message: Option<String>,
 }
 
 pub struct SshAccess {
@@ -103,7 +114,14 @@ pub fn commit_and_push_with_filter<F>(
 where
     F: Fn(&Path) -> bool,
 {
-    commit_and_push_with_filter_mode(repo_dir, message, auth, should_include_path, false)
+    commit_and_push_with_filter_progress(
+        repo_dir,
+        message,
+        auth,
+        should_include_path,
+        false,
+        |_| {},
+    )
 }
 
 pub fn amend_and_push_with_filter<F>(
@@ -115,20 +133,23 @@ pub fn amend_and_push_with_filter<F>(
 where
     F: Fn(&Path) -> bool,
 {
-    commit_and_push_with_filter_mode(repo_dir, message, auth, should_include_path, true)
+    commit_and_push_with_filter_progress(repo_dir, message, auth, should_include_path, true, |_| {})
 }
 
-fn commit_and_push_with_filter_mode<F>(
+pub fn commit_and_push_with_filter_progress<F, P>(
     repo_dir: &Path,
     message: &str,
     auth: PushAuth,
     should_include_path: F,
     amend: bool,
+    on_progress: P,
 ) -> Result<String, GitError>
 where
     F: Fn(&Path) -> bool,
+    P: FnMut(PushProgress),
 {
     eprintln!("[modsync] publish push: open repo {}", repo_dir.display());
+    let mut on_progress = on_progress;
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
     let branch = repo
@@ -143,11 +164,12 @@ where
         .recurse_untracked_dirs(true)
         .include_ignored(false);
     let statuses = repo.statuses(Some(&mut status_options))?;
-    let has_changes = statuses.iter().any(|status| {
-        status
-            .path()
-            .is_some_and(|path| should_include_path(Path::new(path)))
-    });
+    let changed_paths = statuses
+        .iter()
+        .filter_map(|status| status.path().map(PathBuf::from))
+        .filter(|path| should_include_path(path))
+        .collect::<Vec<_>>();
+    let has_changes = !changed_paths.is_empty();
 
     let commit_sha = if has_changes || amend {
         eprintln!(
@@ -155,11 +177,27 @@ where
             if amend { "amend" } else { "create" }
         );
         let mut index = repo.index()?;
+        let mut staged = 0usize;
+        let total_to_stage = changed_paths.len().max(1);
         index.add_all(
             ["*"],
             IndexAddOption::DEFAULT,
             Some(&mut |path, _matched| {
                 if should_include_path(path) {
+                    staged += 1;
+                    on_progress(PushProgress {
+                        stage: "staging",
+                        current_path: Some(path.to_string_lossy().replace('\\', "/")),
+                        completed: staged.min(total_to_stage),
+                        total: total_to_stage,
+                        bytes: None,
+                        message: Some(format!(
+                            "stage file :: {} ({}/{})",
+                            path.display(),
+                            staged.min(total_to_stage),
+                            total_to_stage
+                        )),
+                    });
                     0
                 } else {
                     1
@@ -199,8 +237,19 @@ where
     };
 
     eprintln!("[modsync] publish push: push branch {branch}");
-    push_branch(&repo, &branch, auth, amend)?;
+    push_branch(&repo, &branch, auth, amend, &mut on_progress)?;
     eprintln!("[modsync] publish push: push complete {commit_sha}");
+    on_progress(PushProgress {
+        stage: "done",
+        current_path: None,
+        completed: 1,
+        total: 1,
+        bytes: None,
+        message: Some(format!(
+            "push complete :: {}",
+            &commit_sha[..10.min(commit_sha.len())]
+        )),
+    });
     Ok(commit_sha)
 }
 
@@ -263,8 +312,10 @@ fn push_branch(
     branch: &str,
     auth: PushAuth,
     force: bool,
+    on_progress: &mut dyn FnMut(PushProgress),
 ) -> Result<(), GitError> {
     let use_ssh_transport = matches!(&auth, PushAuth::Ssh);
+    let progress = RefCell::new(on_progress);
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(move |_url, username_from_url, allowed_types| match &auth {
         PushAuth::Pat(token) => {
@@ -291,6 +342,60 @@ fn push_branch(
                 ))
             }
         }
+    });
+    callbacks.pack_progress(|stage, current, total| {
+        let stage_name = match stage {
+            git2::PackBuilderStage::AddingObjects => "packing-objects",
+            git2::PackBuilderStage::Deltafication => "delta-compression",
+        };
+        (*progress.borrow_mut())(PushProgress {
+            stage: stage_name,
+            current_path: None,
+            completed: current,
+            total,
+            bytes: None,
+            message: None,
+        });
+    });
+    callbacks.push_transfer_progress(|current, total, bytes| {
+        (*progress.borrow_mut())(PushProgress {
+            stage: "uploading",
+            current_path: None,
+            completed: current,
+            total,
+            bytes: Some(bytes),
+            message: None,
+        });
+    });
+    callbacks.sideband_progress(|bytes| {
+        let message = String::from_utf8_lossy(bytes).trim().to_string();
+        if !message.is_empty() {
+            (*progress.borrow_mut())(PushProgress {
+                stage: "remote",
+                current_path: None,
+                completed: 0,
+                total: 0,
+                bytes: None,
+                message: Some(format!("remote :: {message}")),
+            });
+        }
+        true
+    });
+    callbacks.push_update_reference(|reference, status| {
+        if let Some(status) = status {
+            return Err(git2::Error::from_str(&format!(
+                "remote rejected {reference}: {status}"
+            )));
+        }
+        (*progress.borrow_mut())(PushProgress {
+            stage: "updating-ref",
+            current_path: None,
+            completed: 1,
+            total: 1,
+            bytes: None,
+            message: Some(format!("remote accepted :: {reference}")),
+        });
+        Ok(())
     });
 
     let mut push_options = PushOptions::new();

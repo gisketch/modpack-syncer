@@ -1,6 +1,6 @@
 [package]
 name = "modsync"
-version = "1.0.4"
+version = "1.0.5"
 description = "Minecraft modpack syncer + Prism launcher wrapper"
 authors = ["gisketch"]
 edition = "2021"

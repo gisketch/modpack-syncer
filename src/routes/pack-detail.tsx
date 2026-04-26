@@ -88,6 +88,7 @@ import {
   NO_OPTION_PRESET_ID,
   type OptionsSyncCategory,
   PACK_DEFAULT_PRESET_ID,
+  type PublishPushProgressEvent,
   type PublishScanProgressEvent,
   type PublishScanReport,
   type SyncInstanceReport,
@@ -211,6 +212,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [publishScanProgress, setPublishScanProgress] = useState<PublishScanProgressEvent | null>(
     null,
   );
+  const [publishPushProgress, setPublishPushProgress] = useState<PublishPushProgressEvent | null>(
+    null,
+  );
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
@@ -236,6 +240,24 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     void listen<PublishScanProgressEvent>("publish-scan-progress", (event) => {
       if (event.payload.packId !== packId) return;
       setPublishScanProgress(event.payload);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [packId]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    void listen<PublishPushProgressEvent>("publish-push-progress", (event) => {
+      if (event.payload.packId !== packId) return;
+      setPublishPushProgress(event.payload);
+      if (event.payload.message) {
+        setPublishLogs((current) => [...current, event.payload.message as string]);
+      }
     }).then((dispose) => {
       unlisten = dispose;
     });
@@ -712,6 +734,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setPublishOpen(true);
       setPublishReport(null);
       setPublishLogs([]);
+      setPublishPushProgress(null);
       setPublishScanProgress({
         packId,
         stage: "queued",
@@ -776,6 +799,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
         amendPrevious ? "> amend previous update + force push origin" : "> commit + push origin",
       ]);
+      setPublishPushProgress({
+        packId,
+        stage: amendPrevious ? "amending" : "committing",
+        currentPath: null,
+        completed: 0,
+        total: 1,
+        bytes: null,
+        message: null,
+      });
       const pushed = await tauri.commitAndPushPublish(
         packId,
         message,
@@ -991,6 +1023,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         pending={publishScan.isPending}
         report={publishReport}
         scanProgress={publishScanProgress}
+        pushProgress={publishPushProgress}
         publishing={publishPush.isPending}
         publishLogs={publishLogs}
         ignorePatterns={publishIgnorePatterns}
