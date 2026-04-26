@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type View =
   | { kind: "packs" }
   | { kind: "pack"; id: string }
+  | { kind: "builder"; id: string }
   | { kind: "settings" }
   | { kind: "about" }
   | { kind: "onboarding" };

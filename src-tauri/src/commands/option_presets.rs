@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -151,9 +151,15 @@ pub fn resolve_option_preset_selection(
     match preset_id.map(str::trim).filter(|value| !value.is_empty()) {
         None | Some(PACK_DEFAULT_PRESET_ID) => Ok(OptionPresetSelection::PackDefault),
         Some(NO_OPTION_PRESET_ID) => Ok(OptionPresetSelection::None),
-        Some(id) => Ok(OptionPresetSelection::Preset(load_option_preset(
-            pack_dir, id,
-        )?)),
+        Some(id) => {
+            let path = option_preset_path(pack_dir, id)?;
+            if !path.exists() {
+                return Ok(OptionPresetSelection::PackDefault);
+            }
+            Ok(OptionPresetSelection::Preset(load_option_preset_path(
+                &path,
+            )?))
+        }
     }
 }
 
@@ -240,9 +246,7 @@ fn list_option_presets_from_pack(
     Ok(presets)
 }
 
-fn load_option_preset(pack_dir: &Path, preset_id: &str) -> Result<OptionPreset, CommandError> {
-    let id = sanitize_preset_id(preset_id)?;
-    let path = pack_dir.join("presets").join(format!("{id}.json"));
+fn load_option_preset_path(path: &Path) -> Result<OptionPreset, CommandError> {
     let bytes = std::fs::read(&path).map_err(|error| {
         CommandError::Other(format!(
             "failed to read option preset {}: {error}",
@@ -255,6 +259,11 @@ fn load_option_preset(pack_dir: &Path, preset_id: &str) -> Result<OptionPreset, 
             path.display()
         ))
     })
+}
+
+fn option_preset_path(pack_dir: &Path, preset_id: &str) -> Result<PathBuf, CommandError> {
+    let id = sanitize_preset_id(preset_id)?;
+    Ok(pack_dir.join("presets").join(format!("{id}.json")))
 }
 
 fn capture_option_preset_from_instance(
@@ -391,4 +400,27 @@ fn sanitize_preset_id(value: &str) -> Result<String, CommandError> {
         return Err(CommandError::Other("preset id is reserved".to_string()));
     }
     Ok(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_selected_preset_falls_back_to_pack_default() {
+        let pack_dir = std::env::temp_dir().join(format!(
+            "modsync-missing-preset-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(pack_dir.join("presets")).expect("create temp preset dir");
+
+        let selection = resolve_option_preset_selection(&pack_dir, Some("medium"))
+            .expect("missing preset resolves");
+
+        assert!(matches!(selection, OptionPresetSelection::PackDefault));
+        let _ = std::fs::remove_dir_all(pack_dir);
+    }
 }

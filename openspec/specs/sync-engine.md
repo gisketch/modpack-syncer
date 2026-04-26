@@ -29,6 +29,7 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 23. Repo-backed shaderpack zip entries MAY tolerate SHA drift by filename, because launchers can rewrite shaderpack zip metadata after opening the shaderpack. If the existing instance already has the same shaderpack filename, sync MAY preserve that same-name local file instead of failing SHA verification.
 24. Options review MUST allow users to continue to sync without visiting or deciding the shader settings tab; an undecided shader settings state MUST behave like not syncing shader settings.
 25. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible.
+26. If a previously selected option preset is no longer present in the pack repo, options preview and sync MUST fall back to Pack Default instead of failing on the missing preset file.
 
 ## See
 

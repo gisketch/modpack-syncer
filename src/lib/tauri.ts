@@ -222,6 +222,44 @@ export type ModrinthAddPreview = {
   alreadyTracked: boolean;
 };
 
+export type ModrinthSearchSort = "relevance" | "downloads" | "follows" | "newest" | "updated";
+export type ModrinthSearchSide = "all" | "client" | "server" | "both";
+
+export type ModrinthSearchHit = {
+  projectId: string;
+  slug: string;
+  title: string;
+  description: string;
+  author: string;
+  iconUrl?: string | null;
+  downloads: number;
+  follows: number;
+  dateModified?: string | null;
+  categories: string[];
+  versions: string[];
+  suggestedSide: Side;
+  alreadyTracked: boolean;
+  trackedVersionId?: string | null;
+  trackedSide?: Side | null;
+};
+
+export type ModrinthSearchReport = {
+  hits: ModrinthSearchHit[];
+  offset: number;
+  limit: number;
+  totalHits: number;
+  mcVersion: string;
+  loader: string;
+};
+
+export type ModrinthVersionSummary = {
+  id: string;
+  versionNumber: string;
+  filename: string;
+  size: number;
+  datePublished?: string | null;
+};
+
 export type PrismLocation = {
   data_dir: string;
   binary: string;
@@ -395,6 +433,32 @@ export const tauri = {
   packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
   suggestPublishVersion: (packId: string) => invoke<string>("suggest_publish_version", { packId }),
+  searchModrinthProjects: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    query?: string,
+    page?: number,
+    side?: ModrinthSearchSide,
+    sort?: ModrinthSearchSort,
+  ) =>
+    invoke<ModrinthSearchReport>("search_modrinth_projects", {
+      packId,
+      category,
+      query,
+      page,
+      side,
+      sort,
+    }),
+  listModrinthProjectVersions: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    projectId: string,
+  ) =>
+    invoke<ModrinthVersionSummary[]>("list_modrinth_project_versions", {
+      packId,
+      category,
+      projectId,
+    }),
   previewModrinthMod: (packId: string, identifier: string, category?: ManifestArtifactCategory) =>
     invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
   addModrinthMod: (

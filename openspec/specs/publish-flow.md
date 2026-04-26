@@ -20,6 +20,7 @@ Authoring and pack-publish behavior exposed by the app today.
 14. Publish preview mod rows MUST allow admins to mark existing manifest mods optional or required. This control MUST update the mod entry's `optional` field in `manifest.json`.
 15. Publish preview MUST provide a show-all-mods mode so unchanged manifest mods can be displayed and edited for optional status.
 16. Publish scan and apply publish MUST ignore local files ending with `.disabled`.
+17. Pack detail MAY expose a full-page Modrinth builder. The builder MUST search Modrinth by current pack Minecraft version, MUST restrict mod results to the current pack loader, MUST paginate at 20 results, and MUST allow users to install any compatible project version into the local instance staging flow. Non-admin users MUST see that only admins can publish or update the pack source of truth. Already tracked or unpublished-staged Modrinth projects MUST be marked installed and MAY be changed to another compatible version.
 
 ## See
 

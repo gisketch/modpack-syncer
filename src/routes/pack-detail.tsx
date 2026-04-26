@@ -12,6 +12,7 @@ import {
   Download,
   FolderGit2,
   FolderOpen,
+  Hammer,
   Loader2,
   Package,
   Play,
@@ -274,6 +275,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     enabled: !!manifest.data,
     retry: false,
   });
+  useEffect(() => {
+    if (!optionPresets.data || selectedOptionPresetId === PACK_DEFAULT_PRESET_ID) return;
+    if (optionPresets.data.some((preset) => preset.id === selectedOptionPresetId)) return;
+    setSelectedOptionPreset(packId, PACK_DEFAULT_PRESET_ID);
+  }, [optionPresets.data, packId, selectedOptionPresetId, setSelectedOptionPreset]);
   const hasOptionsReviewSource =
     hasTrackedOptionsFile ||
     selectedOptionPresetId !== PACK_DEFAULT_PRESET_ID ||
@@ -998,6 +1004,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <FolderOpen />
             OPEN INSTANCE
           </Button>
+          {adminMode && (
+            <Button
+              variant="outline"
+              onClick={() => go({ kind: "builder", id: packId })}
+              disabled={!manifest.data || sync.isPending || fetchPack.isPending}
+            >
+              <Hammer />
+              BUILDER
+            </Button>
+          )}
           {adminMode && (
             <Button
               variant="outline"

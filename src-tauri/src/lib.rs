@@ -59,6 +59,8 @@ pub fn run() {
             commands::changelog::pack_changelog,
             commands::publish::suggest_publish_version,
             commands::modrinth::preview_modrinth_mod,
+            commands::modrinth::search_modrinth_projects,
+            commands::modrinth::list_modrinth_project_versions,
             commands::modrinth::add_modrinth_mod,
             commands::modrinth::delete_instance_mod,
             commands::status::mod_statuses,

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Info, Loader2, Package, Settings } from "lucide-react";
+import { Hammer, Info, Loader2, Package, Settings } from "lucide-react";
 import { AnimatePresence } from "motion/react";
-import { useRef } from "react";
+import { Fragment, useRef } from "react";
 import { TitleBar } from "@/components/title-bar";
 import { AnimatedPage } from "@/components/ui/motion";
 import {
@@ -20,6 +20,7 @@ import { useAppVersion } from "@/hooks/use-app-version";
 import { tauri } from "@/lib/tauri";
 import { AboutRoute } from "@/routes/about";
 import { HomeRoute } from "@/routes/home";
+import { ModpackBuilderRoute } from "@/routes/modpack-builder";
 import { OnboardingRoute } from "@/routes/onboarding";
 import { PackDetailRoute } from "@/routes/pack-detail";
 import { SettingsRoute } from "@/routes/settings";
@@ -110,15 +111,22 @@ function Shell() {
     retry: false,
   });
 
-  const onPacks = view.kind === "packs" || view.kind === "pack";
+  const onPacks = view.kind === "packs" || view.kind === "pack" || view.kind === "builder";
   const sidebarName = prismSettings.data?.offlineUsername?.trim() || "MODSYNC";
-  const routeKey = view.kind === "pack" ? `pack:${view.id}` : view.kind;
+  const routeKey =
+    view.kind === "pack"
+      ? `pack:${view.id}`
+      : view.kind === "builder"
+        ? `builder:${view.id}`
+        : view.kind;
   const initialRouteKey = useRef(routeKey);
   const route =
     view.kind === "packs" ? (
       <HomeRoute />
     ) : view.kind === "pack" ? (
       <PackDetailRoute packId={view.id} />
+    ) : view.kind === "builder" ? (
+      <ModpackBuilderRoute packId={view.id} onBack={() => go({ kind: "pack", id: view.id })} />
     ) : view.kind === "settings" ? (
       <SettingsRoute />
     ) : view.kind === "about" ? (
@@ -158,17 +166,30 @@ function Shell() {
             {packs.data && packs.data.length > 0 && (
               <SidebarSubmenu>
                 {packs.data.map((pack) => (
-                  <SidebarSubItem
-                    key={pack.id}
-                    href="#"
-                    active={view.kind === "pack" && view.id === pack.id}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      go({ kind: "pack", id: pack.id });
-                    }}
-                  >
-                    {pack.id}
-                  </SidebarSubItem>
+                  <Fragment key={pack.id}>
+                    <SidebarSubItem
+                      href="#"
+                      active={view.kind === "pack" && view.id === pack.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        go({ kind: "pack", id: pack.id });
+                      }}
+                    >
+                      {pack.id}
+                    </SidebarSubItem>
+                    <SidebarSubItem
+                      href="#"
+                      active={view.kind === "builder" && view.id === pack.id}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        go({ kind: "builder", id: pack.id });
+                      }}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <Hammer className="size-3" /> BUILDER
+                      </span>
+                    </SidebarSubItem>
+                  </Fragment>
                 ))}
               </SidebarSubmenu>
             )}
