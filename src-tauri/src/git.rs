@@ -5,7 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use git2::{
-    Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository, Signature, StatusOptions,
+    build::CheckoutBuilder, Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository,
+    ResetType, Signature, StatusOptions,
 };
 
 pub enum PushAuth {
@@ -28,7 +29,7 @@ pub enum GitError {
 }
 
 /// Clone a public pack repo to `dest`. If `dest` already contains a git repo,
-/// fetches and fast-forwards instead.
+/// fetches and aligns the current branch to the fetched remote head.
 pub fn clone_or_update(url: &str, dest: &Path) -> Result<String, GitError> {
     if dest.join(".git").exists() {
         return update(dest);
@@ -55,7 +56,7 @@ fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
         let mut remote = repo.find_remote("origin")?;
         remote.fetch::<&str>(&[], None, None)?;
     }
-    // Fast-forward current branch to FETCH_HEAD.
+    // Align current branch to FETCH_HEAD, including force-pushed remote histories.
     let fetch_head = repo.find_reference("FETCH_HEAD")?;
     let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
     let analysis = repo.merge_analysis(&[&fetch_commit])?;
@@ -63,15 +64,25 @@ fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
         let head = repo.head()?.peel_to_commit()?;
         return Ok(head.id().to_string());
     }
+    let refname = {
+        let head = repo.head()?;
+        head.name().unwrap_or("HEAD").to_string()
+    };
     if analysis.0.is_fast_forward() {
-        let refname = {
-            let head = repo.head()?;
-            head.name().unwrap_or("HEAD").to_string()
-        };
         let mut reference = repo.find_reference(&refname)?;
         reference.set_target(fetch_commit.id(), "modsync fast-forward")?;
         repo.set_head(&refname)?;
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
+        repo.checkout_head(Some(CheckoutBuilder::default().force()))?;
+    } else {
+        let target = repo.find_commit(fetch_commit.id())?;
+        let mut reference = repo.find_reference(&refname)?;
+        reference.set_target(fetch_commit.id(), "modsync force update")?;
+        repo.set_head(&refname)?;
+        repo.reset(
+            target.as_object(),
+            ResetType::Hard,
+            Some(CheckoutBuilder::default().force()),
+        )?;
     }
     let head = repo.head()?.peel_to_commit()?;
     Ok(head.id().to_string())
