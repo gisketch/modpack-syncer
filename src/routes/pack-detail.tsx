@@ -23,7 +23,7 @@ import {
   SlidersHorizontal,
   UploadCloudIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PackIcon } from "@/components/pack-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -215,6 +215,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [publishPushProgress, setPublishPushProgress] = useState<PublishPushProgressEvent | null>(
     null,
   );
+  const [publishPushRate, setPublishPushRate] = useState<number | null>(null);
+  const publishPushRateRef = useRef<{ bytes: number; at: number } | null>(null);
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
@@ -255,6 +257,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     void listen<PublishPushProgressEvent>("publish-push-progress", (event) => {
       if (event.payload.packId !== packId) return;
       setPublishPushProgress(event.payload);
+      if (typeof event.payload.bytes === "number") {
+        const now = Date.now();
+        const previous = publishPushRateRef.current;
+        if (previous && now > previous.at && event.payload.bytes >= previous.bytes) {
+          setPublishPushRate(((event.payload.bytes - previous.bytes) * 1000) / (now - previous.at));
+        }
+        publishPushRateRef.current = { bytes: event.payload.bytes, at: now };
+      } else if (event.payload.stage !== "uploading") {
+        publishPushRateRef.current = null;
+        setPublishPushRate(null);
+      }
       if (event.payload.message) {
         setPublishLogs((current) => [...current, event.payload.message as string]);
       }
@@ -821,6 +834,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         bytes: null,
         message: null,
       });
+      publishPushRateRef.current = null;
+      setPublishPushRate(null);
       const pushed = await tauri.commitAndPushPublish(
         packId,
         message,
@@ -1069,6 +1084,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={publishReport}
         scanProgress={publishScanProgress}
         pushProgress={publishPushProgress}
+        pushRateBytesPerSecond={publishPushRate}
         applying={publishApplyOnly.isPending}
         publishing={publishPush.isPending}
         publishLogs={publishLogs}

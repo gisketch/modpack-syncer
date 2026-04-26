@@ -45,6 +45,7 @@ type PublishPreviewPageProps = {
   report: PublishScanReport | null;
   scanProgress?: PublishScanProgressEvent | null;
   pushProgress?: PublishPushProgressEvent | null;
+  pushRateBytesPerSecond?: number | null;
   applying?: boolean;
   publishing: boolean;
   publishLogs: string[];
@@ -61,6 +62,7 @@ export function PublishPreviewPage({
   report,
   scanProgress,
   pushProgress,
+  pushRateBytesPerSecond,
   applying = false,
   publishing,
   publishLogs,
@@ -228,7 +230,12 @@ export function PublishPreviewPage({
                 <CardStatus>{publishing ? "Streaming" : "Idle"}</CardStatus>
               </CardWindowBar>
               <CardContent className="space-y-0 px-0 py-0">
-                {pushProgress ? <PublishProgressView progress={pushProgress} /> : null}
+                {pushProgress ? (
+                  <PublishProgressView
+                    progress={pushProgress}
+                    rateBytesPerSecond={pushRateBytesPerSecond}
+                  />
+                ) : null}
                 <ScrollArea className="h-56 px-4 py-4">
                   <div className="flex flex-col gap-2 font-mono text-xs text-text-low">
                     {publishLogs.map((line) => (
@@ -480,13 +487,19 @@ function PreviewRow({ k, v }: { k: string; v: string }) {
   );
 }
 
-function PublishProgressView({ progress }: { progress: PublishPushProgressEvent }) {
+function PublishProgressView({
+  progress,
+  rateBytesPerSecond,
+}: {
+  progress: PublishPushProgressEvent;
+  rateBytesPerSecond?: number | null;
+}) {
   const percent =
     progress.total > 0 ? Math.min(100, (progress.completed / progress.total) * 100) : 0;
   const detail = progress.currentPath
     ? progress.currentPath
     : progress.bytes
-      ? `${formatBytes(progress.bytes)} uploaded`
+      ? `${formatBytes(progress.bytes)} uploaded${rateBytesPerSecond ? ` @ ${formatBytes(rateBytesPerSecond)}/s` : ""}`
       : progress.total > 0
         ? `${progress.completed} / ${progress.total}`
         : (progress.message ?? "waiting for remote");

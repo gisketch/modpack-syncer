@@ -11,7 +11,7 @@ Authoring and pack-publish behavior exposed by the app today.
 5. Apply publish MUST bump `manifest.pack.version` to the user-provided version or, if omitted, to the next patch version.
 6. Commit and push MUST use libgit2 against the current branch, authenticate with the selected method, and fail if push does not complete within the command timeout.
 7. Publish push timeout MUST allow long GitHub uploads up to 5 minutes before failing.
-8. Publish push MUST emit progress events for staging, pack building, upload transfer, remote responses, and completion so the publish preview can show live progress.
+8. Publish push MUST emit progress events for staging, pack building, upload transfer, remote responses, and completion so the publish preview can show live progress, including an upload transfer rate when byte counts advance.
 9. Publish preview scan MUST be metadata-only and MUST NOT hash file contents while opening Publish Preview.
 10. Publish scan MUST emit stage progress for mods, resourcepacks, shaderpacks, config, shader settings, presets, kubejs, options, and done.
 11. Publish Preview MAY offer a push-current-repo-only mode that skips instance apply and only commits/pushes current repository changes, for retries after files were already applied or instance files are locked by Windows.

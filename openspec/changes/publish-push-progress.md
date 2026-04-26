@@ -7,7 +7,7 @@ Make long publish pushes observable and less likely to fail on large uploads.
 ## Requirements
 
 1. Publish push MUST allow up to 5 minutes before timeout.
-2. Publish push MUST report staging, pack building, upload, remote, and done progress.
+2. Publish push MUST report staging, pack building, upload, remote, done progress, and upload transfer rate when byte counts advance.
 3. Publish Preview MUST show live push progress while commit/amend/push is running.
 4. Amend previous publish MUST force-push the current branch through libgit2.
 5. Publish scan MUST avoid SHA hashing and use metadata-only comparison for preview speed.
