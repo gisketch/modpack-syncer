@@ -853,6 +853,38 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Publish push failed", { description: formatError(e) });
     },
   });
+  const publishApplyOnly = useMutation({
+    mutationFn: async ({ version }: { version: string }) => {
+      setPublishLogs((current) => [...current, "> apply manifest changes to local repo"]);
+      const applied = await tauri.applyInstancePublish(
+        packId,
+        undefined,
+        version,
+        publishIgnorePatterns,
+      );
+      setPublishLogs((current) => [
+        ...current,
+        `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
+        "> local repo ready for manual git commit/push",
+      ]);
+      return applied;
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
+        qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
+      ]);
+      toast.success("Applied to local repo", {
+        description: "Open pack folder to commit or push manually.",
+      });
+    },
+    onError: (error) => {
+      setPublishLogs((current) => [...current, `error :: ${formatError(error)}`]);
+      toast.error("Apply failed", { description: formatError(error) });
+    },
+  });
 
   function handleLaunchClick() {
     if (needsPackSync) {
@@ -1037,10 +1069,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         report={publishReport}
         scanProgress={publishScanProgress}
         pushProgress={publishPushProgress}
+        applying={publishApplyOnly.isPending}
         publishing={publishPush.isPending}
         publishLogs={publishLogs}
         ignorePatterns={publishIgnorePatterns}
         onIgnorePatternsChange={(patterns) => setPublishIgnorePatterns(packId, patterns)}
+        onApply={(version) => publishApplyOnly.mutate({ version })}
         onPublish={(message, version, amendPrevious, skipApply) =>
           publishPush.mutate({ message, version, amendPrevious, skipApply })
         }

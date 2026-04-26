@@ -1269,19 +1269,58 @@ where
 }
 
 fn copy_file_to_repo(src: &std::path::Path, dst: &std::path::Path) -> Result<(), CommandError> {
+    if same_existing_file(src, dst) {
+        return Ok(());
+    }
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::copy(src, dst)?;
+    retry_windows_file_lock(
+        &format!("copy {} -> {}", src.display(), dst.display()),
+        || std::fs::copy(src, dst),
+    )?;
     Ok(())
+}
+
+fn same_existing_file(left: &std::path::Path, right: &std::path::Path) -> bool {
+    if !left.exists() || !right.exists() {
+        return false;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn remove_path_if_exists(path: &std::path::Path) -> Result<bool, CommandError> {
     if !path.exists() {
         return Ok(false);
     }
-    std::fs::remove_file(path)?;
+    retry_windows_file_lock(&format!("remove {}", path.display()), || {
+        std::fs::remove_file(path)
+    })?;
     Ok(true)
+}
+
+fn retry_windows_file_lock<T, F>(label: &str, mut op: F) -> Result<T, CommandError>
+where
+    F: FnMut() -> std::io::Result<T>,
+{
+    const ATTEMPTS: usize = 20;
+    for attempt in 0..ATTEMPTS {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(error) if is_windows_lock_error(&error) && attempt + 1 < ATTEMPTS => {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(error) => return Err(CommandError::Io(format!("{label}: {error}"))),
+        }
+    }
+    Err(CommandError::Io(format!("{label}: file stayed locked")))
+}
+
+fn is_windows_lock_error(error: &std::io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(32 | 33))
 }
 
 fn unique_local_id(

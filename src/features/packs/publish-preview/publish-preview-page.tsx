@@ -45,10 +45,12 @@ type PublishPreviewPageProps = {
   report: PublishScanReport | null;
   scanProgress?: PublishScanProgressEvent | null;
   pushProgress?: PublishPushProgressEvent | null;
+  applying?: boolean;
   publishing: boolean;
   publishLogs: string[];
   ignorePatterns?: string[];
   onIgnorePatternsChange?: (patterns: string[]) => void;
+  onApply: (version: string) => void;
   onPublish: (message: string, version: string, amendPrevious: boolean, skipApply: boolean) => void;
 };
 
@@ -59,8 +61,10 @@ export function PublishPreviewPage({
   report,
   scanProgress,
   pushProgress,
+  applying = false,
   publishing,
   publishLogs,
+  onApply,
   onPublish,
 }: PublishPreviewPageProps) {
   const counts = summarizePublishReport(report);
@@ -176,23 +180,43 @@ export function PublishPreviewPage({
                     PUSH CURRENT REPO ONLY
                   </button>
                 </div>
-                <Button
-                  variant="default"
-                  onClick={() =>
-                    onPublish(
-                      buildCommitMessage(commitTitle, commitDescription),
-                      publishVersion.data ?? "",
-                      amendPrevious,
-                      skipApply,
-                    )
-                  }
-                  disabled={
-                    publishing || !hasChanges || publishVersion.isLoading || !!publishVersion.error
-                  }
-                >
-                  {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-                  {amendPrevious ? "AMEND + FORCE PUSH" : "COMMIT + PUSH"}
-                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => onApply(publishVersion.data ?? "")}
+                    disabled={
+                      applying ||
+                      publishing ||
+                      !hasChanges ||
+                      publishVersion.isLoading ||
+                      !!publishVersion.error
+                    }
+                  >
+                    {applying ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+                    APPLY TO LOCAL REPO
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={() =>
+                      onPublish(
+                        buildCommitMessage(commitTitle, commitDescription),
+                        publishVersion.data ?? "",
+                        amendPrevious,
+                        skipApply,
+                      )
+                    }
+                    disabled={
+                      publishing ||
+                      applying ||
+                      !hasChanges ||
+                      publishVersion.isLoading ||
+                      !!publishVersion.error
+                    }
+                  >
+                    {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+                    {amendPrevious ? "AMEND + FORCE PUSH" : "COMMIT + PUSH"}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
