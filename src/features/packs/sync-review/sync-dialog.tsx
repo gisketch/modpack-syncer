@@ -39,7 +39,7 @@ export function SyncDialog({
 }: SyncDialogProps) {
   const total = Math.max(progress?.total ?? 0, 1);
   const completed = Math.min(progress?.completed ?? 0, total);
-  const currentLabel = progressView?.title ?? progressView?.filename ?? "Preparing sync";
+  const currentLabel = progressView?.title ?? progressView?.filename ?? syncCurrentLabel(progress);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -87,7 +87,7 @@ export function SyncDialog({
                       ) : progress?.status === "downloaded" || progress?.status === "cached" ? (
                         <Check className="size-4 text-brand-core" />
                       ) : progress?.status === "downloading" ||
-                        progress?.status === "writing-instance" ? (
+                        isSyncWorkStatus(progress?.status) ? (
                         <Loader2 className="size-4 animate-spin text-brand-core" />
                       ) : (
                         <Package className="size-4 text-text-low" />
@@ -96,9 +96,7 @@ export function SyncDialog({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-text-high">{currentLabel}</p>
                       <p className="truncate font-mono text-[10px] text-text-low">
-                        {progress?.status === "writing-instance"
-                          ? "Writing Prism instance"
-                          : (progressView?.filename ?? "Waiting for next artifact")}
+                        {syncCurrentPath(progress, progressView?.filename)}
                       </p>
                     </div>
                     <StatusChip status={syncProgressToStatus(progress)} />
@@ -229,7 +227,10 @@ function StatusChip({
 
 function syncProgressLabel(progress: SyncProgressEvent | null) {
   if (!progress) return "WORKING";
+  if (progress.status === "resolving-artifacts") return "RESOLVING";
   if (progress.status === "writing-instance") return "WRITING";
+  if (progress.status === "syncing-options") return "OPTIONS";
+  if (progress.status === "syncing-shaders") return "SHADERS";
   if (progress.status === "cached") return "CACHED";
   if (progress.status === "downloaded") return "DOWNLOADED";
   if (progress.status === "failed") return "FAILED";
@@ -237,12 +238,49 @@ function syncProgressLabel(progress: SyncProgressEvent | null) {
   return "DOWNLOADING";
 }
 
+function syncCurrentLabel(progress: SyncProgressEvent | null) {
+  if (!progress) return "Preparing sync";
+  if (progress.status === "resolving-artifacts") return "Resolving local files";
+  if (progress.status === "writing-instance") return "Writing Prism instance";
+  if (progress.status === "syncing-options") return "Applying options";
+  if (progress.status === "syncing-shaders") return "Applying shader settings";
+  if (progress.status === "done") return "Sync complete";
+  return "Preparing sync";
+}
+
 function syncProgressDescription(progress: SyncProgressEvent | null) {
   if (!progress) return "Downloading + writing Prism instance...";
+  if (progress.status === "resolving-artifacts") {
+    return `Resolving cached and repo artifacts · ${progress.completed}/${progress.total}`;
+  }
   if (progress.status === "writing-instance") {
-    return `Writing instance files · ${progress.completed}/${progress.total}`;
+    return `Writing mods, resourcepacks, and shaderpacks · ${progress.completed}/${progress.total}`;
+  }
+  if (progress.status === "syncing-options") {
+    return `Applying option preset and keybind/video settings · ${progress.completed}/${progress.total}`;
+  }
+  if (progress.status === "syncing-shaders") {
+    return `Applying shader settings · ${progress.completed}/${progress.total}`;
   }
   return `${progress.completed}/${progress.total} artifacts processed`;
+}
+
+function syncCurrentPath(progress: SyncProgressEvent | null, filename: string | null | undefined) {
+  if (!progress) return "Waiting for next artifact";
+  if (progress.status === "resolving-artifacts") return "Cache + repository entries";
+  if (progress.status === "writing-instance") return "mods/, resourcepacks/, shaderpacks/";
+  if (progress.status === "syncing-options") return "options.txt + selected preset";
+  if (progress.status === "syncing-shaders") return "shaderpacks/*.txt";
+  return filename ?? "Waiting for next artifact";
+}
+
+function isSyncWorkStatus(status: SyncProgressEvent["status"] | undefined) {
+  return (
+    status === "resolving-artifacts" ||
+    status === "writing-instance" ||
+    status === "syncing-options" ||
+    status === "syncing-shaders"
+  );
 }
 
 function syncProgressToStatus(progress: SyncProgressEvent | null): ModStatusValue {

@@ -106,6 +106,23 @@ pub async fn sync_instance(
         )));
     }
 
+    let fetch_completed =
+        fetch_report.cached + fetch_report.downloaded + fetch_report.failures.len();
+    let total_work = fetch_report.total + 4;
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressEvent {
+            pack_id: pack_id.clone(),
+            filename: None,
+            status: "resolving-artifacts",
+            completed: fetch_completed + 1,
+            total: total_work,
+            cached: fetch_report.cached,
+            downloaded: fetch_report.downloaded,
+            failures: fetch_report.failures.len(),
+        },
+    );
+
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let existing_instance_root = prism::instance_minecraft_dir(&instance_name);
     let shaderpack_fallback_dir = existing_instance_root
@@ -127,8 +144,8 @@ pub async fn sync_instance(
             pack_id: pack_id.clone(),
             filename: None,
             status: "writing-instance",
-            completed: fetch_report.cached + fetch_report.downloaded,
-            total: fetch_report.total,
+            completed: fetch_completed + 2,
+            total: total_work,
             cached: fetch_report.cached,
             downloaded: fetch_report.downloaded,
             failures: fetch_report.failures.len(),
@@ -137,13 +154,8 @@ pub async fn sync_instance(
     let pack_dir_clone = pack_dir.clone();
     let manifest_clone = manifest.clone();
     let instance_name_clone = instance_name.clone();
-    let apply_shader_settings = sync_shader_settings.unwrap_or(false);
-    let enabled_option_categories =
-        option_sync_categories.unwrap_or_else(default_options_sync_categories);
-    let option_preset_selection =
-        resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     let inst_report = tokio::task::spawn_blocking(move || {
-        let report = prism::write_instance(
+        prism::write_instance(
             &instance_name_clone,
             &manifest_clone,
             &resolved_mods,
@@ -151,24 +163,72 @@ pub async fn sync_instance(
             &resolved_shaderpacks,
             &pack_dir_clone,
             Some(&launch_profile),
-        )?;
+        )
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    let apply_shader_settings = sync_shader_settings.unwrap_or(false);
+    let enabled_option_categories =
+        option_sync_categories.unwrap_or_else(default_options_sync_categories);
+    let option_preset_selection =
+        resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
+
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressEvent {
+            pack_id: pack_id.clone(),
+            filename: None,
+            status: "syncing-options",
+            completed: fetch_completed + 3,
+            total: total_work,
+            cached: fetch_report.cached,
+            downloaded: fetch_report.downloaded,
+            failures: fetch_report.failures.len(),
+        },
+    );
+    let pack_dir_clone = pack_dir.clone();
+    let instance_name_clone = instance_name.clone();
+    let option_preset_selection_clone = option_preset_selection.clone();
+    let enabled_option_categories_clone = enabled_option_categories.clone();
+    tokio::task::spawn_blocking(move || {
         apply_options_sync(
             &pack_dir_clone.join("options.txt"),
             &instance_name_clone,
-            &option_preset_selection,
-            &enabled_option_categories,
-        )?;
-        if apply_shader_settings {
+            &option_preset_selection_clone,
+            &enabled_option_categories_clone,
+        )
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    if apply_shader_settings {
+        let _ = app.emit(
+            "sync-progress",
+            SyncProgressEvent {
+                pack_id: pack_id.clone(),
+                filename: None,
+                status: "syncing-shaders",
+                completed: fetch_completed + 4,
+                total: total_work,
+                cached: fetch_report.cached,
+                downloaded: fetch_report.downloaded,
+                failures: fetch_report.failures.len(),
+            },
+        );
+        let pack_dir_clone = pack_dir.clone();
+        let instance_name_clone = instance_name.clone();
+        let option_preset_selection = option_preset_selection.clone();
+        tokio::task::spawn_blocking(move || {
             apply_shader_settings_sync(
                 &pack_dir_clone,
                 &instance_name_clone,
                 &option_preset_selection,
-            )?;
-        }
-        Ok::<_, CommandError>(report)
-    })
-    .await
-    .map_err(|e| CommandError::Other(e.to_string()))??;
+            )
+        })
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+    }
 
     let _ = app.emit(
         "sync-progress",
@@ -176,8 +236,8 @@ pub async fn sync_instance(
             pack_id: pack_id.clone(),
             filename: None,
             status: "done",
-            completed: fetch_report.total,
-            total: fetch_report.total,
+            completed: total_work,
+            total: total_work,
             cached: fetch_report.cached,
             downloaded: fetch_report.downloaded,
             failures: fetch_report.failures.len(),

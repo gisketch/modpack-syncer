@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, FolderGit2, Loader2, Search } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitCommitHorizontal, Loader2, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,7 @@ import {
   type PublishAction,
   type PublishCategory,
   type PublishScanItem,
+  type PublishScanProgressEvent,
   type PublishScanReport,
   tauri,
 } from "@/lib/tauri";
@@ -53,11 +54,12 @@ type PublishPreviewPageProps = {
   onClose: () => void;
   pending: boolean;
   report: PublishScanReport | null;
+  scanProgress: PublishScanProgressEvent | null;
   publishing: boolean;
   publishLogs: string[];
   ignorePatterns: string[];
   onIgnorePatternsChange: (patterns: string[]) => void;
-  onPublish: (message: string, version: string) => void;
+  onPublish: (message: string, version: string, amendPrevious: boolean) => void;
 };
 
 export function PublishPreviewPage({
@@ -65,6 +67,7 @@ export function PublishPreviewPage({
   onClose,
   pending,
   report,
+  scanProgress,
   publishing,
   publishLogs,
   ignorePatterns,
@@ -125,11 +128,29 @@ export function PublishPreviewPage({
   });
   const [commitTitle, setCommitTitle] = useState("Publish instance changes");
   const [commitDescription, setCommitDescription] = useState("");
+  const [amendPrevious, setAmendPrevious] = useState(false);
+  const latestChangelog = useQuery({
+    queryKey: ["pack-changelog", packId, "latest-for-amend"],
+    queryFn: () => tauri.packChangelog(packId, 1),
+    enabled: !!report && amendPrevious,
+    retry: false,
+  });
+  const publishVersionValue = amendPrevious
+    ? (manifest.data?.pack.version ?? "")
+    : (publishVersion.data ?? "");
 
   useEffect(() => {
-    if (!publishVersion.data) return;
+    if (!publishVersion.data || amendPrevious) return;
     setCommitTitle(`Update ${publishVersion.data}`);
-  }, [publishVersion.data]);
+  }, [amendPrevious, publishVersion.data]);
+
+  useEffect(() => {
+    if (!amendPrevious) return;
+    const latest = latestChangelog.data?.[0];
+    if (!latest) return;
+    setCommitTitle(latest.title || "Publish instance changes");
+    setCommitDescription(latest.description || "");
+  }, [amendPrevious, latestChangelog.data]);
 
   function addIgnorePattern(pattern: string) {
     const cleaned = normalizePublishPattern(pattern);
@@ -175,9 +196,38 @@ export function PublishPreviewPage({
 
       {pending && (
         <Card>
-          <CardContent className="flex items-center gap-3 p-6 text-text-low">
-            <Loader2 className="size-4 animate-spin text-brand-core" />
-            <span className="text-sm">Reading instance folders</span>
+          <CardContent className="flex flex-col gap-4 p-6 text-text-low">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <Loader2 className="size-4 shrink-0 animate-spin text-brand-core" />
+                <div className="min-w-0">
+                  <p className="text-sm text-text-high">
+                    {scanProgress?.stage?.toUpperCase() ?? "READING INSTANCE"}
+                  </p>
+                  <p className="truncate font-mono text-[10px] text-text-low">
+                    {scanProgress?.currentPath ?? "Preparing scan"}
+                  </p>
+                </div>
+              </div>
+              <span className="font-mono text-xs tabular-nums">
+                {scanProgress?.completed ?? 0}/{scanProgress?.total ?? 1}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden bg-surface-sunken">
+              <div
+                className="h-full bg-brand-core transition-[width] duration-300 ease-out"
+                style={{
+                  width: `${Math.max(
+                    6,
+                    Math.min(
+                      100,
+                      ((scanProgress?.completed ?? 0) / Math.max(scanProgress?.total ?? 1, 1)) *
+                        100,
+                    ),
+                  )}%`,
+                }}
+              />
+            </div>
           </CardContent>
         </Card>
       )}
@@ -186,7 +236,23 @@ export function PublishPreviewPage({
         <>
           <Card>
             <CardContent className="flex flex-col gap-4 p-6">
-              <Input value={publishVersion.data ?? ""} placeholder="Pack version" disabled />
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                <Input value={publishVersionValue} placeholder="Pack version" disabled />
+                <Button
+                  variant={amendPrevious ? "default" : "outline"}
+                  onClick={() => setAmendPrevious((current) => !current)}
+                  disabled={publishing}
+                >
+                  <GitCommitHorizontal />
+                  AMEND PREVIOUS UPDATE
+                </Button>
+              </div>
+              {amendPrevious ? (
+                <div className="border border-signal-warn/25 bg-signal-warn/8 px-4 py-3 text-sm text-signal-warn [text-wrap:pretty]">
+                  Current changes will be folded into previous publish commit, then pushed with
+                  amended title and description.
+                </div>
+              ) : null}
               <Input
                 value={commitTitle}
                 onChange={(event) => setCommitTitle(event.target.value)}
@@ -209,15 +275,19 @@ export function PublishPreviewPage({
                   onClick={() =>
                     onPublish(
                       buildCommitMessage(commitTitle, commitDescription),
-                      publishVersion.data ?? "",
+                      publishVersionValue,
+                      amendPrevious,
                     )
                   }
                   disabled={
-                    publishing || !hasChanges || publishVersion.isLoading || !!publishVersion.error
+                    publishing ||
+                    (!hasChanges && !amendPrevious) ||
+                    !commitTitle.trim() ||
+                    (!amendPrevious && (publishVersion.isLoading || !!publishVersion.error))
                   }
                 >
                   {publishing ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-                  COMMIT + PUSH
+                  {amendPrevious ? "AMEND + PUSH" : "COMMIT + PUSH"}
                 </Button>
               </div>
             </CardContent>
@@ -419,7 +489,7 @@ export function PublishPreviewPage({
                                               </TableCell>
                                             ) : null}
                                             <TableCell className="px-3 py-1.5 align-top text-xs text-text-low">
-                                              {item.source ?? "instance-local"}
+                                              {publishSourceLabel(item)}
                                             </TableCell>
                                             <TableCell className="px-3 py-1.5 text-right align-top font-mono text-xs text-text-low tabular-nums">
                                               {typeof item.size === "number"
@@ -676,15 +746,34 @@ function withAllManifestMods(items: PublishScanItem[], mods: ManifestEntry[]) {
 }
 
 function publishDisplayName(item: PublishScanReport["items"][number]) {
+  const base =
+    item.relativePath
+      .split("/")
+      .pop()
+      ?.replace(/\.(jar|zip)$/i, "") ?? item.relativePath;
+  if (item.source === "manifest-removed") return `${base} removed from mod list`;
+  if (item.source === "manifest-added") return `${base} added to mod list`;
+  if (item.source?.startsWith("manifest-optional:")) {
+    const next = item.source.endsWith(":optional") ? "optional" : "required";
+    return `${base} now ${next}`;
+  }
+  if (item.source === "manifest-edited") return `${base} manifest changed`;
+  if (item.source === "manifest-version") return item.relativePath;
   if (isArtifactCategory(item.category)) {
-    return (
-      item.relativePath
-        .split("/")
-        .pop()
-        ?.replace(/\.(jar|zip)$/i, "") ?? item.relativePath
-    );
+    return base;
   }
   return item.relativePath;
+}
+
+function publishSourceLabel(item: PublishScanReport["items"][number]) {
+  if (item.source === "manifest-removed") return "manifest remove";
+  if (item.source === "manifest-added") return "manifest add";
+  if (item.source?.startsWith("manifest-optional:")) {
+    return item.source.endsWith(":optional") ? "manifest optional" : "manifest required";
+  }
+  if (item.source === "manifest-edited") return "manifest edit";
+  if (item.source === "manifest-version") return "manifest version";
+  return item.source ?? "instance-local";
 }
 
 function isArtifactCategory(category: PublishCategory) {

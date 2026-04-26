@@ -75,6 +75,14 @@ export type PublishScanReport = {
   items: PublishScanItem[];
 };
 
+export type PublishScanProgressEvent = {
+  packId: string;
+  stage: string;
+  currentPath?: string | null;
+  completed: number;
+  total: number;
+};
+
 export type PublishAuthSettings = {
   method?: string | null;
   hasPat: boolean;
@@ -260,6 +268,17 @@ export type ModrinthVersionSummary = {
   datePublished?: string | null;
 };
 
+export type ModrinthDependencySummary = {
+  projectId: string;
+  versionId: string;
+  slug: string;
+  title: string;
+  iconUrl?: string | null;
+  versionNumber: string;
+  filename: string;
+  alreadyTracked: boolean;
+};
+
 export type PrismLocation = {
   data_dir: string;
   binary: string;
@@ -327,7 +346,10 @@ export type SyncProgressStatus =
   | "cached"
   | "downloaded"
   | "failed"
+  | "resolving-artifacts"
   | "writing-instance"
+  | "syncing-options"
+  | "syncing-shaders"
   | "done";
 
 export type SyncProgressEvent = {
@@ -371,8 +393,27 @@ export const tauri = {
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
+  loadSourceManifest: (packId: string) => invoke<Manifest>("load_source_manifest", { packId }),
+  restoreManifestFromSource: (packId: string) =>
+    invoke<Manifest>("restore_manifest_from_source", { packId }),
   setManifestModOptional: (packId: string, filename: string, optional: boolean) =>
     invoke<ManifestEntry>("set_manifest_mod_optional", { packId, filename, optional }),
+  setManifestArtifactOptional: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    filename: string,
+    optional: boolean,
+  ) =>
+    invoke<ManifestEntry>("set_manifest_artifact_optional", {
+      packId,
+      category,
+      filename,
+      optional,
+    }),
+  deleteManifestArtifact: (packId: string, category: ManifestArtifactCategory, filename: string) =>
+    invoke<ManifestEntry>("delete_manifest_artifact", { packId, category, filename }),
+  restoreManifestArtifact: (packId: string, category: ManifestArtifactCategory, filename: string) =>
+    invoke<ManifestEntry>("restore_manifest_artifact", { packId, category, filename }),
   getPublishAuthSettings: () => invoke<PublishAuthSettings>("get_publish_auth_settings"),
   setPublishAuthMethod: (method?: string | null) =>
     invoke<PublishAuthSettings>("set_publish_auth_method", { method }),
@@ -459,6 +500,16 @@ export const tauri = {
       category,
       projectId,
     }),
+  listModrinthVersionDependencies: (
+    packId: string,
+    category: ManifestArtifactCategory,
+    versionId: string,
+  ) =>
+    invoke<ModrinthDependencySummary[]>("list_modrinth_version_dependencies", {
+      packId,
+      category,
+      versionId,
+    }),
   previewModrinthMod: (packId: string, identifier: string, category?: ManifestArtifactCategory) =>
     invoke<ModrinthAddPreview>("preview_modrinth_mod", { packId, identifier, category }),
   addModrinthMod: (
@@ -467,7 +518,16 @@ export const tauri = {
     projectId: string,
     versionId: string,
     side?: Side,
-  ) => invoke<ManifestEntry>("add_modrinth_mod", { packId, category, projectId, versionId, side }),
+    installDependencies?: boolean,
+  ) =>
+    invoke<ManifestEntry>("add_modrinth_mod", {
+      packId,
+      category,
+      projectId,
+      versionId,
+      side,
+      installDependencies,
+    }),
   deleteInstanceMod: (
     packId: string,
     filename: string,
@@ -506,8 +566,18 @@ export const tauri = {
       version,
       ignorePatterns,
     }),
-  commitAndPushPublish: (packId: string, message: string, ignorePatterns?: string[]) =>
-    invoke<PublishPushReport>("commit_and_push_publish", { packId, message, ignorePatterns }),
+  commitAndPushPublish: (
+    packId: string,
+    message: string,
+    ignorePatterns?: string[],
+    amendPrevious?: boolean,
+  ) =>
+    invoke<PublishPushReport>("commit_and_push_publish", {
+      packId,
+      message,
+      ignorePatterns,
+      amendPrevious,
+    }),
 };
 
 export type ModStatusValue =

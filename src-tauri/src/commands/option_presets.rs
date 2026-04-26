@@ -104,6 +104,7 @@ pub struct SaveOptionPresetDraft {
     pub rows: Vec<OptionPresetRow>,
 }
 
+#[derive(Clone)]
 pub enum OptionPresetSelection {
     PackDefault,
     None,
@@ -244,6 +245,11 @@ fn list_option_presets_from_pack(
     }
     presets.sort_by(|left, right| left.label.cmp(&right.label));
     Ok(presets)
+}
+
+fn load_option_preset(pack_dir: &Path, preset_id: &str) -> Result<OptionPreset, CommandError> {
+    let path = option_preset_path(pack_dir, preset_id)?;
+    load_option_preset_path(&path)
 }
 
 fn load_option_preset_path(path: &Path) -> Result<OptionPreset, CommandError> {

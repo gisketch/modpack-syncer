@@ -1,8 +1,19 @@
 use super::{
-    modrinth, CommandError, PublishAction, PublishApplyReport, PublishAuthSettings,
-    PublishCategory, PublishPushReport, PublishScanItem, PublishScanReport,
+    modrinth, CommandError, ManifestArtifactCategory, PublishAction, PublishApplyReport,
+    PublishAuthSettings, PublishCategory, PublishPushReport, PublishScanItem, PublishScanReport,
 };
 use crate::{cache, git, manifest, paths, prism};
+use tauri::Emitter;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishScanProgressEvent {
+    pub pack_id: String,
+    pub stage: String,
+    pub current_path: Option<String>,
+    pub completed: usize,
+    pub total: usize,
+}
 
 #[tauri::command]
 pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandError> {
@@ -15,6 +26,7 @@ pub async fn suggest_publish_version(pack_id: String) -> Result<String, CommandE
 
 #[tauri::command]
 pub async fn scan_instance_publish(
+    app: tauri::AppHandle,
     pack_id: String,
     instance_name: Option<String>,
     ignore_patterns: Option<Vec<String>>,
@@ -38,54 +50,179 @@ pub async fn scan_instance_publish(
 
     tokio::task::spawn_blocking(move || -> Result<PublishScanReport, CommandError> {
         let mut items = Vec::new();
+        let total_steps = 11usize;
+        let mut completed_steps = 0usize;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "mods",
+            Some("mods/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_artifact_dir(
             PublishCategory::Mods,
             &instance_dir_for_scan.join("mods"),
             &manifest.mods,
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "mod repo status",
+            Some("mods/"),
+            completed_steps,
+            total_steps,
+        );
+        items.extend(scan_repo_status_dir(
+            PublishCategory::Mods,
+            &pack_dir,
+            "mods",
+            &ignore_matcher,
+        )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "resourcepacks",
+            Some("resourcepacks/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_artifact_dir(
             PublishCategory::Resourcepacks,
             &instance_dir_for_scan.join("resourcepacks"),
             &manifest.resourcepacks,
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "resourcepack repo status",
+            Some("resourcepacks/"),
+            completed_steps,
+            total_steps,
+        );
+        items.extend(scan_repo_status_dir(
+            PublishCategory::Resourcepacks,
+            &pack_dir,
+            "resourcepacks",
+            &ignore_matcher,
+        )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "shaderpacks",
+            Some("shaderpacks/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_artifact_dir(
             PublishCategory::Shaderpacks,
             &instance_dir_for_scan.join("shaderpacks"),
             &manifest.shaderpacks,
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "shaderpack repo status",
+            Some("shaderpacks/"),
+            completed_steps,
+            total_steps,
+        );
+        items.extend(scan_repo_status_dir(
+            PublishCategory::Shaderpacks,
+            &pack_dir,
+            "shaderpacks",
+            &ignore_matcher,
+        )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "configs",
+            Some("config/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_tree_dir(
             PublishCategory::Config,
             &instance_dir_for_scan.join("config"),
             &pack_dir.join("configs"),
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "shader settings",
+            Some("shaderpacks/*.txt"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_shader_settings_publish(
             &instance_dir_for_scan,
             &pack_dir,
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "option presets",
+            Some("presets/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_repo_status_dir(
             PublishCategory::OptionPresets,
             &pack_dir,
             "presets",
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "kubejs",
+            Some("kubejs/"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_tree_dir(
             PublishCategory::Kubejs,
             &instance_dir_for_scan.join("kubejs"),
             &pack_dir.join("kubejs"),
             &ignore_matcher,
         )?);
+        completed_steps += 1;
+        emit_publish_scan_progress(
+            &app,
+            &pack_id,
+            "root files",
+            Some("options.txt"),
+            completed_steps,
+            total_steps,
+        );
         items.extend(scan_root_files(
             &instance_dir_for_scan,
             &pack_dir,
             &["options.txt"],
             &ignore_matcher,
         )?);
+        items.extend(scan_manifest_status_diff(
+            &pack_dir,
+            &manifest,
+            &ignore_matcher,
+        )?);
+        emit_publish_scan_progress(&app, &pack_id, "complete", None, total_steps, total_steps);
 
+        items.sort_by_key(publish_scan_priority);
         let mut seen = HashSet::new();
         items.retain(|item| {
             seen.insert((item.relative_path.clone(), format!("{:?}", item.category)))
@@ -98,6 +235,26 @@ pub async fn scan_instance_publish(
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+fn emit_publish_scan_progress(
+    app: &tauri::AppHandle,
+    pack_id: &str,
+    stage: &str,
+    current_path: Option<&str>,
+    completed: usize,
+    total: usize,
+) {
+    let _ = app.emit(
+        "publish-scan-progress",
+        PublishScanProgressEvent {
+            pack_id: pack_id.to_string(),
+            stage: stage.to_string(),
+            current_path: current_path.map(ToOwned::to_owned),
+            completed,
+            total,
+        },
+    );
 }
 
 #[tauri::command]
@@ -125,10 +282,143 @@ pub async fn set_manifest_mod_optional(
 }
 
 #[tauri::command]
+pub async fn load_source_manifest(pack_id: String) -> Result<manifest::Manifest, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        let pack_dir = paths::packs_dir()?.join(&pack_id);
+        let Some(bytes) = git::read_head_file(&pack_dir, "manifest.json")? else {
+            return manifest::load_from_path(&pack_dir.join("manifest.json"))
+                .map_err(CommandError::from);
+        };
+        let manifest = serde_json::from_slice::<manifest::Manifest>(&bytes)
+            .map_err(|error| CommandError::Other(error.to_string()))?;
+        Ok(manifest)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn restore_manifest_from_source(
+    pack_id: String,
+) -> Result<manifest::Manifest, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        let pack_dir = paths::packs_dir()?.join(&pack_id);
+        let manifest_path = pack_dir.join("manifest.json");
+        let Some(bytes) = git::read_head_file(&pack_dir, "manifest.json")? else {
+            return manifest::load_from_path(&manifest_path).map_err(CommandError::from);
+        };
+        let manifest = serde_json::from_slice::<manifest::Manifest>(&bytes)
+            .map_err(|error| CommandError::Other(error.to_string()))?;
+        std::fs::write(&manifest_path, bytes)?;
+        Ok(manifest)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn set_manifest_artifact_optional(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    filename: String,
+    optional: bool,
+) -> Result<manifest::Entry, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        validate_artifact_filename(&filename)?;
+        let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let entry = entries_for_category_mut(&mut manifest, category)
+            .iter_mut()
+            .find(|entry| entry.filename == filename)
+            .ok_or_else(|| CommandError::Manifest(format!("artifact not found: {filename}")))?;
+        entry.optional = optional;
+        let updated = entry.clone();
+        write_manifest(&manifest_path, &manifest)?;
+        Ok(updated)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn delete_manifest_artifact(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    filename: String,
+) -> Result<manifest::Entry, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        validate_artifact_filename(&filename)?;
+        let pack_dir = paths::packs_dir()?.join(&pack_id);
+        let manifest_path = pack_dir.join("manifest.json");
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let entries = entries_for_category_mut(&mut manifest, category);
+        let index = entries
+            .iter()
+            .position(|entry| entry.filename == filename)
+            .ok_or_else(|| CommandError::Manifest(format!("artifact not found: {filename}")))?;
+        let removed = entries.remove(index);
+        if removed.source == manifest::Source::Repo {
+            let repo_path = removed.repo_path.clone().unwrap_or_else(|| {
+                format!("{}/{}", artifact_repo_prefix(category), removed.filename)
+            });
+            remove_path_if_exists(&pack_dir.join(repo_path))?;
+        }
+        if let Some(instance_root) = prism::instance_minecraft_dir(&format!("modsync-{pack_id}")) {
+            let artifact_dir = instance_root.join(artifact_instance_dir_name(category));
+            remove_path_if_exists(&artifact_dir.join(&removed.filename))?;
+            remove_path_if_exists(&artifact_dir.join(format!("{}.disabled", removed.filename)))?;
+        }
+        write_manifest(&manifest_path, &manifest)?;
+        Ok(removed)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn restore_manifest_artifact(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    filename: String,
+) -> Result<manifest::Entry, CommandError> {
+    tokio::task::spawn_blocking(move || {
+        validate_artifact_filename(&filename)?;
+        let pack_dir = paths::packs_dir()?.join(&pack_id);
+        let manifest_path = pack_dir.join("manifest.json");
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let Some(bytes) = git::read_head_file(&pack_dir, "manifest.json")? else {
+            return Err(CommandError::Manifest(
+                "source manifest not found".to_string(),
+            ));
+        };
+        let source_manifest = serde_json::from_slice::<manifest::Manifest>(&bytes)
+            .map_err(|error| CommandError::Other(error.to_string()))?;
+        let source_entry = entries_for_category(&source_manifest, category)
+            .iter()
+            .find(|entry| entry.filename == filename)
+            .cloned()
+            .ok_or_else(|| {
+                CommandError::Manifest(format!("source artifact not found: {filename}"))
+            })?;
+        let entries = entries_for_category_mut(&mut manifest, category);
+        if entries.iter().any(|entry| entry.filename == filename) {
+            return Ok(source_entry);
+        }
+        entries.push(source_entry.clone());
+        entries.sort_by(|left, right| left.filename.cmp(&right.filename));
+        write_manifest(&manifest_path, &manifest)?;
+        Ok(source_entry)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
 pub async fn commit_and_push_publish(
     pack_id: String,
     message: String,
     ignore_patterns: Option<Vec<String>>,
+    amend_previous: Option<bool>,
 ) -> Result<PublishPushReport, CommandError> {
     eprintln!("[modsync] publish push command: start for {pack_id}");
     let pack_dir = paths::packs_dir()?.join(&pack_id);
@@ -155,13 +445,20 @@ pub async fn commit_and_push_publish(
         }
     };
     let ignore_matcher = PublishIgnoreMatcher::new(ignore_patterns.unwrap_or_default());
+    let amend_previous = amend_previous.unwrap_or(false);
 
     let commit_sha = tokio::time::timeout(
         std::time::Duration::from_secs(45),
         tokio::task::spawn_blocking(move || {
-            git::commit_and_push_with_filter(&pack_dir, &message, auth, |path| {
-                !ignore_matcher.is_repo_path_ignored(path)
-            })
+            if amend_previous {
+                git::amend_and_push_with_filter(&pack_dir, &message, auth, |path| {
+                    !ignore_matcher.is_repo_path_ignored(path)
+                })
+            } else {
+                git::commit_and_push_with_filter(&pack_dir, &message, auth, |path| {
+                    !ignore_matcher.is_repo_path_ignored(path)
+                })
+            }
         }),
     )
     .await
@@ -682,6 +979,139 @@ fn scan_repo_status_dir(
     Ok(out)
 }
 
+fn scan_manifest_status_diff(
+    repo_root: &std::path::Path,
+    current: &manifest::Manifest,
+    ignore_matcher: &PublishIgnoreMatcher,
+) -> Result<Vec<PublishScanItem>, CommandError> {
+    let Some(bytes) = git::read_head_file(repo_root, "manifest.json")? else {
+        return Ok(Vec::new());
+    };
+    let Ok(head) = serde_json::from_slice::<manifest::Manifest>(&bytes) else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    out.extend(scan_manifest_entry_diff(
+        PublishCategory::Mods,
+        &head.mods,
+        &current.mods,
+        ignore_matcher,
+    ));
+    out.extend(scan_manifest_entry_diff(
+        PublishCategory::Resourcepacks,
+        &head.resourcepacks,
+        &current.resourcepacks,
+        ignore_matcher,
+    ));
+    out.extend(scan_manifest_entry_diff(
+        PublishCategory::Shaderpacks,
+        &head.shaderpacks,
+        &current.shaderpacks,
+        ignore_matcher,
+    ));
+    if head.pack.version != current.pack.version {
+        out.push(PublishScanItem {
+            category: PublishCategory::Root,
+            relative_path: format!(
+                "pack version {} -> {}",
+                head.pack.version, current.pack.version
+            ),
+            size: None,
+            sha1: None,
+            action: PublishAction::Update,
+            source: Some("manifest-version".to_string()),
+        });
+    }
+    out.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(out)
+}
+
+fn scan_manifest_entry_diff(
+    category: PublishCategory,
+    head_entries: &[manifest::Entry],
+    current_entries: &[manifest::Entry],
+    ignore_matcher: &PublishIgnoreMatcher,
+) -> Vec<PublishScanItem> {
+    use std::collections::HashMap;
+
+    let head_by_filename = head_entries
+        .iter()
+        .map(|entry| (entry.filename.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let current_by_filename = current_entries
+        .iter()
+        .map(|entry| (entry.filename.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut out = Vec::new();
+
+    for entry in head_entries {
+        if current_by_filename.contains_key(entry.filename.as_str())
+            || ignore_matcher.is_ignored(&category, &entry.filename)
+        {
+            continue;
+        }
+        out.push(PublishScanItem {
+            category: category.clone(),
+            relative_path: entry.filename.clone(),
+            size: Some(entry.size),
+            sha1: Some(entry.sha1.clone()),
+            action: PublishAction::Remove,
+            source: Some("manifest-removed".to_string()),
+        });
+    }
+
+    for entry in current_entries {
+        if ignore_matcher.is_ignored(&category, &entry.filename) {
+            continue;
+        }
+        let Some(head_entry) = head_by_filename.get(entry.filename.as_str()) else {
+            out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: entry.filename.clone(),
+                size: Some(entry.size),
+                sha1: Some(entry.sha1.clone()),
+                action: PublishAction::Add,
+                source: Some("manifest-added".to_string()),
+            });
+            continue;
+        };
+        if head_entry.optional != entry.optional {
+            out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: entry.filename.clone(),
+                size: Some(entry.size),
+                sha1: Some(entry.sha1.clone()),
+                action: PublishAction::Update,
+                source: Some(format!(
+                    "manifest-optional:{}",
+                    if entry.optional {
+                        "optional"
+                    } else {
+                        "required"
+                    }
+                )),
+            });
+            continue;
+        }
+        if head_entry.source != entry.source
+            || head_entry.side != entry.side
+            || head_entry.version_id != entry.version_id
+            || !head_entry.sha1.eq_ignore_ascii_case(&entry.sha1)
+        {
+            out.push(PublishScanItem {
+                category: category.clone(),
+                relative_path: entry.filename.clone(),
+                size: Some(entry.size),
+                sha1: Some(entry.sha1.clone()),
+                action: PublishAction::Update,
+                source: Some("manifest-edited".to_string()),
+            });
+        }
+    }
+
+    out
+}
+
 fn publish_action_from_git_status(status: git2::Status) -> PublishAction {
     if status.intersects(git2::Status::WT_DELETED | git2::Status::INDEX_DELETED) {
         PublishAction::Remove
@@ -698,6 +1128,18 @@ fn publish_action_from_git_status(status: git2::Status) -> PublishAction {
         PublishAction::Update
     } else {
         PublishAction::Unchanged
+    }
+}
+
+fn publish_scan_priority(item: &PublishScanItem) -> u8 {
+    if item
+        .source
+        .as_deref()
+        .is_some_and(|source| source.starts_with("manifest-"))
+    {
+        0
+    } else {
+        1
     }
 }
 
@@ -775,6 +1217,56 @@ fn is_disabled_artifact_filename(filename: &str) -> bool {
 
 fn disabled_artifact_path(instance_dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
     instance_dir.join(format!("{filename}.disabled"))
+}
+
+fn validate_artifact_filename(filename: &str) -> Result<(), CommandError> {
+    if filename.contains('/') || filename.contains('\\') || filename.trim().is_empty() {
+        return Err(CommandError::Other("invalid artifact filename".to_string()));
+    }
+    Ok(())
+}
+
+fn write_manifest(
+    manifest_path: &std::path::Path,
+    manifest: &manifest::Manifest,
+) -> Result<(), CommandError> {
+    let manifest_bytes = serde_json::to_vec_pretty(manifest).map_err(anyhow::Error::from)?;
+    std::fs::write(manifest_path, manifest_bytes)?;
+    Ok(())
+}
+
+fn entries_for_category_mut(
+    manifest: &mut manifest::Manifest,
+    category: ManifestArtifactCategory,
+) -> &mut Vec<manifest::Entry> {
+    match category {
+        ManifestArtifactCategory::Mods => &mut manifest.mods,
+        ManifestArtifactCategory::Resourcepacks => &mut manifest.resourcepacks,
+        ManifestArtifactCategory::Shaderpacks => &mut manifest.shaderpacks,
+    }
+}
+
+fn entries_for_category(
+    manifest: &manifest::Manifest,
+    category: ManifestArtifactCategory,
+) -> &[manifest::Entry] {
+    match category {
+        ManifestArtifactCategory::Mods => &manifest.mods,
+        ManifestArtifactCategory::Resourcepacks => &manifest.resourcepacks,
+        ManifestArtifactCategory::Shaderpacks => &manifest.shaderpacks,
+    }
+}
+
+fn artifact_repo_prefix(category: ManifestArtifactCategory) -> &'static str {
+    match category {
+        ManifestArtifactCategory::Mods => "mods",
+        ManifestArtifactCategory::Resourcepacks => "resourcepacks",
+        ManifestArtifactCategory::Shaderpacks => "shaderpacks",
+    }
+}
+
+fn artifact_instance_dir_name(category: ManifestArtifactCategory) -> &'static str {
+    artifact_repo_prefix(category)
 }
 
 fn read_publish_auth_settings() -> Result<PublishAuthSettings, CommandError> {

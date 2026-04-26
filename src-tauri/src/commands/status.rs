@@ -30,7 +30,7 @@ pub async fn mod_statuses(
     let previous_manifest = tokio::task::spawn_blocking({
         let pack_dir = pack_dir.clone();
         move || -> Result<Option<manifest::Manifest>, CommandError> {
-            let Some(bytes) = git::read_head_parent_file(&pack_dir, "manifest.json")? else {
+            let Some(bytes) = git::read_head_file(&pack_dir, "manifest.json")? else {
                 return Ok(None);
             };
             let parsed = serde_json::from_slice::<manifest::Manifest>(&bytes).ok();
@@ -78,6 +78,21 @@ pub async fn mod_statuses(
                     .filter(|prev| prev.filename != entry.filename)
                     .map(|prev| prev.filename.clone())
             })
+            .collect::<HashSet<_>>();
+        let removed_from_manifest = previous_manifest
+            .as_ref()
+            .map(|manifest| {
+                manifest
+                    .mods
+                    .iter()
+                    .filter(|entry| !manifest_filenames.contains(&entry.filename))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let removed_filenames = removed_from_manifest
+            .iter()
+            .map(|entry| entry.filename.clone())
             .collect::<HashSet<_>>();
 
         for entry in &manifest.mods {
@@ -127,6 +142,15 @@ pub async fn mod_statuses(
             });
         }
 
+        for entry in removed_from_manifest {
+            out.push(ModStatus {
+                id: Some(entry.id),
+                filename: entry.filename,
+                size: Some(entry.size as u64),
+                status: "deleted",
+            });
+        }
+
         if let Some(dir) = &mods_dir_opt {
             let mut seen_extra_filenames = HashSet::new();
             for path in list_regular_files(dir)? {
@@ -139,6 +163,7 @@ pub async fn mod_statuses(
                 if manifest_filenames.contains(&filename)
                     || filename.ends_with(".disabled")
                     || updated_old_filenames.contains(&filename)
+                    || removed_filenames.contains(&filename)
                     || !seen_extra_filenames.insert(filename.clone())
                 {
                     continue;

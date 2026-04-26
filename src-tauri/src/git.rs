@@ -103,6 +103,31 @@ pub fn commit_and_push_with_filter<F>(
 where
     F: Fn(&Path) -> bool,
 {
+    commit_and_push_with_filter_mode(repo_dir, message, auth, should_include_path, false)
+}
+
+pub fn amend_and_push_with_filter<F>(
+    repo_dir: &Path,
+    message: &str,
+    auth: PushAuth,
+    should_include_path: F,
+) -> Result<String, GitError>
+where
+    F: Fn(&Path) -> bool,
+{
+    commit_and_push_with_filter_mode(repo_dir, message, auth, should_include_path, true)
+}
+
+fn commit_and_push_with_filter_mode<F>(
+    repo_dir: &Path,
+    message: &str,
+    auth: PushAuth,
+    should_include_path: F,
+    amend: bool,
+) -> Result<String, GitError>
+where
+    F: Fn(&Path) -> bool,
+{
     eprintln!("[modsync] publish push: open repo {}", repo_dir.display());
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
@@ -124,8 +149,11 @@ where
             .is_some_and(|path| should_include_path(Path::new(path)))
     });
 
-    let commit_sha = if has_changes {
-        eprintln!("[modsync] publish push: create commit");
+    let commit_sha = if has_changes || amend {
+        eprintln!(
+            "[modsync] publish push: {} commit",
+            if amend { "amend" } else { "create" }
+        );
         let mut index = repo.index()?;
         index.add_all(
             ["*"],
@@ -144,33 +172,42 @@ where
         let signature = repo
             .signature()
             .or_else(|_| Signature::now("modsync", "modsync@local"))?;
-        repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            message,
-            &tree,
-            &[&head],
-        )?
-        .to_string()
+        if amend {
+            head.amend(
+                Some("HEAD"),
+                Some(&signature),
+                Some(&signature),
+                None,
+                Some(message),
+                Some(&tree),
+            )?
+            .to_string()
+        } else {
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                message,
+                &tree,
+                &[&head],
+            )?
+            .to_string()
+        }
     } else {
         eprintln!("[modsync] publish push: no local changes, push current HEAD");
         head.id().to_string()
     };
 
     eprintln!("[modsync] publish push: push branch {branch}");
-    push_branch(&repo, &branch, auth)?;
+    push_branch(&repo, &branch, auth, amend)?;
     eprintln!("[modsync] publish push: push complete {commit_sha}");
     Ok(commit_sha)
 }
 
-pub fn read_head_parent_file(repo_dir: &Path, rel_path: &str) -> Result<Option<Vec<u8>>, GitError> {
+pub fn read_head_file(repo_dir: &Path, rel_path: &str) -> Result<Option<Vec<u8>>, GitError> {
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
-    let Some(parent) = head.parents().next() else {
-        return Ok(None);
-    };
-    let tree = parent.tree()?;
+    let tree = head.tree()?;
     let Ok(entry) = tree.get_path(Path::new(rel_path)) else {
         return Ok(None);
     };
@@ -221,7 +258,12 @@ fn broken_backup_dir(repo_dir: &Path) -> PathBuf {
     repo_dir.with_extension("corrupt")
 }
 
-fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), GitError> {
+fn push_branch(
+    repo: &Repository,
+    branch: &str,
+    auth: PushAuth,
+    force: bool,
+) -> Result<(), GitError> {
     let use_ssh_transport = matches!(&auth, PushAuth::Ssh);
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(move |_url, username_from_url, allowed_types| match &auth {
@@ -254,7 +296,11 @@ fn push_branch(repo: &Repository, branch: &str, auth: PushAuth) -> Result<(), Gi
     let mut push_options = PushOptions::new();
     push_options.remote_callbacks(callbacks);
 
-    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let refspec = if force {
+        format!("+refs/heads/{branch}:refs/heads/{branch}")
+    } else {
+        format!("refs/heads/{branch}:refs/heads/{branch}")
+    };
     if use_ssh_transport {
         let origin = repo.find_remote("origin")?;
         let origin_url = origin

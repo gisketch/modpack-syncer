@@ -63,6 +63,19 @@ pub struct ModrinthVersionSummary {
     pub date_published: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModrinthDependencySummary {
+    pub project_id: String,
+    pub version_id: String,
+    pub slug: String,
+    pub title: String,
+    pub icon_url: Option<String>,
+    pub version_number: String,
+    pub filename: String,
+    pub already_tracked: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct UnpublishedModrinthState {
@@ -122,10 +135,22 @@ struct ModrinthSearchHitApi {
 #[derive(Debug, Clone, Deserialize)]
 struct ModrinthVersionApi {
     id: String,
+    project_id: String,
     version_number: String,
+    #[serde(default)]
+    dependencies: Vec<ModrinthDependencyApi>,
     files: Vec<ModrinthVersionFileApi>,
     #[serde(default)]
     date_published: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModrinthDependencyApi {
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    version_id: Option<String>,
+    dependency_type: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -251,6 +276,19 @@ pub async fn list_modrinth_project_versions(
 }
 
 #[tauri::command]
+pub async fn list_modrinth_version_dependencies(
+    pack_id: String,
+    category: ManifestArtifactCategory,
+    version_id: String,
+) -> Result<Vec<ModrinthDependencySummary>, CommandError> {
+    let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+    let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&manifest_path))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+    resolve_modrinth_dependencies(&pack_id, &manifest, category, &version_id).await
+}
+
+#[tauri::command]
 pub async fn preview_modrinth_mod(
     pack_id: String,
     identifier: String,
@@ -271,6 +309,7 @@ pub async fn add_modrinth_mod(
     project_id: String,
     version_id: String,
     side: Option<String>,
+    install_dependencies: Option<bool>,
 ) -> Result<manifest::Entry, CommandError> {
     let category = category.unwrap_or(ManifestArtifactCategory::Mods);
     let pack_dir = paths::packs_dir()?.join(&pack_id);
@@ -282,10 +321,47 @@ pub async fn add_modrinth_mod(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
 
+    let next_entry = install_modrinth_version(
+        &pack_id,
+        &manifest,
+        category,
+        &project_id,
+        &version_id,
+        side.as_deref(),
+    )
+    .await?;
+    if category == ManifestArtifactCategory::Mods && install_dependencies.unwrap_or(false) {
+        let dependencies =
+            resolve_modrinth_dependencies(&pack_id, &manifest, category, &version_id).await?;
+        for dependency in dependencies
+            .into_iter()
+            .filter(|dependency| !dependency.already_tracked)
+        {
+            install_modrinth_version(
+                &pack_id,
+                &manifest,
+                ManifestArtifactCategory::Mods,
+                &dependency.project_id,
+                &dependency.version_id,
+                None,
+            )
+            .await?;
+        }
+    }
+    Ok(next_entry)
+}
+
+async fn install_modrinth_version(
+    pack_id: &str,
+    manifest: &manifest::Manifest,
+    category: ManifestArtifactCategory,
+    project_id: &str,
+    version_id: &str,
+    side: Option<&str>,
+) -> Result<manifest::Entry, CommandError> {
     let preview =
-        resolve_modrinth_preview_from_ids(&manifest, &project_id, &version_id, category).await?;
+        resolve_modrinth_preview_from_ids(manifest, project_id, version_id, category).await?;
     let chosen_side = side
-        .as_deref()
         .map(parse_manifest_side)
         .transpose()?
         .unwrap_or(preview.suggested_side);
@@ -518,6 +594,93 @@ fn build_modrinth_preview(
         suggested_side,
         already_tracked,
     })
+}
+
+async fn resolve_modrinth_dependencies(
+    pack_id: &str,
+    manifest: &manifest::Manifest,
+    category: ManifestArtifactCategory,
+    version_id: &str,
+) -> Result<Vec<ModrinthDependencySummary>, CommandError> {
+    if category != ManifestArtifactCategory::Mods {
+        return Ok(Vec::new());
+    }
+
+    let selected_version = fetch_modrinth_version(version_id).await?;
+    let unpublished_state =
+        read_unpublished_state_for_pack(pack_id, ManifestArtifactCategory::Mods).await;
+    let mut out = Vec::new();
+    for dependency in selected_version
+        .dependencies
+        .into_iter()
+        .filter(|dependency| dependency.dependency_type == "required")
+    {
+        let dependency_version = match dependency.version_id.as_deref() {
+            Some(version_id) => fetch_modrinth_version(version_id).await?,
+            None => {
+                let project_id = dependency.project_id.as_deref().ok_or_else(|| {
+                    CommandError::Other("Modrinth dependency missing project id".to_string())
+                })?;
+                fetch_latest_modrinth_version(
+                    project_id,
+                    &manifest.pack.mc_version,
+                    manifest.pack.loader,
+                    ManifestArtifactCategory::Mods,
+                )
+                .await?
+            }
+        };
+        let project_id = dependency
+            .project_id
+            .unwrap_or_else(|| dependency_version.project_id.clone());
+        let project = fetch_modrinth_project(&project_id).await?;
+        let Some(file) = primary_version_file(&dependency_version) else {
+            continue;
+        };
+        let already_tracked = is_modrinth_project_tracked(
+            manifest,
+            ManifestArtifactCategory::Mods,
+            &unpublished_state,
+            &project.id,
+            &project.slug,
+            Some(&file.filename),
+        );
+        out.push(ModrinthDependencySummary {
+            project_id: project.id,
+            version_id: dependency_version.id,
+            slug: project.slug,
+            title: project.title,
+            icon_url: project.icon_url,
+            version_number: dependency_version.version_number,
+            filename: file.filename,
+            already_tracked,
+        });
+    }
+    out.sort_by(|left, right| left.title.cmp(&right.title));
+    out.dedup_by(|left, right| left.project_id == right.project_id);
+    Ok(out)
+}
+
+fn is_modrinth_project_tracked(
+    manifest: &manifest::Manifest,
+    category: ManifestArtifactCategory,
+    unpublished_state: &[UnpublishedModrinthState],
+    project_id: &str,
+    slug: &str,
+    filename: Option<&str>,
+) -> bool {
+    manifest_entries_for_category(manifest, category)
+        .iter()
+        .any(|entry| {
+            entry.project_id.as_deref() == Some(project_id)
+                || entry.id == slug
+                || filename.is_some_and(|filename| entry.filename == filename)
+        })
+        || unpublished_state.iter().any(|entry| {
+            entry.project_id == project_id
+                || entry.slug == slug
+                || filename.is_some_and(|filename| entry.filename == filename)
+        })
 }
 
 fn primary_version_file(version: &ModrinthVersionApi) -> Option<ModrinthVersionFileApi> {

@@ -8,6 +8,7 @@ import {
   Package,
   Search,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ import {
   CardWindowBar,
   CardWindowTab,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogBody,
@@ -49,10 +51,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatError } from "@/lib/format-error";
 import {
+  type Manifest,
   type ManifestArtifactCategory,
+  type ManifestEntry,
+  type ModrinthDependencySummary,
   type ModrinthSearchHit,
   type ModrinthSearchSide,
   type ModrinthSearchSort,
@@ -102,9 +115,17 @@ type ModpackBuilderPageProps = {
   onBack: () => void;
 };
 
+type BuilderTab = ManifestArtifactCategory | "manifest";
+
+type ManifestEditorRowData = {
+  entry: ManifestEntry;
+  deletedFromManifest: boolean;
+};
+
 export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) {
   const qc = useQueryClient();
   const adminMode = useAppStore((state) => state.adminModeByPack[packId] ?? false);
+  const [builderTab, setBuilderTab] = useState<BuilderTab>("mods");
   const [category, setCategory] = useState<ManifestArtifactCategory>("mods");
   const [searchText, setSearchText] = useState("");
   const [pageByCategory, setPageByCategory] = useState<Record<ManifestArtifactCategory, number>>({
@@ -123,6 +144,12 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
     queryFn: () => tauri.loadManifest(packId),
     retry: false,
   });
+  const sourceManifest = useQuery({
+    queryKey: ["source-manifest", packId],
+    queryFn: () => tauri.loadSourceManifest(packId),
+    enabled: adminMode,
+    retry: false,
+  });
   const search = useQuery({
     queryKey: ["modrinth-builder-search", packId, category, debouncedSearch, page, side, sort],
     queryFn: () =>
@@ -132,8 +159,20 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
     retry: 1,
   });
   const add = useMutation({
-    mutationFn: (payload: { projectId: string; versionId: string; side: Side }) =>
-      tauri.addModrinthMod(packId, category, payload.projectId, payload.versionId, payload.side),
+    mutationFn: (payload: {
+      projectId: string;
+      versionId: string;
+      side: Side;
+      installDependencies: boolean;
+    }) =>
+      tauri.addModrinthMod(
+        packId,
+        category,
+        payload.projectId,
+        payload.versionId,
+        payload.side,
+        payload.installDependencies,
+      ),
     onSuccess: async (entry) => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["manifest", packId] }),
@@ -144,6 +183,55 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
       toast.success("Downloaded to instance", { description: entry.filename });
     },
     onError: (error) => toast.error("Install failed", { description: formatError(error) }),
+  });
+  const updateManifestOptional = useMutation({
+    mutationFn: (payload: {
+      category: ManifestArtifactCategory;
+      filename: string;
+      optional: boolean;
+    }) =>
+      tauri.setManifestArtifactOptional(
+        packId,
+        payload.category,
+        payload.filename,
+        payload.optional,
+      ),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+      ]);
+    },
+    onError: (error) => toast.error("Manifest update failed", { description: formatError(error) }),
+  });
+  const deleteManifestArtifact = useMutation({
+    mutationFn: (payload: { category: ManifestArtifactCategory; filename: string }) =>
+      tauri.deleteManifestArtifact(packId, payload.category, payload.filename),
+    onSuccess: async (entry) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+        qc.invalidateQueries({ queryKey: ["modrinth-builder-search", packId] }),
+      ]);
+      toast.success("Removed from manifest", { description: entry.filename });
+    },
+    onError: (error) => toast.error("Manifest delete failed", { description: formatError(error) }),
+  });
+  const restoreManifestArtifact = useMutation({
+    mutationFn: (payload: { category: ManifestArtifactCategory; filename: string }) =>
+      tauri.restoreManifestArtifact(packId, payload.category, payload.filename),
+    onSuccess: async (entry) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+        qc.invalidateQueries({ queryKey: ["modrinth-builder-search", packId] }),
+      ]);
+      toast.success("Restored to manifest", { description: entry.filename });
+    },
+    onError: (error) => toast.error("Manifest restore failed", { description: formatError(error) }),
   });
 
   const totalPages = Math.max(1, Math.ceil((search.data?.totalHits ?? 0) / PAGE_SIZE));
@@ -199,9 +287,15 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
       </header>
 
       <Tabs
-        value={category}
+        value={builderTab}
         onValueChange={(value) => {
+          if (value === "manifest") {
+            setBuilderTab("manifest");
+            setInstallTarget(null);
+            return;
+          }
           const next = value as ManifestArtifactCategory;
+          setBuilderTab(next);
           setCategory(next);
           setInstallTarget(null);
           resetPage(next);
@@ -217,6 +311,12 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
               </span>
             </TabsTrigger>
           ))}
+          {adminMode ? (
+            <TabsTrigger value="manifest">
+              <span>MANIFEST</span>
+              <span className="font-mono text-[10px] tabular-nums text-text-low">ADMIN</span>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         {CATEGORIES.map((item) => (
@@ -313,6 +413,26 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
             </div>
           </TabsContent>
         ))}
+        {adminMode ? (
+          <TabsContent value="manifest" className="outline-none">
+            <ManifestEditor
+              manifest={manifest.data ?? null}
+              sourceManifest={sourceManifest.data ?? null}
+              pendingOptional={updateManifestOptional.isPending}
+              pendingDelete={deleteManifestArtifact.isPending}
+              pendingRestore={restoreManifestArtifact.isPending}
+              onOptionalChange={(entryCategory, filename, optional) =>
+                updateManifestOptional.mutate({ category: entryCategory, filename, optional })
+              }
+              onDelete={(entryCategory, filename) =>
+                deleteManifestArtifact.mutate({ category: entryCategory, filename })
+              }
+              onRestore={(entryCategory, filename) =>
+                restoreManifestArtifact.mutate({ category: entryCategory, filename })
+              }
+            />
+          </TabsContent>
+        ) : null}
       </Tabs>
 
       <InstallProjectDialog
@@ -322,10 +442,15 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
         hit={installTarget}
         pending={add.isPending}
         onClose={() => setInstallTarget(null)}
-        onInstall={(versionId, selectedSide) => {
+        onInstall={(versionId, selectedSide, installDependencies) => {
           if (!installTarget) return;
           add.mutate(
-            { projectId: installTarget.projectId, versionId, side: selectedSide },
+            {
+              projectId: installTarget.projectId,
+              versionId,
+              side: selectedSide,
+              installDependencies,
+            },
             { onSuccess: () => setInstallTarget(null) },
           );
         }}
@@ -421,6 +546,237 @@ function BuilderFilters({
   );
 }
 
+function ManifestEditor({
+  manifest,
+  sourceManifest,
+  pendingOptional,
+  pendingDelete,
+  pendingRestore,
+  onOptionalChange,
+  onDelete,
+  onRestore,
+}: {
+  manifest: Manifest | null;
+  sourceManifest: Manifest | null;
+  pendingOptional: boolean;
+  pendingDelete: boolean;
+  pendingRestore: boolean;
+  onOptionalChange: (
+    category: ManifestArtifactCategory,
+    filename: string,
+    optional: boolean,
+  ) => void;
+  onDelete: (category: ManifestArtifactCategory, filename: string) => void;
+  onRestore: (category: ManifestArtifactCategory, filename: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  if (!manifest || !sourceManifest) {
+    return <EmptyState title="NO MANIFEST" body="Manifest not loaded." />;
+  }
+  return (
+    <Card variant="window">
+      <CardWindowBar>
+        <CardWindowTab>MANIFEST EDITOR</CardWindowTab>
+        <CardStatus>Admin source-of-truth edits</CardStatus>
+      </CardWindowBar>
+      <CardContent className="flex flex-col gap-5 p-4">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+          <div>
+            <h2 className="text-lg font-semibold text-text-high">Pack Manifest</h2>
+            <p className="text-sm text-text-low [text-wrap:pretty]">
+              Delete entries or change optional flags here. Publish preview will show manifest and
+              repo file changes before push.
+            </p>
+          </div>
+          <div className="relative w-full md:w-72">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-low" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="SEARCH MANIFEST"
+              className="pl-10"
+            />
+          </div>
+        </div>
+        <div className="grid gap-4">
+          {CATEGORIES.map((category) => (
+            <ManifestEditorSection
+              key={category.id}
+              category={category.id}
+              label={category.label}
+              rows={filterManifestEditorRows(
+                manifestEditorRows(
+                  entriesForManifestCategory(manifest, category.id),
+                  entriesForManifestCategory(sourceManifest, category.id),
+                ),
+                search,
+              )}
+              pendingOptional={pendingOptional}
+              pendingDelete={pendingDelete}
+              pendingRestore={pendingRestore}
+              onOptionalChange={onOptionalChange}
+              onDelete={onDelete}
+              onRestore={onRestore}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ManifestEditorSection({
+  category,
+  label,
+  rows,
+  pendingOptional,
+  pendingDelete,
+  pendingRestore,
+  onOptionalChange,
+  onDelete,
+  onRestore,
+}: {
+  category: ManifestArtifactCategory;
+  label: string;
+  rows: ManifestEditorRowData[];
+  pendingOptional: boolean;
+  pendingDelete: boolean;
+  pendingRestore: boolean;
+  onOptionalChange: (
+    category: ManifestArtifactCategory,
+    filename: string,
+    optional: boolean,
+  ) => void;
+  onDelete: (category: ManifestArtifactCategory, filename: string) => void;
+  onRestore: (category: ManifestArtifactCategory, filename: string) => void;
+}) {
+  return (
+    <section className="border border-line-soft/20 bg-surface-panel-strong/35 p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-heading text-sm text-text-high tracking-[0.12em]">{label}</h3>
+        <Badge variant="outline">{rows.length}</Badge>
+      </div>
+      {rows.length > 0 ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>NAME</TableHead>
+              <TableHead>SOURCE</TableHead>
+              <TableHead>SIDE</TableHead>
+              <TableHead className="text-center">OPTIONAL</TableHead>
+              <TableHead className="text-right">ACTION</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <ManifestEditorRow
+                key={`${category}:${row.entry.filename}`}
+                category={category}
+                row={row}
+                pendingOptional={pendingOptional}
+                pendingDelete={pendingDelete}
+                pendingRestore={pendingRestore}
+                onOptionalChange={onOptionalChange}
+                onDelete={onDelete}
+                onRestore={onRestore}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <p className="py-4 text-center text-sm text-text-low">No entries.</p>
+      )}
+    </section>
+  );
+}
+
+function ManifestEditorRow({
+  category,
+  row,
+  pendingOptional,
+  pendingDelete,
+  pendingRestore,
+  onOptionalChange,
+  onDelete,
+  onRestore,
+}: {
+  category: ManifestArtifactCategory;
+  row: ManifestEditorRowData;
+  pendingOptional: boolean;
+  pendingDelete: boolean;
+  pendingRestore: boolean;
+  onOptionalChange: (
+    category: ManifestArtifactCategory,
+    filename: string,
+    optional: boolean,
+  ) => void;
+  onDelete: (category: ManifestArtifactCategory, filename: string) => void;
+  onRestore: (category: ManifestArtifactCategory, filename: string) => void;
+}) {
+  const { entry, deletedFromManifest } = row;
+  return (
+    <TableRow className={cn("h-9", deletedFromManifest && "opacity-55")}>
+      <TableCell className="py-1.5">
+        <div className="min-w-0">
+          <p
+            className={cn(
+              "max-w-[28rem] truncate text-xs font-semibold",
+              deletedFromManifest ? "text-text-low line-through" : "text-text-high",
+            )}
+            title={entry.filename}
+          >
+            {entry.filename}
+          </p>
+          <p className="max-w-[28rem] truncate text-[11px] text-text-low" title={entry.id}>
+            {entry.id}
+            {entry.repoPath ? ` · ${entry.repoPath}` : ""}
+          </p>
+        </div>
+      </TableCell>
+      <TableCell className="py-1.5">
+        <Badge variant={deletedFromManifest ? "outline" : "secondary"}>
+          {deletedFromManifest ? "REMOVED" : entry.source.toUpperCase()}
+        </Badge>
+      </TableCell>
+      <TableCell className="py-1.5 text-text-low text-xs uppercase">{entry.side}</TableCell>
+      <TableCell className="py-1.5 text-center">
+        <Checkbox
+          checked={entry.optional}
+          onCheckedChange={(checked) =>
+            onOptionalChange(category, entry.filename, checked === true)
+          }
+          disabled={pendingOptional || deletedFromManifest}
+          aria-label={`Optional ${entry.filename}`}
+          className="pointer-events-none"
+        />
+      </TableCell>
+      <TableCell className="py-1.5 text-right">
+        {deletedFromManifest ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onRestore(category, entry.filename)}
+            disabled={pendingRestore}
+          >
+            {pendingRestore ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            RESTORE
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onDelete(category, entry.filename)}
+            disabled={pendingDelete}
+          >
+            {pendingDelete ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            DELETE
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
 function BuilderResultCard({
   hit,
   pending,
@@ -496,7 +852,7 @@ function InstallProjectDialog({
   hit: ModrinthSearchHit | null;
   pending: boolean;
   onClose: () => void;
-  onInstall: (versionId: string, side: Side) => void;
+  onInstall: (versionId: string, side: Side, installDependencies: boolean) => void;
 }) {
   const versions = useQuery({
     queryKey: ["modrinth-builder-versions", packId, category, hit?.projectId],
@@ -507,12 +863,24 @@ function InstallProjectDialog({
   });
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [selectedSide, setSelectedSide] = useState<Side>("client");
+  const [installDependencies, setInstallDependencies] = useState(true);
   const selectedVersion = versions.data?.find((version) => version.id === selectedVersionId);
+  const dependencies = useQuery({
+    queryKey: ["modrinth-builder-dependencies", packId, category, selectedVersionId],
+    queryFn: () => tauri.listModrinthVersionDependencies(packId, category, selectedVersionId),
+    enabled: open && category === "mods" && !!selectedVersionId,
+    staleTime: 300_000,
+    retry: 1,
+  });
+  const missingDependencies = (dependencies.data ?? []).filter(
+    (dependency) => !dependency.alreadyTracked,
+  );
 
   useEffect(() => {
     if (!open || !hit) return;
     setSelectedSide(hit.trackedSide ?? hit.suggestedSide);
     setSelectedVersionId("");
+    setInstallDependencies(true);
   }, [hit, open]);
 
   useEffect(() => {
@@ -585,21 +953,115 @@ function InstallProjectDialog({
             loading={versions.isLoading}
             error={versions.error}
           />
+          {category === "mods" ? (
+            <DependencyPreview
+              dependencies={dependencies.data ?? []}
+              loading={dependencies.isLoading || dependencies.isFetching}
+              error={dependencies.error}
+              installDependencies={installDependencies}
+              onInstallDependenciesChange={setInstallDependencies}
+            />
+          ) : null}
         </DialogBody>
         <DialogFooter className="px-6 py-4 sm:justify-between">
           <Button variant="secondary" onClick={onClose} disabled={pending}>
             CANCEL
           </Button>
           <Button
-            onClick={() => selectedVersionId && onInstall(selectedVersionId, selectedSide)}
+            onClick={() =>
+              selectedVersionId &&
+              onInstall(
+                selectedVersionId,
+                selectedSide,
+                installDependencies && missingDependencies.length > 0,
+              )
+            }
             disabled={!selectedVersionId || versions.isLoading || versions.isError || pending}
           >
             {pending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {hit?.alreadyTracked ? "CHANGE VERSION" : "INSTALL"}
+            {installDependencies && missingDependencies.length > 0
+              ? `${hit?.alreadyTracked ? "CHANGE VERSION" : "INSTALL"} + ${missingDependencies.length} DEPS`
+              : hit?.alreadyTracked
+                ? "CHANGE VERSION"
+                : "INSTALL"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function DependencyPreview({
+  dependencies,
+  loading,
+  error,
+  installDependencies,
+  onInstallDependenciesChange,
+}: {
+  dependencies: ModrinthDependencySummary[];
+  loading: boolean;
+  error: unknown;
+  installDependencies: boolean;
+  onInstallDependenciesChange: (value: boolean) => void;
+}) {
+  const missingDependencies = dependencies.filter((dependency) => !dependency.alreadyTracked);
+  if (loading) {
+    return <p className="text-sm text-text-low">Checking required dependencies...</p>;
+  }
+  if (error) {
+    return <p className="text-sm text-signal-alert">{formatError(error)}</p>;
+  }
+  if (dependencies.length === 0) {
+    return <p className="text-sm text-text-low">No required dependencies found.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3 border border-line-soft/20 bg-surface-panel-strong/35 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-text-high">Required dependencies</p>
+          <p className="text-xs text-text-low">
+            {missingDependencies.length} missing / {dependencies.length} total
+          </p>
+        </div>
+        <div className="flex min-h-10 items-center gap-2 text-xs text-text-low">
+          <Checkbox
+            checked={installDependencies}
+            onCheckedChange={(checked) => onInstallDependenciesChange(checked === true)}
+            disabled={missingDependencies.length === 0}
+            aria-label="Download required dependencies too"
+          />
+          DOWNLOAD THEM TOO
+        </div>
+      </div>
+      <div className="grid gap-2">
+        {dependencies.map((dependency) => (
+          <DependencyRow key={dependency.projectId} dependency={dependency} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DependencyRow({ dependency }: { dependency: ModrinthDependencySummary }) {
+  return (
+    <div className="grid grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 border border-line-soft/15 bg-surface-base/45 p-2">
+      <div className="flex size-9 items-center justify-center overflow-hidden bg-surface-panel outline outline-1 outline-white/10">
+        {dependency.iconUrl ? (
+          <img src={dependency.iconUrl} alt="" className="size-full object-cover" loading="lazy" />
+        ) : (
+          <Package className="size-4 text-text-low" />
+        )}
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm text-text-high">{dependency.title}</p>
+        <p className="truncate text-xs text-text-low">
+          {dependency.versionNumber} · {dependency.filename}
+        </p>
+      </div>
+      <Badge variant={dependency.alreadyTracked ? "secondary" : "outline"}>
+        {dependency.alreadyTracked ? "INSTALLED" : "NEEDED"}
+      </Badge>
+    </div>
   );
 }
 
@@ -743,4 +1205,51 @@ function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function entriesForManifestCategory(
+  manifest: Manifest,
+  category: ManifestArtifactCategory,
+): ManifestEntry[] {
+  if (category === "mods") return manifest.mods;
+  if (category === "resourcepacks") return manifest.resourcepacks;
+  return manifest.shaderpacks.filter((entry) => !entry.filename.endsWith(".txt"));
+}
+
+function manifestEditorRows(
+  currentEntries: ManifestEntry[],
+  sourceEntries: ManifestEntry[],
+): ManifestEditorRowData[] {
+  const currentByFilename = new Map(currentEntries.map((entry) => [entry.filename, entry]));
+  const rows = currentEntries.map((entry) => ({ entry, deletedFromManifest: false }));
+  for (const entry of sourceEntries) {
+    if (!currentByFilename.has(entry.filename)) {
+      rows.push({ entry, deletedFromManifest: true });
+    }
+  }
+  return rows.sort((left, right) => {
+    if (left.deletedFromManifest !== right.deletedFromManifest) {
+      return left.deletedFromManifest ? -1 : 1;
+    }
+    return left.entry.filename.localeCompare(right.entry.filename);
+  });
+}
+
+function filterManifestEditorRows(rows: ManifestEditorRowData[], query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return rows;
+  return rows.filter(({ entry, deletedFromManifest }) =>
+    [
+      entry.filename,
+      entry.id,
+      entry.source,
+      entry.side,
+      entry.repoPath ?? "",
+      entry.projectId ?? "",
+      deletedFromManifest ? "removed deleted" : "",
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle),
+  );
 }

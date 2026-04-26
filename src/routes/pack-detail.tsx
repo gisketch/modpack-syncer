@@ -88,6 +88,7 @@ import {
   NO_OPTION_PRESET_ID,
   type OptionsSyncCategory,
   PACK_DEFAULT_PRESET_ID,
+  type PublishScanProgressEvent,
   type PublishScanReport,
   type SyncInstanceReport,
   type SyncProgressEvent,
@@ -207,6 +208,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [activeChangelogIndex, setActiveChangelogIndex] = useState(0);
   const [publishLogs, setPublishLogs] = useState<string[]>([]);
+  const [publishScanProgress, setPublishScanProgress] = useState<PublishScanProgressEvent | null>(
+    null,
+  );
   const [progress, setProgress] = useState<SyncProgressEvent | null>(null);
   const [publishReport, setPublishReport] = useState<PublishScanReport | null>(null);
   const [report, setReport] = useState<SyncInstanceReport | null>(null);
@@ -217,6 +221,21 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     void listen<SyncProgressEvent>("sync-progress", (event) => {
       if (event.payload.packId !== packId) return;
       setProgress(event.payload);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [packId]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    void listen<PublishScanProgressEvent>("publish-scan-progress", (event) => {
+      if (event.payload.packId !== packId) return;
+      setPublishScanProgress(event.payload);
     }).then((dispose) => {
       unlisten = dispose;
     });
@@ -570,13 +589,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       optionPresetId: string;
       optionSyncCategories: OptionsSyncCategory[];
     }) =>
-      tauri.syncInstance(
-        packId,
-        undefined,
-        syncShaderSettings,
-        optionPresetId,
-        optionSyncCategories,
-      ),
+      tauri
+        .restoreManifestFromSource(packId)
+        .then(() =>
+          tauri.syncInstance(
+            packId,
+            undefined,
+            syncShaderSettings,
+            optionPresetId,
+            optionSyncCategories,
+          ),
+        ),
     onMutate: () => {
       setSyncOpen(true);
       setProgress({
@@ -602,6 +625,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       }
       await applyDisabledArtifacts();
       await Promise.all([
+        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
         statuses.refetch(),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
@@ -688,6 +712,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setPublishOpen(true);
       setPublishReport(null);
       setPublishLogs([]);
+      setPublishScanProgress({
+        packId,
+        stage: "queued",
+        currentPath: null,
+        completed: 0,
+        total: 1,
+      });
     },
     onSuccess: async (scan) => {
       await qc.invalidateQueries({ queryKey: ["mod-statuses", packId] });
@@ -724,7 +755,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
   });
   const publishPush = useMutation({
-    mutationFn: async ({ message, version }: { message: string; version: string }) => {
+    mutationFn: async ({
+      message,
+      version,
+      amendPrevious,
+    }: {
+      message: string;
+      version: string;
+      amendPrevious: boolean;
+    }) => {
       setPublishLogs((current) => [...current, "> apply manifest changes"]);
       const applied = await tauri.applyInstancePublish(
         packId,
@@ -735,9 +774,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setPublishLogs((current) => [
         ...current,
         `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
-        "> commit + push origin",
+        amendPrevious ? "> amend previous update + force push origin" : "> commit + push origin",
       ]);
-      const pushed = await tauri.commitAndPushPublish(packId, message, publishIgnorePatterns);
+      const pushed = await tauri.commitAndPushPublish(
+        packId,
+        message,
+        publishIgnorePatterns,
+        amendPrevious,
+      );
       setPublishLogs((current) => [
         ...current,
         `push done :: ${pushed.commitSha.slice(0, 10)} via ${pushed.method.toUpperCase()}`,
@@ -946,11 +990,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         onClose={() => setPublishOpen(false)}
         pending={publishScan.isPending}
         report={publishReport}
+        scanProgress={publishScanProgress}
         publishing={publishPush.isPending}
         publishLogs={publishLogs}
         ignorePatterns={publishIgnorePatterns}
         onIgnorePatternsChange={(patterns) => setPublishIgnorePatterns(packId, patterns)}
-        onPublish={(message, version) => publishPush.mutate({ message, version })}
+        onPublish={(message, version, amendPrevious) =>
+          publishPush.mutate({ message, version, amendPrevious })
+        }
       />
     );
   }

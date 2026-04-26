@@ -21,6 +21,16 @@ Authoring and pack-publish behavior exposed by the app today.
 15. Publish preview MUST provide a show-all-mods mode so unchanged manifest mods can be displayed and edited for optional status.
 16. Publish scan and apply publish MUST ignore local files ending with `.disabled`.
 17. Pack detail MAY expose a full-page Modrinth builder. The builder MUST search Modrinth by current pack Minecraft version, MUST restrict mod results to the current pack loader, MUST paginate at 20 results, and MUST allow users to install any compatible project version into the local instance staging flow. Non-admin users MUST see that only admins can publish or update the pack source of truth. Already tracked or unpublished-staged Modrinth projects MUST be marked installed and MAY be changed to another compatible version.
+18. Publish preview MUST offer an amend-previous-update mode that applies current changes, reuses the current pack version, allows editing commit title/body, amends the previous publish commit, and pushes the rewritten branch.
+19. Modpack Builder mod installs MUST inspect required Modrinth dependencies for the selected version, list them in the install dialog, and allow missing required dependencies to be downloaded into the local staging flow with SHA verification.
+20. Modpack Builder MUST expose an admin-only manifest editor tab. The editor MUST allow deleting artifact entries and changing optional state. Deleting an artifact MUST remove the manifest entry, remove the local instance artifact, and remove the repo-owned artifact file when the entry source is `repo`.
+21. Publish preview MUST include uncommitted manifest and repo artifact changes produced by admin manifest editing as semantic rows, such as removed from mod list or now optional, instead of only a generic `manifest.json` row.
+22. Pack detail mod status MUST show mods removed from the working manifest as deleted/removed based on comparison with the previous committed manifest.
+23. Manifest editor MUST keep source-manifest entries that were deleted from the working manifest visible as strikethrough deleted rows. Entries that do not exist in the source manifest MAY disappear when deleted.
+24. Sync MUST restore `manifest.json` from the current source commit before writing the Prism instance, so unpublished manifest editor deletions are reverted by sync.
+25. Source-deleted manifest editor rows MUST provide a restore action that adds the entry back from the source manifest.
+26. Publish scan MUST emit progress events while reading instance and repo folders, including the current scan stage/path and completed/total scan step counts, and the publish preview MUST show that progress while scan is pending.
+27. Sync progress MUST continue after downloads into resolving artifacts, writing the Prism instance, applying options, and applying shader settings so the sync dialog remains informative during post-download work.
 
 ## See
 
