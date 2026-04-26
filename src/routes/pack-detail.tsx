@@ -782,23 +782,36 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       message,
       version,
       amendPrevious,
+      skipApply,
     }: {
       message: string;
       version: string;
       amendPrevious: boolean;
+      skipApply: boolean;
     }) => {
-      setPublishLogs((current) => [...current, "> apply manifest changes"]);
-      const applied = await tauri.applyInstancePublish(
-        packId,
-        undefined,
-        version,
-        publishIgnorePatterns,
+      const applied = skipApply
+        ? null
+        : await (async () => {
+            setPublishLogs((current) => [...current, "> apply manifest changes"]);
+            const result = await tauri.applyInstancePublish(
+              packId,
+              undefined,
+              version,
+              publishIgnorePatterns,
+            );
+            setPublishLogs((current) => [
+              ...current,
+              `apply done :: ${result.manifestEntriesWritten} entries / ${result.repoFilesWritten} repo writes / ${result.repoFilesRemoved} removals`,
+            ]);
+            return result;
+          })();
+      setPublishLogs((current) =>
+        [
+          ...current,
+          skipApply ? "> skip apply, push current repo" : null,
+          amendPrevious ? "> amend previous update + force push origin" : "> commit + push origin",
+        ].filter((line): line is string => line !== null),
       );
-      setPublishLogs((current) => [
-        ...current,
-        `apply done :: ${applied.manifestEntriesWritten} entries / ${applied.repoFilesWritten} repo writes / ${applied.repoFilesRemoved} removals`,
-        amendPrevious ? "> amend previous update + force push origin" : "> commit + push origin",
-      ]);
       setPublishPushProgress({
         packId,
         stage: amendPrevious ? "amending" : "committing",
@@ -1028,8 +1041,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         publishLogs={publishLogs}
         ignorePatterns={publishIgnorePatterns}
         onIgnorePatternsChange={(patterns) => setPublishIgnorePatterns(packId, patterns)}
-        onPublish={(message, version, amendPrevious) =>
-          publishPush.mutate({ message, version, amendPrevious })
+        onPublish={(message, version, amendPrevious, skipApply) =>
+          publishPush.mutate({ message, version, amendPrevious, skipApply })
         }
       />
     );

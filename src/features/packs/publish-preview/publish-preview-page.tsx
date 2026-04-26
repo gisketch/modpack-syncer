@@ -49,7 +49,7 @@ type PublishPreviewPageProps = {
   publishLogs: string[];
   ignorePatterns?: string[];
   onIgnorePatternsChange?: (patterns: string[]) => void;
-  onPublish: (message: string, version: string, amendPrevious: boolean) => void;
+  onPublish: (message: string, version: string, amendPrevious: boolean, skipApply: boolean) => void;
 };
 
 export function PublishPreviewPage({
@@ -76,6 +76,7 @@ export function PublishPreviewPage({
   const [commitTitle, setCommitTitle] = useState("Publish instance changes");
   const [commitDescription, setCommitDescription] = useState("");
   const [amendPrevious, setAmendPrevious] = useState(false);
+  const [skipApply, setSkipApply] = useState(false);
 
   useEffect(() => {
     if (!publishVersion.data) return;
@@ -157,14 +158,24 @@ export function PublishPreviewPage({
                 <PreviewRow k="REMOVE" v={String(counts.remove)} />
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  type="button"
-                  onClick={() => setAmendPrevious((current) => !current)}
-                  className="flex min-h-10 items-center gap-3 text-left text-[10px] uppercase tracking-[0.18em] text-text-low transition-colors hover:text-text-high"
-                >
-                  <Checkbox checked={amendPrevious} className="pointer-events-none" />
-                  AMEND PREVIOUS + FORCE PUSH
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAmendPrevious((current) => !current)}
+                    className="flex min-h-10 items-center gap-3 text-left text-[10px] uppercase tracking-[0.18em] text-text-low transition-colors hover:text-text-high"
+                  >
+                    <Checkbox checked={amendPrevious} className="pointer-events-none" />
+                    AMEND PREVIOUS + FORCE PUSH
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkipApply((current) => !current)}
+                    className="flex min-h-10 items-center gap-3 text-left text-[10px] uppercase tracking-[0.18em] text-text-low transition-colors hover:text-text-high"
+                  >
+                    <Checkbox checked={skipApply} className="pointer-events-none" />
+                    PUSH CURRENT REPO ONLY
+                  </button>
+                </div>
                 <Button
                   variant="default"
                   onClick={() =>
@@ -172,6 +183,7 @@ export function PublishPreviewPage({
                       buildCommitMessage(commitTitle, commitDescription),
                       publishVersion.data ?? "",
                       amendPrevious,
+                      skipApply,
                     )
                   }
                   disabled={
