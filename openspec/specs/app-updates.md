@@ -5,10 +5,13 @@ In-app application update checks and installs.
 ## Requirements
 
 1. The frontend MUST query the Tauri updater plugin for the latest available application update.
-2. The app MAY surface update availability in the shell and settings UI when the updater reports a newer version.
-3. In-app install MUST only be offered on Windows builds. Other platforms may check for updates but MUST NOT expose the Windows installer flow.
-4. When an install starts, the UI MUST stream download progress and transition to an installing state once the payload has finished downloading.
-5. Successful install handoff MUST invalidate cached update state so a subsequent check reflects the new version.
+2. The app MUST check for updates from the configured GitHub Releases `latest.json` endpoint during app launch.
+3. The app MUST surface update availability in the sidebar footer and settings/about UI when the updater reports a newer version.
+4. Settings/About UI MUST provide a manual check-for-update action.
+5. In-app install MUST only be offered on Windows builds. Other platforms may check for updates but MUST NOT expose the Windows installer flow.
+6. When an install starts, the UI MUST stream download progress and transition to an installing state once the payload has finished downloading.
+7. Successful install handoff MUST invalidate cached update state so a subsequent check reflects the new version.
+8. If the updater endpoint is reachable but lacks an artifact for the current non-Windows platform, the UI SHOULD present this as an unsupported installer platform rather than a dangerous app failure.
 
 ## See
 

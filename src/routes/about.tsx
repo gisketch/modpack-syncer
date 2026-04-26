@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardStatus, CardWindowBar, CardWindowTab } from "@/components/ui/card";
+import { AppUpdateSettingsPanel } from "@/features/app-updates/app-update-panels";
 import { useAppVersion } from "@/hooks/use-app-version";
 import { formatError } from "@/lib/format-error";
 
-const GITHUB_URL = "https://github.com/gisketch/s_modpack_syncer";
+const GITHUB_URL = "https://github.com/gisketch/modpack-syncer";
 
 export function AboutRoute() {
   const appVersion = useAppVersion();
@@ -65,6 +66,10 @@ export function AboutRoute() {
             <Button type="button" onClick={() => void openGithub()}>
               <Code2 className="size-4" /> GITHUB <ExternalLink className="size-4" />
             </Button>
+          </div>
+
+          <div className="border-line-soft/30 border-t pt-5">
+            <AppUpdateSettingsPanel currentVersion={appVersion.data} />
           </div>
         </CardContent>
       </Card>

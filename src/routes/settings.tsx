@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { AppUpdateSettingsPanel } from "@/features/app-updates/app-update-panels";
 import { useAppVersion } from "@/hooks/use-app-version";
 import { formatError } from "@/lib/format-error";
 import { type PrismInstallProgressEvent, tauri } from "@/lib/tauri";
@@ -483,10 +484,11 @@ export function SettingsRoute() {
           </CardTitle>
           <CardDescription>modsync v{appVersion.data ?? "..."}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           <p className="text-xs text-[--text-low]">
             Minecraft modpack syncer + Prism Launcher wrapper.
           </p>
+          <AppUpdateSettingsPanel currentVersion={appVersion.data} />
         </CardContent>
       </Card>
 

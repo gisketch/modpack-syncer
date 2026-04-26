@@ -16,6 +16,7 @@ import {
   SidebarSubmenu,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
+import { AppUpdateWarmup, SidebarUpdatePanel } from "@/features/app-updates/app-update-panels";
 import { useAppVersion } from "@/hooks/use-app-version";
 import { tauri } from "@/lib/tauri";
 import { AboutRoute } from "@/routes/about";
@@ -36,6 +37,7 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-[--surface-base] text-[--text-high]">
+        <AppUpdateWarmup />
         <TitleBar />
         <RootGate />
         <Toaster />
@@ -222,9 +224,7 @@ function Shell() {
           </SidebarItem>
         </SidebarContent>
         <SidebarFooter>
-          <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-            :: v{appVersion.data ?? "..."}
-          </span>
+          <SidebarUpdatePanel currentVersion={appVersion.data} />
         </SidebarFooter>
       </Sidebar>
       <main className="flex-1 overflow-auto scrollbar-tactical">
