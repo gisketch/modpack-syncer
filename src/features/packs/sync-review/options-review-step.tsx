@@ -16,10 +16,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatError } from "@/lib/format-error";
 import {
-  type OptionPresetSummary,
   type OptionsSyncCategory,
   type OptionsSyncPreview,
-  PACK_DEFAULT_PRESET_ID,
   type ShaderSettingsPreview,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -47,9 +45,6 @@ type OptionsReviewStepProps = {
   shaderError: unknown;
   shaderDecision: ShaderDecision;
   onShaderDecisionChange: (decision: ShaderDecision) => void;
-  optionPresets: OptionPresetSummary[];
-  selectedOptionPresetId: string;
-  onOptionPresetChange: (presetId: string) => void;
   enabledOptionSyncCategories: OptionsSyncCategory[];
   onOptionSyncCategoryChange: (category: OptionsSyncCategory, enabled: boolean) => void;
 };
@@ -66,9 +61,6 @@ export function OptionsReviewStep({
   shaderError,
   shaderDecision,
   onShaderDecisionChange,
-  optionPresets,
-  selectedOptionPresetId,
-  onOptionPresetChange,
   enabledOptionSyncCategories,
   onOptionSyncCategoryChange,
 }: OptionsReviewStepProps) {
@@ -135,16 +127,6 @@ export function OptionsReviewStep({
             <ScrollArea className="h-full px-4 py-4">
               <div className="flex flex-col gap-3">
                 <div className="grid gap-2">
-                  <div className="grid gap-2 border border-line-soft/20 bg-surface-sunken/60 px-3 py-2">
-                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                      PRESET
-                    </span>
-                    <OptionPresetStackSelector
-                      presets={optionPresets}
-                      selectedPresetId={selectedOptionPresetId}
-                      onChange={onOptionPresetChange}
-                    />
-                  </div>
                   <Row k="PACK FILE" v={preview?.hasPackFile ? "FOUND" : "MISSING"} />
                   <Row k="INSTANCE FILE" v={preview?.hasInstanceFile ? "FOUND" : "MISSING"} />
                   <Row k="IGNORED KEYS" v={String(preview?.ignoredKeys.length ?? 0)} />
@@ -338,58 +320,6 @@ export function OptionsReviewStep({
       </div>
     </div>
   );
-}
-
-function OptionPresetStackSelector({
-  presets,
-  selectedPresetId,
-  onChange,
-}: {
-  presets: OptionPresetSummary[];
-  selectedPresetId: string;
-  onChange: (presetId: string) => void;
-}) {
-  const normalizedPresetId = presets.some((preset) => preset.id === selectedPresetId)
-    ? selectedPresetId
-    : PACK_DEFAULT_PRESET_ID;
-  const options = [
-    { id: PACK_DEFAULT_PRESET_ID, label: "DEFAULT", detail: "MAIN SOURCE" },
-    ...presets.map((preset) => ({
-      id: preset.id,
-      label: preset.label.toUpperCase(),
-      detail: presetCountLabel(preset),
-    })),
-  ];
-
-  return (
-    <div className="grid gap-1">
-      {options.map((option) => {
-        const active = option.id === normalizedPresetId;
-        return (
-          <button
-            key={option.id}
-            type="button"
-            className={cn(
-              "flex min-h-8 items-center justify-between gap-2 border border-line-soft/20 bg-surface-panel/60 px-2 py-1 text-left transition-colors",
-              active && "border-brand-core/60 bg-brand-core/10 text-brand-core",
-            )}
-            onClick={() => onChange(option.id)}
-          >
-            <span className="truncate text-[10px] uppercase tracking-[0.16em]">{option.label}</span>
-            <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.12em] text-text-low">
-              {option.detail}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function presetCountLabel(preset: OptionPresetSummary) {
-  const count =
-    preset.counts.video + preset.counts.keybinds + preset.counts.other + preset.counts.shader;
-  return `${count} keys`;
 }
 
 function syncCategoryLabel(category: OptionsSyncCategory) {

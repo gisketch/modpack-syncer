@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::Emitter;
 
-use super::option_presets::resolve_option_preset_selection;
+use super::option_presets::{apply_option_preset_overrides, resolve_option_preset_selection};
 use super::sync_review::{
     apply_options_sync, apply_shader_settings_sync, build_options_sync_preview,
     build_shader_settings_preview, set_options_ignored, OptionsSyncCategory, OptionsSyncPreview,
@@ -108,7 +108,7 @@ pub async fn sync_instance(
 
     let fetch_completed =
         fetch_report.cached + fetch_report.downloaded + fetch_report.failures.len();
-    let total_work = fetch_report.total + 4;
+    let total_work = fetch_report.total + 5;
     let _ = app.emit(
         "sync-progress",
         SyncProgressEvent {
@@ -229,6 +229,32 @@ pub async fn sync_instance(
         .await
         .map_err(|e| CommandError::Other(e.to_string()))??;
     }
+
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressEvent {
+            pack_id: pack_id.clone(),
+            filename: None,
+            status: "syncing-preset",
+            completed: fetch_completed + 5,
+            total: total_work,
+            cached: fetch_report.cached,
+            downloaded: fetch_report.downloaded,
+            failures: fetch_report.failures.len(),
+        },
+    );
+    let pack_dir_clone = pack_dir.clone();
+    let instance_name_clone = instance_name.clone();
+    let option_preset_selection = option_preset_selection.clone();
+    tokio::task::spawn_blocking(move || {
+        apply_option_preset_overrides(
+            &pack_dir_clone,
+            &instance_name_clone,
+            &option_preset_selection,
+        )
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
 
     let _ = app.emit(
         "sync-progress",

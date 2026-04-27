@@ -123,13 +123,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const qc = useQueryClient();
   const adminMode = useAppStore((s) => s.adminModeByPack[packId] ?? false);
   const lastSyncedCommit = useAppStore((s) => s.lastSyncedCommitByPack[packId] ?? null);
-  const rawSelectedOptionPresetId = useAppStore(
+  const selectedOptionPresetId = useAppStore(
     (s) => s.selectedOptionPresetByPack[packId] ?? PACK_DEFAULT_PRESET_ID,
   );
-  const selectedOptionPresetId =
-    rawSelectedOptionPresetId === NO_OPTION_PRESET_ID
-      ? PACK_DEFAULT_PRESET_ID
-      : rawSelectedOptionPresetId;
   const publishIgnorePatterns = useAppStore(
     (s) => s.publishIgnorePatternsByPack[packId] ?? EMPTY_PUBLISH_IGNORE_PATTERNS,
   );
@@ -180,7 +176,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
-  const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "options">("artifacts");
+  const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "presets" | "options">(
+    "artifacts",
+  );
   const [shaderSyncDecision, setShaderSyncDecision] = useState<"undecided" | "sync" | "skip">(
     "undecided",
   );
@@ -332,7 +330,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     retry: false,
   });
   useEffect(() => {
-    if (!optionPresets.data || selectedOptionPresetId === PACK_DEFAULT_PRESET_ID) return;
+    if (
+      !optionPresets.data ||
+      selectedOptionPresetId === PACK_DEFAULT_PRESET_ID ||
+      selectedOptionPresetId === NO_OPTION_PRESET_ID
+    ) {
+      return;
+    }
     if (optionPresets.data.some((preset) => preset.id === selectedOptionPresetId)) return;
     setSelectedOptionPreset(packId, PACK_DEFAULT_PRESET_ID);
   }, [optionPresets.data, packId, selectedOptionPresetId, setSelectedOptionPreset]);
@@ -1003,7 +1007,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   function handleSyncReviewNext() {
-    setSyncReviewStep("options");
+    setSyncReviewStep((current) => (current === "artifacts" ? "presets" : "options"));
+  }
+
+  function handleSyncReviewBack() {
+    setSyncReviewStep((current) => (current === "options" ? "presets" : "artifacts"));
   }
 
   function handleConfirmSyncFromReview() {
@@ -1748,7 +1756,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         syncPending={sync.isPending}
         onClose={handleCloseSyncReview}
         onNext={handleSyncReviewNext}
-        onBack={() => setSyncReviewStep("artifacts")}
+        onBack={handleSyncReviewBack}
         onConfirm={handleConfirmSyncFromReview}
       />
 

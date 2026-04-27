@@ -28,12 +28,14 @@ import type {
   OptionsSyncPreview,
   ShaderSettingsPreview,
 } from "@/lib/tauri";
+import { NO_OPTION_PRESET_ID, PACK_DEFAULT_PRESET_ID } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { formatBytes } from "../artifact-status/artifact-status-rows";
 import { OptionsReviewStep } from "./options-review-step";
 import type { SyncCategorySummary, SyncReviewTab } from "./sync-artifact-preview";
 import { SyncPlanActionChip, SyncPreviewCard } from "./sync-artifact-preview";
 
-type SyncReviewStep = "artifacts" | "options";
+type SyncReviewStep = "artifacts" | "presets" | "options";
 type ShaderDecision = "undecided" | "sync" | "skip";
 
 type SyncReviewDialogProps = {
@@ -102,11 +104,9 @@ export function SyncReviewDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
         <DialogHeader>
-          <DialogTitle>{step === "artifacts" ? "SYNC PREVIEW" : "OPTIONS REVIEW"}</DialogTitle>
+          <DialogTitle>{syncStepTitle(step)}</DialogTitle>
           <DialogDescription>
-            {step === "artifacts"
-              ? "Review mods, resourcepacks, and shaderpacks before writing Prism instance."
-              : "Review options categories before final sync confirm."}
+            {syncStepDescription(step)}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
@@ -140,6 +140,12 @@ export function SyncReviewDialog({
                   syncReviewTabs={syncReviewTabs}
                   defaultTab={defaultTab}
                 />
+              ) : step === "presets" ? (
+                <PresetSelectionStep
+                  presets={optionPresets}
+                  selectedPresetId={selectedOptionPresetId}
+                  onChange={onOptionPresetChange}
+                />
               ) : (
                 <OptionsReviewStep
                   hasTrackedOptionsFile={hasTrackedOptionsFile}
@@ -153,9 +159,6 @@ export function SyncReviewDialog({
                   shaderError={shaderError}
                   shaderDecision={shaderDecision}
                   onShaderDecisionChange={onShaderDecisionChange}
-                  optionPresets={optionPresets}
-                  selectedOptionPresetId={selectedOptionPresetId}
-                  onOptionPresetChange={onOptionPresetChange}
                   enabledOptionSyncCategories={enabledOptionSyncCategories}
                   onOptionSyncCategoryChange={onOptionSyncCategoryChange}
                 />
@@ -170,6 +173,15 @@ export function SyncReviewDialog({
                 CANCEL
               </Button>
               <Button onClick={onNext} disabled={artifactLoading}>
+                NEXT <ChevronRight />
+              </Button>
+            </>
+          ) : step === "presets" ? (
+            <>
+              <Button variant="secondary" onClick={onBack}>
+                <ChevronLeft /> BACK
+              </Button>
+              <Button onClick={onNext}>
                 NEXT <ChevronRight />
               </Button>
             </>
@@ -188,6 +200,145 @@ export function SyncReviewDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function syncStepTitle(step: SyncReviewStep) {
+  if (step === "artifacts") return "SYNC PREVIEW";
+  if (step === "presets") return "CHOOSE PRESET";
+  return "KEYBINDS / OPTIONS";
+}
+
+function syncStepDescription(step: SyncReviewStep) {
+  if (step === "artifacts") {
+    return "Review mods, resourcepacks, and shaderpacks before writing Prism instance.";
+  }
+  if (step === "presets") {
+    return "Choose how pack settings, preset files, and optional disabled mods apply.";
+  }
+  return "Review option categories before final sync.";
+}
+
+function PresetSelectionStep({
+  presets,
+  selectedPresetId,
+  onChange,
+}: {
+  presets: OptionPresetSummary[];
+  selectedPresetId: string;
+  onChange: (presetId: string) => void;
+}) {
+  const reduceMotion = useReducedMotion();
+  const options = [
+    {
+      id: PACK_DEFAULT_PRESET_ID,
+      label: "PACK DEFAULT",
+      description: "Recommended on first install. Use pack baseline settings and synced pack files.",
+      detail: "RECOMMENDED FIRST INSTALL",
+      shaderPack: null,
+      disabledMods: [],
+    },
+    {
+      id: NO_OPTION_PRESET_ID,
+      label: "DON'T OVERRIDE SETTINGS",
+      description: "Skip preset option keys, preset file overrides, and preset-disabled mods.",
+      detail: "NO PRESET",
+      shaderPack: null,
+      disabledMods: [],
+    },
+    ...presets.map((preset) => ({
+      id: preset.id,
+      label: preset.label,
+      description: preset.description || "No description.",
+      detail: presetCountLabel(preset),
+      shaderPack: preset.shaderPack ?? null,
+      disabledMods: preset.disabledMods ?? [],
+    })),
+  ];
+
+  return (
+    <ScrollArea className="min-h-0 flex-1 pr-3">
+      <div className="grid gap-3">
+        {options.map((option) => {
+          const selected = option.id === selectedPresetId;
+          return (
+            <Card
+              key={option.id}
+              variant="window"
+              className={cn(
+                "cursor-pointer overflow-hidden transition-colors",
+                selected && "border-brand-core/60 bg-brand-core/10",
+              )}
+              role="button"
+              tabIndex={0}
+              onClick={() => onChange(option.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onChange(option.id);
+                }
+              }}
+            >
+              <CardWindowBar className="select-none">
+                <CardWindowTab>{option.label}</CardWindowTab>
+                <CardStatus>{option.detail}</CardStatus>
+              </CardWindowBar>
+              <CardContent className="p-0">
+                <div className="px-4 py-3 text-[11px] text-text-low">{option.description}</div>
+                <AnimatePresence initial={false}>
+                  {selected ? (
+                    <motion.div
+                      key="preset-details"
+                      initial={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                      animate={reduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+                      exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                      transition={{ duration: reduceMotion ? 0.01 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+                      className="overflow-hidden"
+                    >
+                      <div className="grid gap-2 border-line-soft/20 border-t px-4 py-3 text-[11px] text-text-low">
+                        {option.disabledMods.length > 0 ? (
+                          <PresetDetailRow
+                            label="MODS DISABLED"
+                            value={option.disabledMods.join(", ")}
+                          />
+                        ) : null}
+                        {option.shaderPack ? (
+                          <PresetDetailRow label="SHADER SELECTED" value={option.shaderPack} />
+                        ) : null}
+                        {option.disabledMods.length === 0 && !option.shaderPack ? (
+                          <PresetDetailRow label="PRESET EFFECT" value={option.detail} />
+                        ) : null}
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function PresetDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[10rem_minmax(0,1fr)]">
+      <span className="text-[10px] uppercase tracking-[0.16em] text-text-low">{label}</span>
+      <span className="min-w-0 truncate font-mono text-[11px] text-text-high" title={value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function presetCountLabel(preset: OptionPresetSummary) {
+  const keyCount =
+    preset.counts.video + preset.counts.keybinds + preset.counts.other + preset.counts.shader;
+  const parts = [];
+  if (keyCount > 0) parts.push(`${keyCount} keys`);
+  if (preset.counts.files > 0) parts.push(`${preset.counts.files} files`);
+  if (preset.counts.disabledMods > 0) parts.push(`${preset.counts.disabledMods} mods off`);
+  return parts.length > 0 ? parts.join(" / ") : "empty";
 }
 
 function SyncArtifactReview({

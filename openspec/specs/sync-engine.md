@@ -18,18 +18,24 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 12. Shader settings review MUST live as a separate tab inside options review. It MUST diff pack `configs/iris.properties` against instance `config/iris.properties` and MUST diff the active shader preset sidecar `shaderpacks/<shaderPack>.txt` when present.
 13. Shader settings review MUST expose an explicit `IGNORE SHADER SETTINGS` control when shader settings differ. When ignore is off, sync MUST copy pack `configs/iris.properties` to instance `config/iris.properties` and copy the matching shader preset sidecar when present. When ignore is on, sync MUST leave shader settings unchanged.
 14. Sync MUST support remote and repo-backed entries across mods, resourcepacks, and shaderpacks with the same SHA verification rules.
-15. Pack repos MAY include option preset JSON files under `presets/`. Each preset MUST be a patch over selected option keys grouped by video settings, keybinds, all other options, and optional shader settings.
-16. Publisher preset capture MUST read the current Prism instance and default to including video and shader settings while leaving keybinds and other options unselected until the publisher opts in.
-17. Sync review MUST let users choose Default or a pack preset before confirming options sync. Default MUST pull from the pack's main source files rather than any preset. A selected preset MUST affect options and shader previews before sync.
-18. Sync MUST apply selected preset keys after pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
-19. `IGNORE SHADER SETTINGS` MUST override the shader portion of a selected preset.
-20. The pack detail UI MUST consider an instance needing sync when the last synced pack commit differs from the current local pack head, even if current artifact files look unchanged.
-21. Local option file edits MUST be handled through options review and ignored-key controls, not treated as a global pack-update signal by themselves.
-22. Options review MUST let users enable or disable syncing for each options category (`keybinds`, `video`, `other`). Category sync MUST be enabled by default, and disabled categories MUST leave matching local option keys unchanged during sync.
-23. Repo-backed shaderpack zip entries MAY tolerate SHA drift by filename, because launchers can rewrite shaderpack zip metadata after opening the shaderpack. If the existing instance already has the same shaderpack filename, sync MAY preserve that same-name local file instead of failing SHA verification.
-24. Options review MUST allow users to continue to sync without visiting or deciding the shader settings tab; an undecided shader settings state MUST behave like not syncing shader settings.
-25. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible.
-26. If a previously selected option preset is no longer present in the pack repo, options preview and sync MUST fall back to Pack Default instead of failing on the missing preset file.
+15. Pack repos MAY include preset JSON files under `presets/`. Each preset MUST be a bundle over selected option keys, selected file overrides, and selected disabled mod filenames.
+16. Publisher preset capture MUST read the current Prism instance and default to including video option keys while leaving keybinds and other option keys unselected until the publisher opts in.
+17. Publisher preset capture MUST expose selectable file overrides from `config/**` and `shaderpacks/*.txt`; saved preset file bytes MUST live under `presets/<presetId>/files/<relativePath>`.
+18. Publisher preset capture MUST expose optional manifest mods so the publisher can mark mods disabled for that preset. Sync MUST apply disabled mod states by renaming selected mods to `<filename>.disabled` after writing the instance.
+19. Publisher preset builder MUST present separate searchable sections for video settings, keybinds, other options, config/shader sidecar file overrides, and optional mods.
+20. Sync review MUST use this wizard order: sync preview, choose preset, keybinds/options review, then sync progress after confirmation.
+21. Choose preset MUST present Pack Default, Don't Override Settings, and pack presets as selectable expanded cards. The selected card MUST show description, disabled mods when present, and shader selected when present in preset Iris settings.
+22. Pack Default MUST pull from the pack's main source files rather than any preset. Don't Override Settings MUST select no preset and skip preset option keys, preset file overrides, and preset-disabled mods.
+23. Sync MUST apply selected preset keys after pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
+24. Sync MUST copy selected preset file overrides into the Prism instance after standard pack overrides and shader settings sync.
+25. `IGNORE SHADER SETTINGS` MUST override the legacy shader-key portion of a selected preset. File overrides selected in a preset are preset-owned and apply with the preset.
+26. The pack detail UI MUST consider an instance needing sync when the last synced pack commit differs from the current local pack head, even if current artifact files look unchanged.
+27. Local option file edits MUST be handled through options review and ignored-key controls, not treated as a global pack-update signal by themselves.
+28. Options review MUST let users enable or disable syncing for each options category (`keybinds`, `video`, `other`). Category sync MUST be enabled by default, and disabled categories MUST leave matching local option keys unchanged during sync.
+29. Repo-backed shaderpack zip entries MAY tolerate SHA drift by filename, because launchers can rewrite shaderpack zip metadata after opening the shaderpack. If the existing instance already has the same shaderpack filename, sync MAY preserve that same-name local file instead of failing SHA verification.
+30. Options review MUST allow users to continue to sync without visiting or deciding the shader settings tab; an undecided shader settings state MUST behave like not syncing shader settings.
+31. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible.
+32. If a previously selected option preset is no longer present in the pack repo, options preview and sync MUST fall back to Pack Default instead of failing on the missing preset file.
 
 ## See
 

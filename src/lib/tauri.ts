@@ -149,6 +149,8 @@ export type OptionPresetCounts = {
   keybinds: number;
   other: number;
   shader: number;
+  files: number;
+  disabledMods: number;
 };
 
 export type OptionPresetSummary = {
@@ -156,6 +158,8 @@ export type OptionPresetSummary = {
   label: string;
   description: string;
   counts: OptionPresetCounts;
+  shaderPack?: string | null;
+  disabledMods: string[];
 };
 
 export type OptionPresetRow = {
@@ -169,6 +173,20 @@ export type OptionPresetRow = {
 export type OptionPresetCapture = {
   rows: OptionPresetRow[];
   shaderPack?: string | null;
+  files: OptionPresetFileRow[];
+  mods: OptionPresetModRow[];
+};
+
+export type OptionPresetFileRow = {
+  relPath: string;
+  included: boolean;
+  size: number;
+};
+
+export type OptionPresetModRow = {
+  filename: string;
+  disabled: boolean;
+  optional: boolean;
 };
 
 export type SaveOptionPresetDraft = {
@@ -177,6 +195,8 @@ export type SaveOptionPresetDraft = {
   description: string;
   shaderPack?: string | null;
   rows: OptionPresetRow[];
+  files: OptionPresetFileRow[];
+  disabledMods: string[];
 };
 
 export type ShaderSettingsStatus =
