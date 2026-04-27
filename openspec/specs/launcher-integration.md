@@ -14,6 +14,9 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 8. If the current pack head differs from the last synced commit, launching from pack detail MUST show a sync-first gate with `SYNC NOW` and `CONTINUE ANYWAY` choices.
 9. Pack detail artifact lists MUST support local user-side disabling by renaming instance artifacts with a `.disabled` suffix. Mods MAY only be disabled when their manifest entry is optional; resourcepacks and shaderpacks MAY be disabled by filename.
 10. Artifact filenames ending in `.disabled` MUST render as disabled state using the enabled filename for display and toggle actions, and enabling them MUST remove a single `.disabled` suffix rather than appending another suffix.
+11. Launching from pack detail MUST show preset selection before launcher options unless the user has chosen Don't Show Again for that pack. The preset selection MUST present Pack Default, Don't Override Settings, and pack presets as selectable expanded cards. The selected card MUST show description, disabled mods when present, and shader selected when present in preset Iris settings. If preset Iris settings set `enableShaders=false`, the card MUST show shaders disabled instead of the selected shader filename.
+12. Launch MUST apply the selected preset before invoking Prism. Pack Default MUST apply pack baseline options and shader settings. Don't Override Settings MUST skip preset option keys, preset file overrides, and preset-disabled mods.
+13. Pack detail MUST expose a Presets button for all users so preset selection remains available when the launch preset step is hidden.
 
 ## UI Requirements
 

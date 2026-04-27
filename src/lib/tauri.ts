@@ -177,6 +177,16 @@ export type OptionPresetCapture = {
   mods: OptionPresetModRow[];
 };
 
+export type OptionPresetEditDraft = {
+  id: string;
+  label: string;
+  description: string;
+  rows: OptionPresetRow[];
+  shaderPack?: string | null;
+  files: OptionPresetFileRow[];
+  mods: OptionPresetModRow[];
+};
+
 export type OptionPresetFileRow = {
   relPath: string;
   included: boolean;
@@ -483,8 +493,8 @@ export const tauri = {
       optionSyncCategories,
     }),
   launchInstance: (instanceName: string) => invoke<void>("launch_instance", { instanceName }),
-  launchPack: (packId: string, instanceName?: string) =>
-    invoke<void>("launch_pack", { packId, instanceName }),
+  launchPack: (packId: string, instanceName?: string, optionPresetId?: string) =>
+    invoke<void>("launch_pack", { packId, instanceName, optionPresetId }),
   setInstanceArtifactDisabled: (
     packId: string,
     category: ManifestArtifactCategory,
@@ -582,6 +592,12 @@ export const tauri = {
     invoke<OptionPresetSummary[]>("list_option_presets", { packId }),
   captureOptionPreset: (packId: string, instanceName?: string) =>
     invoke<OptionPresetCapture>("capture_option_preset", { packId, instanceName }),
+  loadOptionPresetForEdit: (packId: string, presetId: string, instanceName?: string) =>
+    invoke<OptionPresetEditDraft>("load_option_preset_for_edit", {
+      packId,
+      presetId,
+      instanceName,
+    }),
   saveOptionPreset: (packId: string, draft: SaveOptionPresetDraft) =>
     invoke<OptionPresetSummary>("save_option_preset", { packId, draft }),
   applyInstancePublish: (

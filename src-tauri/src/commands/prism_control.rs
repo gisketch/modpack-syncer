@@ -1,6 +1,10 @@
 use serde::Serialize;
 use tauri::Emitter;
 
+use super::option_presets::{
+    apply_option_preset_overrides, resolve_option_preset_selection, OptionPresetSelection,
+};
+use super::sync_review::{apply_options_sync, apply_shader_settings_sync, OptionsSyncCategory};
 use super::{CommandError, ManifestArtifactCategory};
 use crate::{manifest, paths, prism};
 
@@ -161,10 +165,15 @@ pub async fn launch_instance(instance_name: String) -> Result<(), CommandError> 
 pub async fn launch_pack(
     pack_id: String,
     instance_name: Option<String>,
+    option_preset_id: Option<String>,
 ) -> Result<(), CommandError> {
     let launch_profile = prism::load_launch_profile(&pack_id)?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let option_preset_selection =
+        resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        apply_launch_option_preset(&pack_dir, &instance_name, &option_preset_selection)?;
         prism::apply_launch_profile(&instance_name, &launch_profile)?;
         prism::launch(&instance_name)?;
         Ok(())
@@ -172,6 +181,29 @@ pub async fn launch_pack(
     .await
     .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(())
+}
+
+fn apply_launch_option_preset(
+    pack_dir: &std::path::Path,
+    instance_name: &str,
+    selection: &OptionPresetSelection,
+) -> Result<(), CommandError> {
+    if matches!(selection, OptionPresetSelection::None) {
+        return Ok(());
+    }
+    let categories = [
+        OptionsSyncCategory::Keybinds,
+        OptionsSyncCategory::Video,
+        OptionsSyncCategory::Other,
+    ];
+    apply_options_sync(
+        &pack_dir.join("options.txt"),
+        instance_name,
+        selection,
+        &categories,
+    )?;
+    apply_shader_settings_sync(pack_dir, instance_name, selection)?;
+    apply_option_preset_overrides(pack_dir, instance_name, selection)
 }
 
 #[tauri::command]

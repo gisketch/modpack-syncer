@@ -60,6 +60,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { OptionPresetBuilderDialog } from "@/features/packs/presets/option-preset-builder-dialog";
 import { formatError } from "@/lib/format-error";
 import {
   type Manifest,
@@ -115,7 +116,7 @@ type ModpackBuilderPageProps = {
   onBack: () => void;
 };
 
-type BuilderTab = ManifestArtifactCategory | "manifest";
+type BuilderTab = ManifestArtifactCategory | "manifest" | "presets";
 
 type ManifestEditorRowData = {
   entry: ManifestEntry;
@@ -136,6 +137,7 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
   const [side, setSide] = useState<ModrinthSearchSide>("all");
   const [sort, setSort] = useState<ModrinthSearchSort>("relevance");
   const [installTarget, setInstallTarget] = useState<ModrinthSearchHit | null>(null);
+  const [presetBuilderOpen, setPresetBuilderOpen] = useState(false);
   const debouncedSearch = useDebouncedValue(searchText, 300);
   const page = pageByCategory[category];
 
@@ -289,8 +291,8 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
       <Tabs
         value={builderTab}
         onValueChange={(value) => {
-          if (value === "manifest") {
-            setBuilderTab("manifest");
+          if (value === "manifest" || value === "presets") {
+            setBuilderTab(value);
             setInstallTarget(null);
             return;
           }
@@ -312,10 +314,16 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
             </TabsTrigger>
           ))}
           {adminMode ? (
-            <TabsTrigger value="manifest">
-              <span>MANIFEST</span>
-              <span className="font-mono text-[10px] tabular-nums text-text-low">ADMIN</span>
-            </TabsTrigger>
+            <>
+              <TabsTrigger value="presets">
+                <span>PRESETS</span>
+                <span className="font-mono text-[10px] tabular-nums text-text-low">ADMIN</span>
+              </TabsTrigger>
+              <TabsTrigger value="manifest">
+                <span>MANIFEST</span>
+                <span className="font-mono text-[10px] tabular-nums text-text-low">ADMIN</span>
+              </TabsTrigger>
+            </>
           ) : null}
         </TabsList>
 
@@ -414,6 +422,30 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
           </TabsContent>
         ))}
         {adminMode ? (
+          <TabsContent value="presets" className="outline-none">
+            <Card variant="window">
+              <CardWindowBar>
+                <CardWindowTab>PRESET BUILDER</CardWindowTab>
+                <CardStatus>ADMIN</CardStatus>
+              </CardWindowBar>
+              <CardContent className="flex flex-col gap-4 p-5">
+                <div className="max-w-2xl">
+                  <h2 className="text-xl text-text-high [text-wrap:balance]">Pack Presets</h2>
+                  <p className="mt-2 text-sm text-text-low [text-wrap:pretty]">
+                    Build and edit preset bundles from the current Prism instance: option keys,
+                    config file overrides, shader sidecars, and optional mods to disable.
+                  </p>
+                </div>
+                <div>
+                  <Button onClick={() => setPresetBuilderOpen(true)}>
+                    <Sparkles /> OPEN PRESET BUILDER
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        ) : null}
+        {adminMode ? (
           <TabsContent value="manifest" className="outline-none">
             <ManifestEditor
               manifest={manifest.data ?? null}
@@ -453,6 +485,14 @@ export function ModpackBuilderPage({ packId, onBack }: ModpackBuilderPageProps) 
             },
             { onSuccess: () => setInstallTarget(null) },
           );
+        }}
+      />
+      <OptionPresetBuilderDialog
+        packId={packId}
+        open={presetBuilderOpen}
+        onOpenChange={setPresetBuilderOpen}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ["option-presets", packId] });
         }}
       />
     </div>

@@ -73,6 +73,8 @@ export function OptionPresetBuilderDialog({
   const [fileRows, setFileRows] = useState<OptionPresetFileRow[]>([]);
   const [modRows, setModRows] = useState<OptionPresetModRow[]>([]);
   const [manualId, setManualId] = useState(false);
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [draftShaderPack, setDraftShaderPack] = useState<string | null>(null);
 
   const presets = useQuery({
     queryKey: ["option-presets", packId],
@@ -87,11 +89,17 @@ export function OptionPresetBuilderDialog({
   });
 
   useEffect(() => {
-    if (!capture.data) return;
+    if (!open || !capture.data || editingPresetId) return;
     setRows(capture.data.rows);
     setFileRows(capture.data.files);
     setModRows(capture.data.mods);
-  }, [capture.data]);
+    setDraftShaderPack(capture.data.shaderPack ?? null);
+  }, [open, capture.data, editingPresetId]);
+
+  useEffect(() => {
+    if (open) return;
+    setEditingPresetId(null);
+  }, [open]);
 
   useEffect(() => {
     if (manualId) return;
@@ -109,13 +117,34 @@ export function OptionPresetBuilderDialog({
     onError: (error) => toast.error("Preset save failed", { description: formatError(error) }),
   });
 
+  const loadPreset = useMutation({
+    mutationFn: (presetId: string) => tauri.loadOptionPresetForEdit(packId, presetId),
+    onSuccess: (draft) => {
+      setEditingPresetId(draft.id);
+      setLabel(draft.label);
+      setId(draft.id);
+      setDescription(draft.description);
+      setRows(draft.rows);
+      setFileRows(draft.files);
+      setModRows(draft.mods);
+      setDraftShaderPack(draft.shaderPack ?? null);
+      setManualId(true);
+      setActiveSection("video");
+      setSearch("");
+      toast.success("Preset loaded", { description: draft.label });
+    },
+    onError: (error) => toast.error("Preset load failed", { description: formatError(error) }),
+  });
+
   const counts = useMemo(() => buildScopeCounts(rows), [rows]);
   const includedCount = rows.filter((row) => row.included).length;
   const includedFileCount = fileRows.filter((row) => row.included).length;
   const optionalModRows = modRows.filter((row) => row.optional);
   const disabledModCount = optionalModRows.filter((row) => row.disabled).length;
   const visibleRows = rows.filter(
-    (row) => row.scope === activeSection && fuzzyMatch(`${humanizeKey(row.key)} ${row.key} ${row.value} ${row.source}`, search),
+    (row) =>
+      row.scope === activeSection &&
+      fuzzyMatch(`${humanizeKey(row.key)} ${row.key} ${row.value} ${row.source}`, search),
   );
   const visibleFileRows = fileRows.filter((row) => fuzzyMatch(row.relPath, search));
   const visibleModRows = optionalModRows.filter((row) => fuzzyMatch(row.filename, search));
@@ -143,9 +172,7 @@ export function OptionPresetBuilderDialog({
 
   function updateFileRow(target: OptionPresetFileRow, included: boolean) {
     setFileRows((current) =>
-      current.map((row) =>
-        row.relPath === target.relPath ? { ...row, included } : row,
-      ),
+      current.map((row) => (row.relPath === target.relPath ? { ...row, included } : row)),
     );
   }
 
@@ -155,9 +182,7 @@ export function OptionPresetBuilderDialog({
 
   function updateModRow(target: OptionPresetModRow, disabled: boolean) {
     setModRows((current) =>
-      current.map((row) =>
-        row.filename === target.filename ? { ...row, disabled } : row,
-      ),
+      current.map((row) => (row.filename === target.filename ? { ...row, disabled } : row)),
     );
   }
 
@@ -180,7 +205,7 @@ export function OptionPresetBuilderDialog({
       id,
       label,
       description,
-      shaderPack: capture.data?.shaderPack ?? null,
+      shaderPack: draftShaderPack === "Disabled" ? null : draftShaderPack,
       rows,
       files: fileRows,
       disabledMods: optionalModRows.filter((row) => row.disabled).map((row) => row.filename),
@@ -233,26 +258,26 @@ export function OptionPresetBuilderDialog({
               {sections.map((section) => {
                 const count = sectionCount(section.id, counts, fileRows, optionalModRows);
                 return (
-                <button
-                  key={section.id}
-                  type="button"
-                  className={cn(
-                    "flex items-center justify-between border border-line-soft/20 bg-surface-sunken/40 px-3 py-2 text-left",
-                    activeSection === section.id && "border-brand-core/50 bg-brand-core/10",
-                  )}
-                  onClick={() => {
-                    setActiveSection(section.id);
-                    setSearch("");
-                  }}
-                >
-                  <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                    {section.label}
-                  </span>
-                  <span className="font-mono text-[10px] tabular-nums text-text-high">
-                    {count.included}/{count.total}
-                  </span>
-                </button>
-              );
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={cn(
+                      "flex items-center justify-between border border-line-soft/20 bg-surface-sunken/40 px-3 py-2 text-left",
+                      activeSection === section.id && "border-brand-core/50 bg-brand-core/10",
+                    )}
+                    onClick={() => {
+                      setActiveSection(section.id);
+                      setSearch("");
+                    }}
+                  >
+                    <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
+                      {section.label}
+                    </span>
+                    <span className="font-mono text-[10px] tabular-nums text-text-high">
+                      {count.included}/{count.total}
+                    </span>
+                  </button>
+                );
               })}
             </div>
 
@@ -264,11 +289,15 @@ export function OptionPresetBuilderDialog({
                   <p className="text-[10px] uppercase tracking-[0.16em] text-text-low">OPTIONS</p>
                 </div>
                 <div>
-                  <p className="font-mono text-sm tabular-nums text-text-high">{includedFileCount}</p>
+                  <p className="font-mono text-sm tabular-nums text-text-high">
+                    {includedFileCount}
+                  </p>
                   <p className="text-[10px] uppercase tracking-[0.16em] text-text-low">FILES</p>
                 </div>
                 <div>
-                  <p className="font-mono text-sm tabular-nums text-text-high">{disabledModCount}</p>
+                  <p className="font-mono text-sm tabular-nums text-text-high">
+                    {disabledModCount}
+                  </p>
                   <p className="text-[10px] uppercase tracking-[0.16em] text-text-low">MODS OFF</p>
                 </div>
               </div>
@@ -277,11 +306,24 @@ export function OptionPresetBuilderDialog({
             <div className="grid gap-2">
               <p className="text-[10px] uppercase tracking-[0.18em] text-text-low">EXISTING</p>
               <div className="flex flex-wrap gap-2">
-                {(presets.data ?? []).map((preset) => (
-                  <Badge key={preset.id} variant="outline">
-                    {preset.label}
-                  </Badge>
-                ))}
+                {(presets.data ?? []).map((preset) => {
+                  const loadingThisPreset =
+                    loadPreset.isPending && loadPreset.variables === preset.id;
+                  return (
+                    <Button
+                      key={preset.id}
+                      type="button"
+                      variant={editingPresetId === preset.id ? "secondary" : "outline"}
+                      size="sm"
+                      className="h-7 px-2 text-[10px] uppercase tracking-[0.14em]"
+                      disabled={loadPreset.isPending}
+                      onClick={() => loadPreset.mutate(preset.id)}
+                    >
+                      {loadingThisPreset ? <Loader2 className="size-3 animate-spin" /> : null}
+                      {preset.label}
+                    </Button>
+                  );
+                })}
                 {!presets.isLoading && (presets.data ?? []).length === 0 ? (
                   <span className="text-xs text-text-low">No presets yet.</span>
                 ) : null}
@@ -346,7 +388,7 @@ export function OptionPresetBuilderDialog({
             disabled={savePreset.isPending || !label.trim() || !id.trim()}
           >
             {savePreset.isPending ? <Loader2 className="animate-spin" /> : <Save />}
-            SAVE PRESET
+            {editingPresetId === id ? "UPDATE PRESET" : "SAVE PRESET"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -501,9 +543,7 @@ function PresetModsPanel({
                   />
                 </TableCell>
                 <TableCell className="min-w-0 px-3 py-1.5">
-                  <span className="block truncate text-[11px] text-text-high">
-                    {row.filename}
-                  </span>
+                  <span className="block truncate text-[11px] text-text-high">{row.filename}</span>
                 </TableCell>
                 <TableCell className="w-24 px-3 py-1.5 text-right">
                   <Badge variant={row.optional ? "outline" : "secondary"}>

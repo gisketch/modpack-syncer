@@ -110,6 +110,18 @@ pub struct OptionPresetCapture {
     pub mods: Vec<OptionPresetModRow>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPresetEditDraft {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub rows: Vec<OptionPresetRow>,
+    pub shader_pack: Option<String>,
+    pub files: Vec<OptionPresetFileRow>,
+    pub mods: Vec<OptionPresetModRow>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OptionPresetFileRow {
@@ -171,6 +183,24 @@ pub async fn capture_option_preset(
     let manifest = manifest::load_from_path(&pack_dir.join("manifest.json"))?;
     tokio::task::spawn_blocking(move || {
         capture_option_preset_from_instance(&instance_root, &manifest)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn load_option_preset_for_edit(
+    pack_id: String,
+    preset_id: String,
+    instance_name: Option<String>,
+) -> Result<OptionPresetEditDraft, CommandError> {
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_root = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let manifest = manifest::load_from_path(&pack_dir.join("manifest.json"))?;
+    tokio::task::spawn_blocking(move || {
+        load_option_preset_edit_draft(&pack_dir, &instance_root, &manifest, &preset_id)
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
@@ -328,10 +358,197 @@ fn preset_summary_from_pack(
     preset: &OptionPreset,
 ) -> Result<OptionPresetSummary, CommandError> {
     let mut summary = preset_summary(preset);
-    if summary.shader_pack.is_none() {
-        summary.shader_pack = preset_shader_pack_from_files(pack_dir, preset)?;
+    let file_shader_pack = preset_shader_pack_from_files(pack_dir, preset)?;
+    if file_shader_pack.as_deref() == Some("Disabled") || summary.shader_pack.is_none() {
+        summary.shader_pack = file_shader_pack;
     }
     Ok(summary)
+}
+
+fn load_option_preset_edit_draft(
+    pack_dir: &Path,
+    instance_root: &Path,
+    manifest: &manifest::Manifest,
+    preset_id: &str,
+) -> Result<OptionPresetEditDraft, CommandError> {
+    let preset = load_option_preset(pack_dir, preset_id)?;
+    let capture = capture_option_preset_from_instance(instance_root, manifest)?;
+    let shader_pack = preset_shader_pack_for_display(pack_dir, &preset)?;
+    Ok(OptionPresetEditDraft {
+        id: preset.id.clone(),
+        label: preset.label.clone(),
+        description: preset.description.clone(),
+        rows: merge_preset_rows(capture.rows, &preset),
+        shader_pack,
+        files: merge_preset_file_rows(pack_dir, capture.files, &preset)?,
+        mods: merge_preset_mod_rows(capture.mods, &preset),
+    })
+}
+
+fn preset_shader_pack_for_display(
+    pack_dir: &Path,
+    preset: &OptionPreset,
+) -> Result<Option<String>, CommandError> {
+    let file_shader_pack = preset_shader_pack_from_files(pack_dir, preset)?;
+    if file_shader_pack.as_deref() == Some("Disabled") {
+        return Ok(file_shader_pack);
+    }
+    Ok(preset
+        .shader
+        .as_ref()
+        .and_then(|shader| shader.shader_pack.clone())
+        .or(file_shader_pack))
+}
+
+fn merge_preset_rows(
+    mut rows: Vec<OptionPresetRow>,
+    preset: &OptionPreset,
+) -> Vec<OptionPresetRow> {
+    let preset_rows = preset_rows(preset);
+    let preset_values = preset_rows
+        .iter()
+        .map(|row| ((row.scope, row.key.clone()), row.value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen = BTreeSet::new();
+
+    for row in &mut rows {
+        row.included = false;
+        if let Some(value) = preset_values.get(&(row.scope, row.key.clone())) {
+            row.value = value.clone();
+            row.included = true;
+            row.source = format!("preset / {}", row.source);
+        }
+        seen.insert((row.scope, row.key.clone()));
+    }
+
+    rows.extend(
+        preset_rows
+            .into_iter()
+            .filter(|row| !seen.contains(&(row.scope, row.key.clone()))),
+    );
+    rows.sort_by(|left, right| {
+        (left.scope, left.key.as_str()).cmp(&(right.scope, right.key.as_str()))
+    });
+    rows
+}
+
+fn preset_rows(preset: &OptionPreset) -> Vec<OptionPresetRow> {
+    let mut rows = Vec::new();
+    rows.extend(
+        preset
+            .options
+            .video
+            .iter()
+            .map(|(key, value)| OptionPresetRow {
+                scope: OptionPresetScope::Video,
+                key: key.clone(),
+                value: value.clone(),
+                included: true,
+                source: "preset".to_string(),
+            }),
+    );
+    rows.extend(
+        preset
+            .options
+            .keybinds
+            .iter()
+            .map(|(key, value)| OptionPresetRow {
+                scope: OptionPresetScope::Keybinds,
+                key: key.clone(),
+                value: value.clone(),
+                included: true,
+                source: "preset".to_string(),
+            }),
+    );
+    rows.extend(
+        preset
+            .options
+            .other
+            .iter()
+            .map(|(key, value)| OptionPresetRow {
+                scope: OptionPresetScope::Other,
+                key: key.clone(),
+                value: value.clone(),
+                included: true,
+                source: "preset".to_string(),
+            }),
+    );
+    if let Some(shader) = preset.shader.as_ref() {
+        rows.extend(shader.iris.iter().map(|(key, value)| OptionPresetRow {
+            scope: OptionPresetScope::ShaderIris,
+            key: key.clone(),
+            value: value.clone(),
+            included: true,
+            source: "preset".to_string(),
+        }));
+        if let Some(shader_pack) = shader.shader_pack.as_ref() {
+            if !shader.iris.contains_key("shaderPack") {
+                rows.push(OptionPresetRow {
+                    scope: OptionPresetScope::ShaderIris,
+                    key: "shaderPack".to_string(),
+                    value: shader_pack.clone(),
+                    included: true,
+                    source: "preset".to_string(),
+                });
+            }
+        }
+        rows.extend(shader.preset.iter().map(|(key, value)| OptionPresetRow {
+            scope: OptionPresetScope::ShaderPreset,
+            key: key.clone(),
+            value: value.clone(),
+            included: true,
+            source: "preset".to_string(),
+        }));
+    }
+    rows
+}
+
+fn merge_preset_file_rows(
+    pack_dir: &Path,
+    mut rows: Vec<OptionPresetFileRow>,
+    preset: &OptionPreset,
+) -> Result<Vec<OptionPresetFileRow>, CommandError> {
+    let selected = preset
+        .files
+        .iter()
+        .map(|file| file.rel_path.clone())
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    for row in &mut rows {
+        row.included = selected.contains(&row.rel_path);
+        seen.insert(row.rel_path.clone());
+    }
+    let preset_files_dir = pack_dir
+        .join("presets")
+        .join(sanitize_preset_id(&preset.id)?)
+        .join("files");
+    for rel_path in selected
+        .into_iter()
+        .filter(|rel_path| !seen.contains(rel_path))
+    {
+        let size = preset_files_dir
+            .join(&rel_path)
+            .metadata()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        rows.push(OptionPresetFileRow {
+            rel_path,
+            included: true,
+            size,
+        });
+    }
+    rows.sort_by(|left, right| left.rel_path.cmp(&right.rel_path));
+    Ok(rows)
+}
+
+fn merge_preset_mod_rows(
+    mut rows: Vec<OptionPresetModRow>,
+    preset: &OptionPreset,
+) -> Vec<OptionPresetModRow> {
+    for row in &mut rows {
+        row.disabled = preset.disabled_mods.contains(&row.filename);
+    }
+    rows
 }
 
 fn list_option_presets_from_pack(
@@ -541,7 +758,7 @@ fn preset_shader_pack_from_files(
     let iris = read_properties_map(&iris_path)?;
     if iris
         .get("enableShaders")
-        .is_some_and(|value| value == "false")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("false"))
     {
         return Ok(Some("Disabled".to_string()));
     }

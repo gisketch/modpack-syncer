@@ -59,13 +59,15 @@ pub struct LaunchProfile {
     pub auto_java: bool,
 }
 
+pub const DEFAULT_EXTRA_JVM_ARGS: &str = "-XX:+UseZGC -XX:+ZGenerational -XX:+UseStringDeduplication -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:+ParallelRefProcEnabled -XX:+PerfDisableSharedMem -Dfile.encoding=UTF-8";
+
 impl Default for LaunchProfile {
     fn default() -> Self {
         Self {
             min_memory_mb: 512,
-            max_memory_mb: 4096,
+            max_memory_mb: 8192,
             java_path: None,
-            extra_jvm_args: String::new(),
+            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
             auto_java: true,
         }
     }
@@ -144,7 +146,11 @@ pub fn load_launch_profile(pack_id: &str) -> Result<LaunchProfile, PrismError> {
         return Ok(LaunchProfile::default());
     }
     let bytes = std::fs::read(path)?;
-    let profile = serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
+    let mut profile =
+        serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
+    if profile.extra_jvm_args.trim().is_empty() {
+        profile.extra_jvm_args = DEFAULT_EXTRA_JVM_ARGS.to_string();
+    }
     Ok(profile)
 }
 

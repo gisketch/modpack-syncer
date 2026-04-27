@@ -73,6 +73,7 @@ fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
     let analysis = repo.merge_analysis(&[&fetch_commit])?;
     if analysis.0.is_up_to_date() {
         let head = repo.head()?.peel_to_commit()?;
+        checkout_head_clean(&repo)?;
         return Ok(head.id().to_string());
     }
     let refname = {
@@ -83,20 +84,30 @@ fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
         let mut reference = repo.find_reference(&refname)?;
         reference.set_target(fetch_commit.id(), "modsync fast-forward")?;
         repo.set_head(&refname)?;
-        repo.checkout_head(Some(CheckoutBuilder::default().force()))?;
+        checkout_head_clean(&repo)?;
     } else {
         let target = repo.find_commit(fetch_commit.id())?;
         let mut reference = repo.find_reference(&refname)?;
         reference.set_target(fetch_commit.id(), "modsync force update")?;
         repo.set_head(&refname)?;
-        repo.reset(
-            target.as_object(),
-            ResetType::Hard,
-            Some(CheckoutBuilder::default().force()),
-        )?;
+        reset_hard_clean(&repo, &target)?;
     }
     let head = repo.head()?.peel_to_commit()?;
     Ok(head.id().to_string())
+}
+
+fn checkout_head_clean(repo: &Repository) -> Result<(), GitError> {
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().remove_untracked(true);
+    repo.checkout_head(Some(&mut checkout))?;
+    Ok(())
+}
+
+fn reset_hard_clean(repo: &Repository, target: &git2::Commit<'_>) -> Result<(), GitError> {
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().remove_untracked(true);
+    repo.reset(target.as_object(), ResetType::Hard, Some(&mut checkout))?;
+    Ok(())
 }
 
 pub fn head_sha(repo_dir: &Path) -> Result<String, GitError> {

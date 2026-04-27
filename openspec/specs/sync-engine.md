@@ -22,19 +22,19 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 16. Publisher preset capture MUST read the current Prism instance and default to including video option keys while leaving keybinds and other option keys unselected until the publisher opts in.
 17. Publisher preset capture MUST expose selectable file overrides from `config/**` and `shaderpacks/*.txt`; saved preset file bytes MUST live under `presets/<presetId>/files/<relativePath>`.
 18. Publisher preset capture MUST expose optional manifest mods so the publisher can mark mods disabled for that preset. Sync MUST apply disabled mod states by renaming selected mods to `<filename>.disabled` after writing the instance.
-19. Publisher preset builder MUST present separate searchable sections for video settings, keybinds, other options, config/shader sidecar file overrides, and optional mods.
-20. Sync review MUST use this wizard order: sync preview, choose preset, keybinds/options review, then sync progress after confirmation.
-21. Choose preset MUST present Pack Default, Don't Override Settings, and pack presets as selectable expanded cards. The selected card MUST show description, disabled mods when present, and shader selected when present in preset Iris settings.
+19. Publisher preset builder MUST live under the Builder page's Presets tab. It MUST present separate searchable sections for video settings, keybinds, other options, config/shader sidecar file overrides, and optional mods, and MUST allow publishers to load and edit existing presets.
+20. Sync review MUST use this wizard order: sync preview, keybinds/options review, then sync progress after confirmation.
+21. Sync MUST apply pack-default option and shader settings only. Preset selection MUST happen in the launch flow, not the sync flow.
 22. Pack Default MUST pull from the pack's main source files rather than any preset. Don't Override Settings MUST select no preset and skip preset option keys, preset file overrides, and preset-disabled mods.
-23. Sync MUST apply selected preset keys after pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
-24. Sync MUST copy selected preset file overrides into the Prism instance after standard pack overrides and shader settings sync.
-25. `IGNORE SHADER SETTINGS` MUST override the legacy shader-key portion of a selected preset. File overrides selected in a preset are preset-owned and apply with the preset.
+23. Launch MUST apply selected preset keys after synced pack defaults, MUST only modify keys included in the preset, and MUST let per-key ignored option state override preset option keys.
+24. Launch MUST copy selected preset file overrides into the Prism instance before Prism starts.
+25. `IGNORE SHADER SETTINGS` MUST override sync-time pack shader settings only. Launch-time preset file overrides are preset-owned and apply when a preset is selected.
 26. The pack detail UI MUST consider an instance needing sync when the last synced pack commit differs from the current local pack head, even if current artifact files look unchanged.
 27. Local option file edits MUST be handled through options review and ignored-key controls, not treated as a global pack-update signal by themselves.
 28. Options review MUST let users enable or disable syncing for each options category (`keybinds`, `video`, `other`). Category sync MUST be enabled by default, and disabled categories MUST leave matching local option keys unchanged during sync.
 29. Repo-backed shaderpack zip entries MAY tolerate SHA drift by filename, because launchers can rewrite shaderpack zip metadata after opening the shaderpack. If the existing instance already has the same shaderpack filename, sync MAY preserve that same-name local file instead of failing SHA verification.
 30. Options review MUST allow users to continue to sync without visiting or deciding the shader settings tab; an undecided shader settings state MUST behave like not syncing shader settings.
-31. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible.
+31. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible. Pack fetch MUST also remove untracked local files so stale local-only pack files, including presets, do not merge with source repo files.
 32. If a previously selected option preset is no longer present in the pack repo, options preview and sync MUST fall back to Pack Default instead of failing on the missing preset file.
 
 ## See

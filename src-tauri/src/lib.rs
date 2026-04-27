@@ -77,6 +77,7 @@ pub fn run() {
             commands::sync::preview_shader_settings_sync,
             commands::option_presets::list_option_presets,
             commands::option_presets::capture_option_preset,
+            commands::option_presets::load_option_preset_for_edit,
             commands::option_presets::save_option_preset,
             commands::publish::apply_instance_publish,
             commands::publish::commit_and_push_publish,

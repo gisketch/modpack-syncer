@@ -7,11 +7,12 @@ This spec covers the launch-profile files modsync currently uses at runtime. Pac
 ## Requirements
 
 1. A launch profile MUST be stored at `<appData>/launch-profiles/<packId>.json`.
-2. If no launch-profile file exists for a pack, the app MUST synthesize a default profile with `minMemoryMb = 512`, `maxMemoryMb = 4096`, `extraJvmArgs = ""`, and `autoJava = true`.
+2. If no launch-profile file exists for a pack, the app MUST synthesize a default profile with `minMemoryMb = 512`, `maxMemoryMb = 8192`, editable Java 21 Generational ZGC extra JVM args, and `autoJava = true`.
 3. If a preferred managed Java runtime already exists when the default profile is synthesized, the default profile MUST instead set `autoJava = false` and seed `javaPath` with that managed runtime.
 4. A launch profile MUST expose `minMemoryMb`, `maxMemoryMb`, `javaPath` (optional), `extraJvmArgs`, and `autoJava`.
-5. Saving a launch profile MUST update the local JSON file and the next sync or launch MUST apply those values to the Prism instance's `instance.cfg`.
-6. When `autoJava` is `true`, modsync MUST not force a Java override into the Prism instance. When `autoJava` is `false` and `javaPath` is set, modsync MUST write that Java path into Prism's instance config.
+5. If an existing launch profile has blank `extraJvmArgs`, the app MUST prefill the default editable Generational ZGC args when loading it. `extraJvmArgs` MUST NOT include `-Xmx` or `-Xms`; memory controls own heap sizing.
+6. Saving a launch profile MUST update the local JSON file and the next sync or launch MUST apply those values to the Prism instance's `instance.cfg`.
+7. When `autoJava` is `true`, modsync MUST not force a Java override into the Prism instance. When `autoJava` is `false` and `javaPath` is set, modsync MUST write that Java path into Prism's instance config.
 
 ## See
 

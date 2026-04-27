@@ -22,12 +22,14 @@ type AppState = {
   adminModeByPack: Record<string, boolean>;
   lastSyncedCommitByPack: Record<string, string>;
   selectedOptionPresetByPack: Record<string, string>;
+  skipLaunchPresetSelectionByPack: Record<string, boolean>;
   publishIgnorePatternsByPack: Record<string, string[]>;
   disabledArtifactsByPack: Record<string, Record<string, string[]>>;
   setActiveProfile: (name: string | null) => void;
   setPackAdminMode: (packId: string, adminMode: boolean) => void;
   setLastSyncedCommit: (packId: string, commitSha: string) => void;
   setSelectedOptionPreset: (packId: string, presetId: string) => void;
+  setSkipLaunchPresetSelection: (packId: string, skip: boolean) => void;
   setPublishIgnorePatterns: (packId: string, patterns: string[]) => void;
   setArtifactDisabled: (
     packId: string,
@@ -48,6 +50,7 @@ export const useAppStore = create<AppState>()(
       adminModeByPack: {},
       lastSyncedCommitByPack: {},
       selectedOptionPresetByPack: {},
+      skipLaunchPresetSelectionByPack: {},
       publishIgnorePatternsByPack: {},
       disabledArtifactsByPack: {},
       setActiveProfile: (name) => set({ activeProfile: name }),
@@ -70,6 +73,13 @@ export const useAppStore = create<AppState>()(
           selectedOptionPresetByPack: {
             ...state.selectedOptionPresetByPack,
             [packId]: presetId,
+          },
+        })),
+      setSkipLaunchPresetSelection: (packId, skip) =>
+        set((state) => ({
+          skipLaunchPresetSelectionByPack: {
+            ...state.skipLaunchPresetSelectionByPack,
+            [packId]: skip,
           },
         })),
       setPublishIgnorePatterns: (packId, patterns) =>
@@ -108,6 +118,7 @@ export const useAppStore = create<AppState>()(
         adminModeByPack: state.adminModeByPack,
         lastSyncedCommitByPack: state.lastSyncedCommitByPack,
         selectedOptionPresetByPack: state.selectedOptionPresetByPack,
+        skipLaunchPresetSelectionByPack: state.skipLaunchPresetSelectionByPack,
         publishIgnorePatternsByPack: state.publishIgnorePatternsByPack,
         disabledArtifactsByPack: state.disabledArtifactsByPack,
       }),

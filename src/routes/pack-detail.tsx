@@ -71,7 +71,7 @@ import {
   AddModrinthEntryDialog,
   describeArtifactCategory,
 } from "@/features/packs/modrinth-admin/add-modrinth-entry-dialog";
-import { OptionPresetBuilderDialog } from "@/features/packs/presets/option-preset-builder-dialog";
+import { OptionPresetSelection } from "@/features/packs/presets/option-preset-selection";
 import { PublishPreviewPage } from "@/features/packs/publish-preview/publish-preview-page";
 import {
   buildSyncReviewTabs,
@@ -126,11 +126,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const selectedOptionPresetId = useAppStore(
     (s) => s.selectedOptionPresetByPack[packId] ?? PACK_DEFAULT_PRESET_ID,
   );
+  const skipLaunchPresetSelection = useAppStore(
+    (s) => s.skipLaunchPresetSelectionByPack[packId] ?? false,
+  );
   const publishIgnorePatterns = useAppStore(
     (s) => s.publishIgnorePatternsByPack[packId] ?? EMPTY_PUBLISH_IGNORE_PATTERNS,
   );
   const setLastSyncedCommit = useAppStore((s) => s.setLastSyncedCommit);
   const setSelectedOptionPreset = useAppStore((s) => s.setSelectedOptionPreset);
+  const setSkipLaunchPresetSelection = useAppStore((s) => s.setSkipLaunchPresetSelection);
   const setPublishIgnorePatterns = useAppStore((s) => s.setPublishIgnorePatterns);
   const disabledArtifactsForPack = useAppStore(
     (s) => s.disabledArtifactsByPack[packId] ?? EMPTY_DISABLED_ARTIFACTS,
@@ -172,13 +176,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [presetBuilderOpen, setPresetBuilderOpen] = useState(false);
+  const [presetSelectionOpen, setPresetSelectionOpen] = useState(false);
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
   const [syncReviewOpen, setSyncReviewOpen] = useState(false);
-  const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "presets" | "options">(
-    "artifacts",
-  );
+  const [syncReviewStep, setSyncReviewStep] = useState<"artifacts" | "options">("artifacts");
+  const [launchStep, setLaunchStep] = useState<"presets" | "options">("presets");
   const [shaderSyncDecision, setShaderSyncDecision] = useState<"undecided" | "sync" | "skip">(
     "undecided",
   );
@@ -312,14 +315,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const hasTrackedOptionsFile = hasTrackedOptionsPreset(artifactPublishScan.data);
   const optionsSyncPreview = useQuery({
-    queryKey: ["options-sync-preview", packId, selectedOptionPresetId],
-    queryFn: () => tauri.previewOptionsSync(packId, undefined, selectedOptionPresetId),
+    queryKey: ["options-sync-preview", packId, PACK_DEFAULT_PRESET_ID],
+    queryFn: () => tauri.previewOptionsSync(packId, undefined, PACK_DEFAULT_PRESET_ID),
     enabled: syncReviewOpen && !!instanceDir.data,
     retry: false,
   });
   const shaderSettingsPreview = useQuery({
-    queryKey: ["shader-settings-preview", packId, selectedOptionPresetId],
-    queryFn: () => tauri.previewShaderSettingsSync(packId, undefined, selectedOptionPresetId),
+    queryKey: ["shader-settings-preview", packId, PACK_DEFAULT_PRESET_ID],
+    queryFn: () => tauri.previewShaderSettingsSync(packId, undefined, PACK_DEFAULT_PRESET_ID),
     enabled: syncReviewOpen && !!instanceDir.data,
     retry: false,
   });
@@ -340,10 +343,6 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     if (optionPresets.data.some((preset) => preset.id === selectedOptionPresetId)) return;
     setSelectedOptionPreset(packId, PACK_DEFAULT_PRESET_ID);
   }, [optionPresets.data, packId, selectedOptionPresetId, setSelectedOptionPreset]);
-  const hasOptionsReviewSource =
-    hasTrackedOptionsFile ||
-    selectedOptionPresetId !== PACK_DEFAULT_PRESET_ID ||
-    (optionPresets.data?.length ?? 0) > 0;
   const changelog = useQuery({
     queryKey: ["pack-changelog", packId, lastSyncedCommit],
     queryFn: () => tauri.packChangelog(packId, 12),
@@ -585,6 +584,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["option-presets", packId] }),
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
         qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
@@ -682,6 +682,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         statuses.refetch(),
         qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
         qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+        qc.invalidateQueries({ queryKey: ["option-presets", packId] }),
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
         qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
@@ -712,7 +713,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const launch = useMutation({
     mutationFn: async (profile: LaunchProfile) => {
       await tauri.setLaunchProfile(packId, profile);
-      await tauri.launchPack(packId, instanceName);
+      await tauri.launchPack(packId, instanceName, selectedOptionPresetId);
     },
     onSuccess: () => toast.success("Prism launched"),
     onError: (e) => toast.error("Launch failed", { description: formatError(e) }),
@@ -924,12 +925,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       setLaunchSyncGateOpen(true);
       return;
     }
+    openLaunchFlow();
+  }
+
+  function openLaunchFlow() {
+    setLaunchStep(skipLaunchPresetSelection ? "options" : "presets");
     setLaunchConfirmOpen(true);
   }
 
   function handleContinueLaunchAnyway() {
     setLaunchSyncGateOpen(false);
-    setLaunchConfirmOpen(true);
+    openLaunchFlow();
   }
 
   function handleSyncFromLaunchGate() {
@@ -990,7 +996,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setSyncReviewStep("artifacts");
     setShaderSyncDecision("undecided");
     setPendingShaderSync(false);
-    setPendingOptionPresetId(selectedOptionPresetId);
+    setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
     setOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
     setPendingOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
     setSyncReviewOpen(true);
@@ -1007,11 +1013,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   function handleSyncReviewNext() {
-    setSyncReviewStep((current) => (current === "artifacts" ? "presets" : "options"));
+    setSyncReviewStep("options");
   }
 
   function handleSyncReviewBack() {
-    setSyncReviewStep((current) => (current === "options" ? "presets" : "artifacts"));
+    setSyncReviewStep("artifacts");
   }
 
   function handleConfirmSyncFromReview() {
@@ -1020,7 +1026,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       : false;
     handleCloseSyncReview();
     setPendingShaderSync(applyShaderSettings);
-    setPendingOptionPresetId(selectedOptionPresetId);
+    setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
     setPendingOptionSyncCategories(optionSyncCategories);
     if (unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
@@ -1032,7 +1038,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     }
     sync.mutate({
       syncShaderSettings: applyShaderSettings,
-      optionPresetId: selectedOptionPresetId,
+      optionPresetId: PACK_DEFAULT_PRESET_ID,
       optionSyncCategories,
     });
   }
@@ -1189,16 +1195,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               PUBLISH
             </Button>
           )}
-          {adminMode && (
-            <Button
-              variant="outline"
-              onClick={() => setPresetBuilderOpen(true)}
-              disabled={!instanceDir.data || sync.isPending || fetchPack.isPending}
-            >
-              <SlidersHorizontal />
-              PRESETS
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            onClick={() => setPresetSelectionOpen(true)}
+            disabled={!manifest.data || sync.isPending || fetchPack.isPending}
+          >
+            <SlidersHorizontal />
+            PRESETS
+          </Button>
           <Button
             variant="outline"
             onClick={() => fetchPack.mutate()}
@@ -1737,7 +1741,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         syncSummary={syncSummary}
         syncReviewTabs={syncReviewTabs}
         defaultTab={syncReviewDefaultTab}
-        hasTrackedOptionsFile={hasOptionsReviewSource}
+        hasTrackedOptionsFile={hasTrackedOptionsFile}
         optionsPreview={optionsSyncPreview.data}
         optionsLoading={optionsSyncPreview.isLoading || optionsSyncPreview.isFetching}
         optionsError={optionsSyncPreview.error}
@@ -1748,9 +1752,6 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         shaderError={shaderSettingsPreview.error}
         shaderDecision={shaderSyncDecision}
         onShaderDecisionChange={setShaderSyncDecision}
-        optionPresets={optionPresets.data ?? []}
-        selectedOptionPresetId={selectedOptionPresetId}
-        onOptionPresetChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
         enabledOptionSyncCategories={optionSyncCategories}
         onOptionSyncCategoryChange={handleOptionSyncCategoryChange}
         syncPending={sync.isPending}
@@ -1767,16 +1768,37 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         category={addEntryCategory}
       />
 
-      <OptionPresetBuilderDialog
-        packId={packId}
-        open={presetBuilderOpen}
-        onOpenChange={setPresetBuilderOpen}
-        onSaved={() => {
-          void qc.invalidateQueries({ queryKey: ["option-presets", packId] });
-          void qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] });
-          void qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] });
-        }}
-      />
+      <Dialog open={presetSelectionOpen} onOpenChange={setPresetSelectionOpen}>
+        <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
+          <DialogHeader>
+            <DialogTitle>PRESETS</DialogTitle>
+            <DialogDescription>Choose the preset used for launch.</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="flex min-h-0 flex-1 flex-col overflow-hidden p-5 xl:p-6">
+            <OptionPresetSelection
+              presets={optionPresets.data ?? []}
+              selectedPresetId={selectedOptionPresetId}
+              onChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
+            />
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setPresetSelectionOpen(false)}>
+                CLOSE
+              </Button>
+              {skipLaunchPresetSelection ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setSkipLaunchPresetSelection(packId, false)}
+                >
+                  SHOW ON LAUNCH
+                </Button>
+              ) : null}
+            </div>
+            <Button onClick={() => setPresetSelectionOpen(false)}>DONE</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ChangelogDialog
         open={changelogOpen}
@@ -1838,12 +1860,30 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       </Dialog>
 
       <Dialog open={launchConfirmOpen} onOpenChange={setLaunchConfirmOpen}>
-        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
+        <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
           <DialogHeader>
-            <DialogTitle>LAUNCHER SETUP</DialogTitle>
+            <DialogTitle>
+              {launchStep === "presets" ? "CHOOSE PRESET" : "LAUNCHER SETUP"}
+            </DialogTitle>
+            <DialogDescription>
+              {launchStep === "presets"
+                ? "Choose preset overrides for this launch."
+                : "Choose Java, memory, and launcher settings."}
+            </DialogDescription>
           </DialogHeader>
-          <DialogBody className="min-h-0 overflow-y-auto p-5 xl:p-6">
-            {launchProfileDraft ? (
+          <DialogBody
+            className={cn(
+              "flex min-h-0 flex-1 flex-col p-5 xl:p-6",
+              launchStep === "presets" ? "overflow-hidden" : "overflow-y-auto",
+            )}
+          >
+            {launchStep === "presets" ? (
+              <OptionPresetSelection
+                presets={optionPresets.data ?? []}
+                selectedPresetId={selectedOptionPresetId}
+                onChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
+              />
+            ) : launchProfileDraft ? (
               <LaunchSetupPanel
                 packName={manifest.data?.pack.name ?? packId}
                 profile={launchProfileDraft}
@@ -1862,17 +1902,41 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             )}
           </DialogBody>
           <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={() => setLaunchConfirmOpen(false)}>
-              CLOSE
-            </Button>
-            <Button
-              variant={needsSync || totalLaunchRiskCount > 0 ? "destructive" : "default"}
-              onClick={handleLaunchSubmit}
-              disabled={launch.isPending || !launchProfileDraft}
-            >
-              {launch.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
-              {needsSync || totalLaunchRiskCount > 0 ? "LAUNCH ANYWAY" : "LAUNCH"}
-            </Button>
+            {launchStep === "presets" ? (
+              <>
+                <Button variant="secondary" onClick={() => setLaunchConfirmOpen(false)}>
+                  CLOSE
+                </Button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSkipLaunchPresetSelection(packId, true);
+                      setLaunchStep("options");
+                    }}
+                  >
+                    DON'T SHOW AGAIN
+                  </Button>
+                  <Button onClick={() => setLaunchStep("options")}>
+                    NEXT <ChevronRight />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => setLaunchStep("presets")}>
+                  <ArrowLeft /> BACK
+                </Button>
+                <Button
+                  variant={needsSync || totalLaunchRiskCount > 0 ? "destructive" : "default"}
+                  onClick={handleLaunchSubmit}
+                  disabled={launch.isPending || !launchProfileDraft}
+                >
+                  {launch.isPending ? <Loader2 className="animate-spin" /> : <Rocket />}
+                  {needsSync || totalLaunchRiskCount > 0 ? "LAUNCH ANYWAY" : "LAUNCH"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
