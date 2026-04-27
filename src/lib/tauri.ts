@@ -42,6 +42,15 @@ export type PackSummary = {
   head_sha: string;
 };
 
+export type PackTransferProgressEvent = {
+  packId: string;
+  stage: string;
+  receivedObjects: number;
+  totalObjects: number;
+  indexedObjects: number;
+  receivedBytes: number;
+};
+
 export type FetchReport = {
   total: number;
   cached: number;

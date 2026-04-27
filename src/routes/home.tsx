@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Boxes, ChevronRight, FolderGit2, Loader2, Package, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PackIcon } from "@/components/pack-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatError } from "@/lib/format-error";
-import { type PackSummary, tauri } from "@/lib/tauri";
+import { type PackSummary, type PackTransferProgressEvent, tauri } from "@/lib/tauri";
 import { useNav } from "@/stores/nav-store";
 
 export function HomeRoute() {
@@ -26,9 +27,46 @@ export function HomeRoute() {
 
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [cloneProgress, setCloneProgress] = useState<PackTransferProgressEvent | null>(null);
+  const [cloneRate, setCloneRate] = useState<number | null>(null);
+  const cloneRateRef = useRef<{ bytes: number; at: number } | null>(null);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void listen<PackTransferProgressEvent>("pack-transfer-progress", (event) => {
+      setCloneProgress((current) =>
+        event.payload.stage === "done" && current ? { ...current, stage: "done" } : event.payload,
+      );
+      const now = Date.now();
+      const previous = cloneRateRef.current;
+      if (
+        previous &&
+        now > previous.at &&
+        event.payload.receivedBytes >= previous.bytes &&
+        event.payload.stage !== "done"
+      ) {
+        setCloneRate(((event.payload.receivedBytes - previous.bytes) * 1000) / (now - previous.at));
+      }
+      cloneRateRef.current = { bytes: event.payload.receivedBytes, at: now };
+      if (event.payload.stage === "done") {
+        setCloneRate(null);
+      }
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const addPack = useMutation({
     mutationFn: (u: string) => tauri.addPack(u),
+    onMutate: () => {
+      setError(null);
+      setCloneProgress(null);
+      setCloneRate(null);
+      cloneRateRef.current = null;
+    },
     onSuccess: () => {
       setUrl("");
       setError(null);
@@ -88,6 +126,9 @@ export function HomeRoute() {
               CLONE
             </Button>
           </form>
+          {addPack.isPending || cloneProgress ? (
+            <CloneProgress progress={cloneProgress} rate={cloneRate} pending={addPack.isPending} />
+          ) : null}
           {error && (
             <Alert variant="destructive" className="mt-3">
               <AlertTitle>Clone failed</AlertTitle>
@@ -113,6 +154,54 @@ export function HomeRoute() {
       </section>
     </div>
   );
+}
+
+function CloneProgress({
+  progress,
+  rate,
+  pending,
+}: {
+  progress: PackTransferProgressEvent | null;
+  rate: number | null;
+  pending: boolean;
+}) {
+  const total = progress?.totalObjects ?? 0;
+  const received = progress?.receivedObjects ?? 0;
+  const percent = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+  const stage = progress?.stage === "done" ? "DONE" : (progress?.stage.toUpperCase() ?? "STARTING");
+  return (
+    <div className="mt-3 flex flex-col gap-2 border border-line-soft/20 bg-surface-sunken/50 px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em]">
+        <span className="text-text-low">{stage}</span>
+        <span className="font-mono text-text-high tabular-nums">
+          {total > 0 ? `${received}/${total} objects` : pending ? "connecting" : "ready"}
+          {rate ? ` / ${formatRate(rate)}` : ""}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden bg-surface-raised">
+        <div
+          className="h-full bg-brand-core transition-[width] duration-150"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      {progress ? (
+        <div className="flex justify-between font-mono text-[10px] text-text-low tabular-nums">
+          <span>{formatBytes(progress.receivedBytes)}</span>
+          <span>{progress.indexedObjects} indexed</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatRate(bytesPerSecond: number) {
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function PrismStatus({

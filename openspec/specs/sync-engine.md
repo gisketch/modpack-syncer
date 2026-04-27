@@ -36,6 +36,8 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 30. Options review MUST allow users to continue to sync without visiting or deciding the shader settings tab; an undecided shader settings state MUST behave like not syncing shader settings.
 31. Pack fetch MUST force-align the local pack clone to the fetched remote head when remote history has been rewritten and fast-forward is impossible. Pack fetch MUST also remove untracked local files so stale local-only pack files, including presets, do not merge with source repo files.
 32. If a previously selected option preset is no longer present in the pack repo, options preview and sync MUST fall back to Pack Default instead of failing on the missing preset file.
+33. If a cached remote artifact exists but fails SHA verification, sync MUST delete that cache entry and re-download the artifact instead of reusing stale cache bytes.
+34. Pack add and pack fetch MUST emit git transfer progress events with stage, object counts, indexed object count, and received byte count so the UI can show progress and transfer rate while cloning or fetching.
 
 ## See
 

@@ -6,8 +6,9 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use git2::{
-    build::CheckoutBuilder, Cred, IndexAddOption, PushOptions, RemoteCallbacks, Repository,
-    ResetType, Signature, StatusOptions,
+    build::{CheckoutBuilder, RepoBuilder},
+    Cred, FetchOptions, IndexAddOption, PushOptions, RemoteCallbacks, Repository, ResetType,
+    Signature, StatusOptions,
 };
 
 pub enum PushAuth {
@@ -23,6 +24,15 @@ pub struct PushProgress {
     pub total: usize,
     pub bytes: Option<usize>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitTransferProgress {
+    pub stage: &'static str,
+    pub received_objects: usize,
+    pub total_objects: usize,
+    pub indexed_objects: usize,
+    pub received_bytes: usize,
 }
 
 pub struct SshAccess {
@@ -41,31 +51,57 @@ pub enum GitError {
 
 /// Clone a public pack repo to `dest`. If `dest` already contains a git repo,
 /// fetches and aligns the current branch to the fetched remote head.
-pub fn clone_or_update(url: &str, dest: &Path) -> Result<String, GitError> {
+pub fn clone_or_update_with_progress<P>(
+    url: &str,
+    dest: &Path,
+    mut on_progress: P,
+) -> Result<String, GitError>
+where
+    P: FnMut(GitTransferProgress),
+{
     if dest.join(".git").exists() {
-        return update(dest);
+        return update_with_progress(dest, on_progress);
     }
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let repo = Repository::clone(url, dest)?;
+    let repo = {
+        let mut builder = RepoBuilder::new();
+        let fetch_options = fetch_options("cloning", &mut on_progress);
+        builder.fetch_options(fetch_options);
+        builder.clone(url, dest)?
+    };
     let head = repo.head()?.peel_to_commit()?;
+    on_progress(GitTransferProgress {
+        stage: "done",
+        received_objects: 0,
+        total_objects: 0,
+        indexed_objects: 0,
+        received_bytes: 0,
+    });
     Ok(head.id().to_string())
 }
 
-pub fn update(repo_dir: &Path) -> Result<String, GitError> {
-    match fetch_and_ff(repo_dir) {
+pub fn update_with_progress<P>(repo_dir: &Path, mut on_progress: P) -> Result<String, GitError>
+where
+    P: FnMut(GitTransferProgress),
+{
+    match fetch_and_ff(repo_dir, &mut on_progress) {
         Ok(head) => Ok(head),
         Err(GitError::Git(err)) if is_missing_object_error(&err) => recover_broken_clone(repo_dir),
         Err(err) => Err(err),
     }
 }
 
-fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
+fn fetch_and_ff<P>(dest: &Path, on_progress: &mut P) -> Result<String, GitError>
+where
+    P: FnMut(GitTransferProgress),
+{
     let repo = Repository::open(dest)?;
     {
         let mut remote = repo.find_remote("origin")?;
-        remote.fetch::<&str>(&[], None, None)?;
+        let mut fetch_options = fetch_options("fetching", on_progress);
+        remote.fetch::<&str>(&[], Some(&mut fetch_options), None)?;
     }
     // Align current branch to FETCH_HEAD, including force-pushed remote histories.
     let fetch_head = repo.find_reference("FETCH_HEAD")?;
@@ -93,7 +129,34 @@ fn fetch_and_ff(dest: &Path) -> Result<String, GitError> {
         reset_hard_clean(&repo, &target)?;
     }
     let head = repo.head()?.peel_to_commit()?;
+    on_progress(GitTransferProgress {
+        stage: "done",
+        received_objects: 0,
+        total_objects: 0,
+        indexed_objects: 0,
+        received_bytes: 0,
+    });
     Ok(head.id().to_string())
+}
+
+fn fetch_options<'a, P>(stage: &'static str, on_progress: &'a mut P) -> FetchOptions<'a>
+where
+    P: FnMut(GitTransferProgress) + 'a,
+{
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.transfer_progress(move |progress| {
+        on_progress(GitTransferProgress {
+            stage,
+            received_objects: progress.received_objects(),
+            total_objects: progress.total_objects(),
+            indexed_objects: progress.indexed_objects(),
+            received_bytes: progress.received_bytes(),
+        });
+        true
+    });
+    let mut fetch_options = FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+    fetch_options
 }
 
 fn checkout_head_clean(repo: &Repository) -> Result<(), GitError> {

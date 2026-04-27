@@ -1,6 +1,7 @@
 use super::CommandError;
 use crate::{download, git, manifest, paths};
 use serde::Serialize;
+use tauri::Emitter;
 
 #[derive(Debug, Serialize)]
 pub struct PackSummary {
@@ -10,15 +11,41 @@ pub struct PackSummary {
     pub head_sha: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackTransferProgressEvent {
+    pub pack_id: String,
+    pub stage: String,
+    pub received_objects: usize,
+    pub total_objects: usize,
+    pub indexed_objects: usize,
+    pub received_bytes: usize,
+}
+
 #[tauri::command]
-pub async fn add_pack(url: String) -> Result<PackSummary, CommandError> {
+pub async fn add_pack(app: tauri::AppHandle, url: String) -> Result<PackSummary, CommandError> {
     let id = paths::pack_id_from_url(&url);
     let dest = paths::packs_dir()?.join(&id);
     let url_clone = url.clone();
     let dest_clone = dest.clone();
-    let head = tokio::task::spawn_blocking(move || git::clone_or_update(&url_clone, &dest_clone))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))??;
+    let id_clone = id.clone();
+    let head = tokio::task::spawn_blocking(move || {
+        git::clone_or_update_with_progress(&url_clone, &dest_clone, |progress| {
+            let _ = app.emit(
+                "pack-transfer-progress",
+                PackTransferProgressEvent {
+                    pack_id: id_clone.clone(),
+                    stage: progress.stage.to_string(),
+                    received_objects: progress.received_objects,
+                    total_objects: progress.total_objects,
+                    indexed_objects: progress.indexed_objects,
+                    received_bytes: progress.received_bytes,
+                },
+            );
+        })
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
     Ok(PackSummary {
         id,
         url,
@@ -50,12 +77,30 @@ pub async fn list_packs() -> Result<Vec<PackSummary>, CommandError> {
 }
 
 #[tauri::command]
-pub async fn update_pack(pack_id: String) -> Result<PackSummary, CommandError> {
+pub async fn update_pack(
+    app: tauri::AppHandle,
+    pack_id: String,
+) -> Result<PackSummary, CommandError> {
     let dest = paths::packs_dir()?.join(&pack_id);
     let dest_clone = dest.clone();
-    let head = tokio::task::spawn_blocking(move || git::update(&dest_clone))
-        .await
-        .map_err(|e| CommandError::Other(e.to_string()))??;
+    let pack_id_clone = pack_id.clone();
+    let head = tokio::task::spawn_blocking(move || {
+        git::update_with_progress(&dest_clone, |progress| {
+            let _ = app.emit(
+                "pack-transfer-progress",
+                PackTransferProgressEvent {
+                    pack_id: pack_id_clone.clone(),
+                    stage: progress.stage.to_string(),
+                    received_objects: progress.received_objects,
+                    total_objects: progress.total_objects,
+                    indexed_objects: progress.indexed_objects,
+                    received_bytes: progress.received_bytes,
+                },
+            );
+        })
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
 
     Ok(PackSummary {
         id: pack_id,

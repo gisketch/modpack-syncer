@@ -37,7 +37,7 @@ pub enum DownloadError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-    #[error("sha1 mismatch for {filename}: expected {expected}, got {actual}")]
+    #[error("sha1 mismatch for {filename}: expected {expected}, got {actual}. Source artifact or cache bytes do not match the manifest")]
     Sha1Mismatch {
         filename: String,
         expected: String,
@@ -78,6 +78,9 @@ pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadEr
 
     if cache::exists_and_matches(&sha1_expected)? {
         return Ok(cache_path);
+    }
+    if cache_path.exists() {
+        std::fs::remove_file(&cache_path)?;
     }
 
     if !url_host_allowed(&entry.url) {
