@@ -747,7 +747,6 @@ function ManifestEditorRow({
           }
           disabled={pendingOptional || deletedFromManifest}
           aria-label={`Optional ${entry.filename}`}
-          className="pointer-events-none"
         />
       </TableCell>
       <TableCell className="py-1.5 text-right">

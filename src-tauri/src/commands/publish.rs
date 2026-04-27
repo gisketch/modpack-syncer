@@ -271,12 +271,14 @@ pub async fn set_manifest_artifact_optional(
     tokio::task::spawn_blocking(move || {
         let manifest_path = pack_dir.join("manifest.json");
         let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let filename = enabled_artifact_filename(&filename).to_string();
         let entry = manifest_entries_mut(&mut manifest, category)
             .iter_mut()
-            .find(|entry| entry.filename == filename)
+            .find(|entry| enabled_artifact_filename(&entry.filename) == filename)
             .ok_or_else(|| {
                 CommandError::Manifest(format!("manifest entry not found: {filename}"))
             })?;
+        entry.filename = filename;
         entry.optional = optional;
         let updated = entry.clone();
         write_manifest(&manifest_path, &manifest)?;
@@ -454,17 +456,23 @@ fn scan_artifact_dir(
 
     let baseline = entries
         .iter()
-        .map(|entry| (entry.filename.clone(), entry))
+        .map(|entry| {
+            (
+                enabled_artifact_filename(&entry.filename).to_string(),
+                entry,
+            )
+        })
         .collect::<HashMap<_, _>>();
     let mut seen = HashSet::new();
     let mut out = Vec::new();
 
     for path in list_regular_files(instance_dir)? {
-        let filename = path
+        let raw_filename = path
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| CommandError::Other("invalid unicode filename".to_string()))?
             .to_string();
+        let filename = enabled_artifact_filename(&raw_filename).to_string();
         if should_skip_artifact_publish(&category, &filename) {
             continue;
         }
@@ -496,7 +504,7 @@ fn scan_artifact_dir(
         if !seen.contains(&entry.filename) {
             out.push(PublishScanItem {
                 category: category.clone(),
-                relative_path: entry.filename.clone(),
+                relative_path: enabled_artifact_filename(&entry.filename).to_string(),
                 size: Some(entry.size),
                 sha1: None,
                 action: PublishAction::Remove,
@@ -773,7 +781,12 @@ fn apply_artifact_dir(
     let mut existing_by_filename = entries
         .iter()
         .cloned()
-        .map(|entry| (entry.filename.clone(), entry))
+        .map(|entry| {
+            (
+                enabled_artifact_filename(&entry.filename).to_string(),
+                entry,
+            )
+        })
         .collect::<HashMap<_, _>>();
     let mut used_ids = entries
         .iter()
@@ -788,26 +801,39 @@ fn apply_artifact_dir(
     let mut seen_filenames = HashSet::new();
 
     for path in instance_files {
-        let filename = path
+        let raw_filename = path
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| CommandError::Other("invalid unicode filename".to_string()))?
             .to_string();
+        let filename = enabled_artifact_filename(&raw_filename).to_string();
+        let disabled_instance_file = is_disabled_artifact_filename(&raw_filename);
         let sha1 = cache::file_sha1_hex(&path)?;
         let size = path.metadata()?.len();
         let existing = existing_by_filename.remove(&filename);
         let unpublished = unpublished_by_filename
             .get(filename.as_str())
             .filter(|entry| entry.sha1.eq_ignore_ascii_case(&sha1));
+        let desired_repo_path = format!("{repo_prefix}/{filename}");
         let preserve_existing_same_name =
             existing.is_some() && should_trust_artifact_filename_match_prefix(repo_prefix);
-        let needs_repo_copy = if unpublished.is_some() || preserve_existing_same_name {
+        let existing_matches_source = matches!(
+            &existing,
+            Some(entry) if entry.sha1.eq_ignore_ascii_case(&sha1) && entry.size == size
+        );
+        let existing_repo_path_is_canonical = matches!(
+            &existing,
+            Some(entry)
+                if entry.source != manifest::Source::Repo
+                    || entry.repo_path.as_deref() == Some(desired_repo_path.as_str())
+        );
+        let needs_repo_copy = if unpublished.is_some()
+            || preserve_existing_same_name
+            || (existing_matches_source && existing_repo_path_is_canonical)
+        {
             false
         } else {
-            !matches!(
-                &existing,
-                Some(entry) if entry.sha1.eq_ignore_ascii_case(&sha1) && entry.source != manifest::Source::Repo
-            )
+            true
         };
         let mut entry = if let Some(unpublished) = unpublished {
             manifest::Entry {
@@ -836,29 +862,42 @@ fn apply_artifact_dir(
                 sha512: None,
                 size,
                 url: String::new(),
-                optional: false,
+                optional: disabled_instance_file && repo_prefix == "mods",
                 side: manifest::Side::Client,
             })
         };
 
+        if disabled_instance_file && repo_prefix == "mods" {
+            entry.optional = true;
+        }
+
         if preserve_existing_same_name {
+            entry.filename = filename.clone();
             seen_filenames.insert(filename);
             next_entries.push(entry);
             continue;
         }
 
         if needs_repo_copy {
-            let repo_path = entry
-                .repo_path
-                .clone()
-                .unwrap_or_else(|| format!("{repo_prefix}/{filename}"));
+            let previous_repo_path = entry.repo_path.clone();
             if copy_file_to_repo(&path, &repo_dir.join(&filename))? {
                 *repo_files_written += 1;
+            }
+            if let Some(previous_repo_path) = previous_repo_path {
+                if previous_repo_path != desired_repo_path {
+                    let target = repo_dir
+                        .parent()
+                        .unwrap_or(repo_dir)
+                        .join(previous_repo_path);
+                    if remove_path_if_exists(&target)? {
+                        *repo_files_removed += 1;
+                    }
+                }
             }
             entry.source = manifest::Source::Repo;
             entry.project_id = None;
             entry.version_id = None;
-            entry.repo_path = Some(repo_path);
+            entry.repo_path = Some(desired_repo_path.clone());
             entry.url.clear();
         }
 
@@ -871,7 +910,8 @@ fn apply_artifact_dir(
     }
 
     for entry in existing_by_filename.into_values() {
-        if seen_filenames.contains(&entry.filename) {
+        let filename = enabled_artifact_filename(&entry.filename);
+        if seen_filenames.contains(filename) {
             continue;
         }
         if let Some(repo_path) = entry.repo_path {
@@ -947,6 +987,7 @@ fn apply_root_files(
 }
 
 fn should_skip_artifact_publish(category: &PublishCategory, filename: &str) -> bool {
+    let filename = enabled_artifact_filename(filename);
     matches!(category, PublishCategory::Shaderpacks) && filename.ends_with(".txt")
 }
 
@@ -955,7 +996,16 @@ fn should_trust_artifact_filename_match(category: &PublishCategory) -> bool {
 }
 
 fn should_skip_artifact_publish_prefix(repo_prefix: &str, filename: &str) -> bool {
+    let filename = enabled_artifact_filename(filename);
     repo_prefix == "shaderpacks" && filename.ends_with(".txt")
+}
+
+fn enabled_artifact_filename(filename: &str) -> &str {
+    filename.strip_suffix(".disabled").unwrap_or(filename)
+}
+
+fn is_disabled_artifact_filename(filename: &str) -> bool {
+    filename.ends_with(".disabled")
 }
 
 fn should_trust_artifact_filename_match_prefix(repo_prefix: &str) -> bool {

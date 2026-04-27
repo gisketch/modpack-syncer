@@ -17,6 +17,7 @@ The manifest is the single source of truth for what a pack contains at a given c
 7. **Integrity** — every artifact used for sync MUST be SHA1-verified before it is copied into the Prism instance. If `sha512` is present it MUST also match. This verification applies to freshly downloaded files, cache hits, and repo-backed entries.
 8. **URL safety** — remote `url` hosts MUST be allowlisted. Current built-in hosts are `cdn.modrinth.com`, `edge.forgecdn.net`, and `mediafilez.forgecdn.net`.
 9. **Resourcepack and shaderpack parity** — resourcepacks and shaderpacks MUST support the same remote Modrinth/CurseForge/URL and repo-source flow as mods. Resourcepack and shaderpack Modrinth version selection MUST NOT require a Minecraft loader match.
+10. **Disabled suffix** — `.disabled` is an instance-local enabled state marker and MUST NOT become part of manifest `filename`, `id`, or `repoPath` identity. Manifest entries MUST use the enabled artifact filename.
 
 ## See
 

@@ -213,12 +213,13 @@ fn set_instance_artifact_disabled_blocking(
         ManifestArtifactCategory::Resourcepacks => &manifest.resourcepacks,
         ManifestArtifactCategory::Shaderpacks => &manifest.shaderpacks,
     };
+    let canonical_filename = enabled_artifact_filename(&filename).to_string();
     let entry = entries
         .iter()
-        .find(|entry| entry.filename == filename)
+        .find(|entry| enabled_artifact_filename(&entry.filename) == canonical_filename)
         .ok_or_else(|| CommandError::Manifest(format!("artifact not found: {filename}")))?;
 
-    if category == ManifestArtifactCategory::Mods && !entry.optional {
+    if disabled && category == ManifestArtifactCategory::Mods && !entry.optional {
         return Err(CommandError::Other(
             "only optional mods can be disabled".to_string(),
         ));
@@ -233,8 +234,8 @@ fn set_instance_artifact_disabled_blocking(
         ManifestArtifactCategory::Shaderpacks => minecraft_dir.join("shaderpacks"),
     };
     std::fs::create_dir_all(&artifact_dir)?;
-    let enabled_path = artifact_dir.join(filename);
-    let disabled_path = artifact_dir.join(format!("{filename}.disabled"));
+    let enabled_path = artifact_dir.join(&canonical_filename);
+    let disabled_path = artifact_dir.join(format!("{canonical_filename}.disabled"));
 
     if disabled {
         if enabled_path.exists() {
@@ -245,6 +246,10 @@ fn set_instance_artifact_disabled_blocking(
     }
 
     Ok(())
+}
+
+fn enabled_artifact_filename(filename: &str) -> &str {
+    filename.strip_suffix(".disabled").unwrap_or(filename)
 }
 
 #[tauri::command]

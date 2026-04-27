@@ -47,7 +47,7 @@ pub async fn mod_statuses(
         let manifest_filenames = manifest
             .mods
             .iter()
-            .map(|entry| entry.filename.clone())
+            .map(|entry| enabled_artifact_filename(&entry.filename).to_string())
             .collect::<HashSet<_>>();
         let mut out = Vec::with_capacity(manifest.mods.len());
         let previous_state = mods_dir_opt
@@ -76,7 +76,7 @@ pub async fn mod_statuses(
                 previous_manifest_by_id
                     .get(entry.id.as_str())
                     .filter(|prev| prev.filename != entry.filename)
-                    .map(|prev| prev.filename.clone())
+                    .map(|prev| enabled_artifact_filename(&prev.filename).to_string())
             })
             .collect::<HashSet<_>>();
         let removed_from_manifest = previous_manifest
@@ -85,22 +85,25 @@ pub async fn mod_statuses(
                 manifest
                     .mods
                     .iter()
-                    .filter(|entry| !manifest_filenames.contains(&entry.filename))
+                    .filter(|entry| {
+                        !manifest_filenames.contains(enabled_artifact_filename(&entry.filename))
+                    })
                     .cloned()
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         let removed_filenames = removed_from_manifest
             .iter()
-            .map(|entry| entry.filename.clone())
+            .map(|entry| enabled_artifact_filename(&entry.filename).to_string())
             .collect::<HashSet<_>>();
 
         for entry in &manifest.mods {
+            let filename = enabled_artifact_filename(&entry.filename);
             let status = match &mods_dir_opt {
                 None => "missing",
                 Some(dir) => {
-                    let path = dir.join(&entry.filename);
-                    let disabled_path = dir.join(format!("{}.disabled", entry.filename));
+                    let path = dir.join(filename);
+                    let disabled_path = dir.join(format!("{filename}.disabled"));
                     if path.exists() {
                         match std::fs::read(&path) {
                             Ok(bytes) => {
@@ -113,18 +116,22 @@ pub async fn mod_statuses(
                             }
                             Err(_) => "missing",
                         }
-                    } else if disabled_path.exists() && entry.optional {
+                    } else if disabled_path.exists()
+                        && (entry.optional || is_disabled_artifact_filename(&entry.filename))
+                    {
                         "disabled"
                     } else if let Some(previous) = previous_by_id.get(entry.id.as_str()) {
-                        if dir.join(&previous.filename).exists() {
+                        if dir
+                            .join(enabled_artifact_filename(&previous.filename))
+                            .exists()
+                        {
                             "outdated"
                         } else {
                             "missing"
                         }
                     } else if let Some(previous) = previous_manifest_by_id.get(entry.id.as_str()) {
-                        if previous.filename != entry.filename
-                            && dir.join(&previous.filename).exists()
-                        {
+                        let previous_filename = enabled_artifact_filename(&previous.filename);
+                        if previous_filename != filename && dir.join(previous_filename).exists() {
                             "outdated"
                         } else {
                             "missing"
@@ -136,7 +143,7 @@ pub async fn mod_statuses(
             };
             out.push(ModStatus {
                 id: Some(entry.id.clone()),
-                filename: entry.filename.clone(),
+                filename: filename.to_string(),
                 size: Some(entry.size as u64),
                 status,
             });
@@ -182,6 +189,14 @@ pub async fn mod_statuses(
     })
     .await
     .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+fn enabled_artifact_filename(filename: &str) -> &str {
+    filename.strip_suffix(".disabled").unwrap_or(filename)
+}
+
+fn is_disabled_artifact_filename(filename: &str) -> bool {
+    filename.ends_with(".disabled")
 }
 
 fn list_regular_files(root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, CommandError> {

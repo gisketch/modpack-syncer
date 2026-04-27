@@ -54,7 +54,9 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import {
   buildArtifactStatusMap,
   DeletedModRow,
+  enabledArtifactFilename,
   entryDisplayName,
+  isDisabledArtifactFilename,
   ModRow,
   UnpublishedModRow,
 } from "@/features/packs/artifact-status/artifact-status-rows";
@@ -423,13 +425,16 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     artifactSort.mods,
     modrinthMap,
     (entry) =>
-      disabledArtifactSets.mods.has(entry.filename) || statusMap.get(entry.filename) === "disabled"
+      disabledArtifactSets.mods.has(enabledArtifactFilename(entry.filename)) ||
+      statusMap.get(enabledArtifactFilename(entry.filename)) === "disabled" ||
+      isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (statusMap.get(entry.filename) ?? "missing"),
+        : (statusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
     (entry) =>
       !(
-        disabledArtifactSets.mods.has(entry.filename) ||
-        statusMap.get(entry.filename) === "disabled"
+        disabledArtifactSets.mods.has(enabledArtifactFilename(entry.filename)) ||
+        statusMap.get(enabledArtifactFilename(entry.filename)) === "disabled" ||
+        isDisabledArtifactFilename(entry.filename)
       ),
   );
   const sortedResourcepacks = sortArtifactEntries(
@@ -437,20 +442,26 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     artifactSort.resourcepacks,
     modrinthMap,
     (entry) =>
-      disabledArtifactSets.resourcepacks.has(entry.filename)
+      disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) ||
+      isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (resourcepackStatusMap.get(entry.filename) ?? "missing"),
-    (entry) => !disabledArtifactSets.resourcepacks.has(entry.filename),
+        : (resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
+    (entry) =>
+      !disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) &&
+      !isDisabledArtifactFilename(entry.filename),
   );
   const sortedShaderpacks = sortArtifactEntries(
     filteredShaderpacks,
     artifactSort.shaderpacks,
     modrinthMap,
     (entry) =>
-      disabledArtifactSets.shaderpacks.has(entry.filename)
+      disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) ||
+      isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (shaderpackStatusMap.get(entry.filename) ?? "missing"),
-    (entry) => !disabledArtifactSets.shaderpacks.has(entry.filename),
+        : (shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
+    (entry) =>
+      !disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) &&
+      !isDisabledArtifactFilename(entry.filename),
   );
   const pagedMods = paginateArtifacts(sortedMods, artifactPage.mods);
   const pagedResourcepacks = paginateArtifacts(sortedResourcepacks, artifactPage.resourcepacks);
@@ -461,25 +472,28 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const disabledOptionalModCount = (manifest.data?.mods ?? []).filter(
     (entry) =>
       entry.optional &&
-      (disabledArtifactSets.mods.has(entry.filename) ||
-        statusMap.get(entry.filename) === "disabled"),
+      (disabledArtifactSets.mods.has(enabledArtifactFilename(entry.filename)) ||
+        statusMap.get(enabledArtifactFilename(entry.filename)) === "disabled" ||
+        isDisabledArtifactFilename(entry.filename)),
   ).length;
   const launchRiskCount = (statuses.data ?? []).filter(
     (s) =>
       (s.status === "missing" || s.status === "outdated") &&
-      !disabledArtifactSets.mods.has(s.filename),
+      !disabledArtifactSets.mods.has(enabledArtifactFilename(s.filename)),
   ).length;
   const resourcepackRiskCount = manifest.data
     ? manifest.data.resourcepacks.filter(
         (entry) =>
-          !disabledArtifactSets.resourcepacks.has(entry.filename) &&
-          resourcepackStatusMap.get(entry.filename) !== "synced",
+          !disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) &&
+          !isDisabledArtifactFilename(entry.filename) &&
+          resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
       ).length
     : 0;
   const shaderpackRiskCount = visibleShaderpacks.filter(
     (entry) =>
-      !disabledArtifactSets.shaderpacks.has(entry.filename) &&
-      shaderpackStatusMap.get(entry.filename) !== "synced",
+      !disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) &&
+      !isDisabledArtifactFilename(entry.filename) &&
+      shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
   ).length;
   const totalLaunchRiskCount = launchRiskCount + resourcepackRiskCount + shaderpackRiskCount;
   const stagedArtifactCount =
@@ -1362,9 +1376,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                     />
                   ))}
                   {pagedMods.map((m) => {
+                    const filename = enabledArtifactFilename(m.filename);
                     const disabled =
-                      disabledArtifactSets.mods.has(m.filename) ||
-                      statusMap.get(m.filename) === "disabled";
+                      disabledArtifactSets.mods.has(filename) ||
+                      statusMap.get(filename) === "disabled" ||
+                      isDisabledArtifactFilename(m.filename);
                     return (
                       <ModRow
                         key={m.id}
@@ -1379,17 +1395,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(m.projectId)?.title ?? null)
                             : null
                         }
-                        status={statusMap.get(m.filename) ?? null}
+                        status={statusMap.get(filename) ?? null}
                         loading={statuses.isLoading || statuses.isFetching}
                         disabled={disabled}
-                        canDisable={m.optional}
+                        canDisable={m.optional || isDisabledArtifactFilename(m.filename)}
                         togglingDisabled={
-                          !!pendingArtifactToggles[artifactToggleKey("mods", m.filename)]
+                          !!pendingArtifactToggles[artifactToggleKey("mods", filename)]
                         }
                         onToggleDisabled={(nextDisabled) =>
                           toggleArtifactDisabled.mutate({
                             category: "mods",
-                            filename: m.filename,
+                            filename,
                             disabled: nextDisabled,
                           })
                         }
@@ -1498,7 +1514,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                     />
                   ))}
                   {pagedResourcepacks.map((entry) => {
-                    const disabled = disabledArtifactSets.resourcepacks.has(entry.filename);
+                    const filename = enabledArtifactFilename(entry.filename);
+                    const disabled =
+                      disabledArtifactSets.resourcepacks.has(filename) ||
+                      isDisabledArtifactFilename(entry.filename);
                     return (
                       <ModRow
                         key={entry.id}
@@ -1513,19 +1532,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(entry.projectId)?.title ?? null)
                             : null
                         }
-                        status={resourcepackStatusMap.get(entry.filename) ?? null}
+                        status={resourcepackStatusMap.get(filename) ?? null}
                         loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                         disabled={disabled}
                         canDisable
                         togglingDisabled={
-                          !!pendingArtifactToggles[
-                            artifactToggleKey("resourcepacks", entry.filename)
-                          ]
+                          !!pendingArtifactToggles[artifactToggleKey("resourcepacks", filename)]
                         }
                         onToggleDisabled={(nextDisabled) =>
                           toggleArtifactDisabled.mutate({
                             category: "resourcepacks",
-                            filename: entry.filename,
+                            filename,
                             disabled: nextDisabled,
                           })
                         }
@@ -1643,7 +1660,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                     />
                   ))}
                   {pagedShaderpacks.map((entry) => {
-                    const disabled = disabledArtifactSets.shaderpacks.has(entry.filename);
+                    const filename = enabledArtifactFilename(entry.filename);
+                    const disabled =
+                      disabledArtifactSets.shaderpacks.has(filename) ||
+                      isDisabledArtifactFilename(entry.filename);
                     return (
                       <ModRow
                         key={entry.id}
@@ -1658,17 +1678,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(entry.projectId)?.title ?? null)
                             : null
                         }
-                        status={shaderpackStatusMap.get(entry.filename) ?? null}
+                        status={shaderpackStatusMap.get(filename) ?? null}
                         loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                         disabled={disabled}
                         canDisable
                         togglingDisabled={
-                          !!pendingArtifactToggles[artifactToggleKey("shaderpacks", entry.filename)]
+                          !!pendingArtifactToggles[artifactToggleKey("shaderpacks", filename)]
                         }
                         onToggleDisabled={(nextDisabled) =>
                           toggleArtifactDisabled.mutate({
                             category: "shaderpacks",
-                            filename: entry.filename,
+                            filename,
                             disabled: nextDisabled,
                           })
                         }

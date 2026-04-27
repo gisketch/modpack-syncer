@@ -17,7 +17,10 @@ Authoring and pack-publish behavior exposed by the app today.
 11. Publish Preview MAY offer a push-current-repo-only mode that skips instance apply and only commits/pushes current repository changes, for retries after files were already applied or instance files are locked by Windows.
 12. Publish Preview MUST allow applying instance changes to the local pack repo without committing or pushing, so admins can inspect or push manually from the repository directory.
 13. Apply publish SHOULD skip overwriting repository files that already match source content, retry transient Windows file lock errors when copying or removing files, and MUST include the affected path in the returned error if the lock persists.
-14. The authoring flow MAY resolve Modrinth metadata by identifier or project/version IDs and write those entries back into `manifest.json` as remote sources.
+14. Publish scan/apply MUST normalize instance artifact filenames ending in `.disabled` to their enabled filename before comparing, writing manifest entries, writing repo paths, or deciding removals.
+15. Disabled instance mods MUST be treated as optional when publish apply repairs or creates their manifest entry.
+16. Manifest Admin optional controls MUST remain interactive for active manifest entries and MUST normalize `.disabled` filenames before saving optional flags.
+17. The authoring flow MAY resolve Modrinth metadata by identifier or project/version IDs and write those entries back into `manifest.json` as remote sources.
 
 ## See
 

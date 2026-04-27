@@ -13,8 +13,16 @@ export function formatBytes(n: number) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export function enabledArtifactFilename(filename: string) {
+  return filename.endsWith(".disabled") ? filename.slice(0, -".disabled".length) : filename;
+}
+
+export function isDisabledArtifactFilename(filename: string) {
+  return filename.endsWith(".disabled");
+}
+
 export function entryDisplayName(filename: string) {
-  return filename.replace(/\.(jar|zip)$/i, "");
+  return enabledArtifactFilename(filename).replace(/\.(jar|zip)$/i, "");
 }
 
 export function ModRow({
@@ -38,8 +46,10 @@ export function ModRow({
   togglingDisabled?: boolean;
   onToggleDisabled?: (disabled: boolean) => void;
 }) {
-  const displayName = title ?? entryDisplayName(entry.filename);
-  const enabled = !disabled;
+  const canonicalFilename = enabledArtifactFilename(entry.filename);
+  const effectiveDisabled = disabled || isDisabledArtifactFilename(entry.filename);
+  const displayName = title ?? entryDisplayName(canonicalFilename);
+  const enabled = !effectiveDisabled;
   const toggleEnabled = () => {
     if (!canDisable || togglingDisabled) return;
     onToggleDisabled?.(enabled);
@@ -48,12 +58,12 @@ export function ModRow({
     <Checkbox
       checked={enabled}
       disabled={!canDisable || togglingDisabled}
-      aria-label={`Enabled ${entry.filename}`}
+      aria-label={`Enabled ${canonicalFilename}`}
       className={cn("pointer-events-none", !canDisable && "opacity-45")}
     />
   );
   return (
-    <TableRow className={cn("h-9", disabled && "opacity-45")}>
+    <TableRow className={cn("h-9", effectiveDisabled && "opacity-45")}>
       <TableCell className="py-1.5">
         <div className="flex size-7 items-center justify-center overflow-hidden rounded border border-line-soft/40 bg-surface-base">
           {icon ? (
@@ -67,9 +77,9 @@ export function ModRow({
         <span
           className={cn(
             "block max-w-[22rem] truncate text-xs",
-            disabled ? "text-text-low line-through" : "text-text-high",
+            effectiveDisabled ? "text-text-low line-through" : "text-text-high",
           )}
-          title={entry.filename}
+          title={canonicalFilename}
         >
           {displayName}
         </span>
@@ -82,7 +92,10 @@ export function ModRow({
       </TableCell>
       <TableCell className="py-1.5 text-text-low text-xs uppercase">{entry.side}</TableCell>
       <TableCell className="py-1.5 text-right">
-        <StatusChip status={disabled ? "disabled" : status} loading={loading && status === null} />
+        <StatusChip
+          status={effectiveDisabled ? "disabled" : status}
+          loading={loading && status === null}
+        />
       </TableCell>
       <TableCell
         className={cn(
@@ -285,7 +298,7 @@ export function buildArtifactStatusMap(
     if (item.category !== category) continue;
     if (item.action === "add") continue;
     map.set(
-      item.relativePath,
+      enabledArtifactFilename(item.relativePath),
       item.action === "unchanged" ? "synced" : item.action === "update" ? "outdated" : "missing",
     );
   }

@@ -13,6 +13,7 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 7. Launch MUST execute the resolved Prism binary with `--launch <instanceName>`. If a saved Prism data-dir override exists, launch MUST also pass `--dir <dataDir>`. The app does not wait for Prism to exit after spawn.
 8. If the current pack head differs from the last synced commit, launching from pack detail MUST show a sync-first gate with `SYNC NOW` and `CONTINUE ANYWAY` choices.
 9. Pack detail artifact lists MUST support local user-side disabling by renaming instance artifacts with a `.disabled` suffix. Mods MAY only be disabled when their manifest entry is optional; resourcepacks and shaderpacks MAY be disabled by filename.
+10. Artifact filenames ending in `.disabled` MUST render as disabled state using the enabled filename for display and toggle actions, and enabling them MUST remove a single `.disabled` suffix rather than appending another suffix.
 
 ## UI Requirements
 

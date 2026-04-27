@@ -15,3 +15,5 @@ Make long publish pushes observable and less likely to fail on large uploads.
 7. Publish Preview MAY let admins skip instance apply and push current repo changes only.
 8. Apply publish SHOULD skip same-content overwrites and retry transient Windows file lock errors before failing with path context.
 9. Publish Preview MUST offer an apply-only action that writes local repo changes without commit/push.
+10. Publish scan/apply MUST treat `.disabled` as instance state, normalize artifact filenames to their enabled form, and preserve disabled mods as optional manifest entries.
+11. Manifest Admin optional controls MUST be clickable for active entries and save against normalized enabled filenames.
