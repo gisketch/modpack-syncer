@@ -15,11 +15,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatError } from "@/lib/format-error";
-import {
-  type OptionsSyncCategory,
-  type OptionsSyncPreview,
-  type ShaderSettingsPreview,
-} from "@/lib/tauri";
+import type { OptionsSyncCategory, OptionsSyncPreview, ShaderSettingsPreview } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { OptionsPreviewKey, OptionsPreviewValue } from "./option-value-cells";
 import {

@@ -1,14 +1,12 @@
-//! Parallel HTTP download pipeline with resume + SHA verify.
-//! Uses reqwest + tokio Semaphore. Verifies every artifact against the
-//! manifest-declared SHA1 (and SHA512 if present) before admitting to cache.
+//! Parallel HTTP download pipeline.
+//! Uses reqwest + tokio Semaphore. Normal sync uses filename + size metadata
+//! instead of hashing artifact bytes.
 
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 use once_cell::sync::Lazy;
 use reqwest::Client;
-use sha1::{Digest as _, Sha1};
-use sha2::Sha512;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Semaphore;
 
@@ -37,14 +35,12 @@ pub enum DownloadError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-    #[error("sha1 mismatch for {filename}: expected {expected}, got {actual}. Source artifact or cache bytes do not match the manifest")]
-    Sha1Mismatch {
+    #[error("size mismatch for {filename}: expected {expected}, got {actual}")]
+    SizeMismatch {
         filename: String,
-        expected: String,
-        actual: String,
+        expected: u64,
+        actual: u64,
     },
-    #[error("sha512 mismatch for {filename}")]
-    Sha512Mismatch { filename: String },
     #[error("disallowed url host: {0}")]
     DisallowedHost(String),
     #[error("repo entry missing repoPath: {0}")]
@@ -67,16 +63,15 @@ fn url_host_allowed(url: &str) -> bool {
     }
 }
 
-/// Download a single manifest entry into the content-addressable cache.
-/// No-op if a valid copy already exists.
+/// Download a single manifest entry into the metadata-addressed cache.
+/// No-op if a same-filename/same-size copy already exists.
 pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadError> {
     if entry.source == Source::Repo {
         return Err(DownloadError::MissingRepoPath(entry.filename.clone()));
     }
-    let sha1_expected = entry.sha1.to_ascii_lowercase();
-    let cache_path = cache::path_for(&sha1_expected)?;
+    let cache_path = cache::path_for_entry(&entry.filename, entry.size)?;
 
-    if cache::exists_and_matches(&sha1_expected)? {
+    if cache::exists_with_size(&entry.filename, entry.size)? {
         return Ok(cache_path);
     }
     if cache_path.exists() {
@@ -87,7 +82,7 @@ pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadEr
         return Err(DownloadError::DisallowedHost(entry.url.clone()));
     }
 
-    // Download to `<cache_path>.part`, hash as we write, then atomically rename.
+    // Download to `<cache_path>.part`, count bytes as we write, then atomically rename.
     let part_path = cache_path.with_extension("part");
     if part_path.exists() {
         std::fs::remove_file(&part_path)?;
@@ -95,37 +90,22 @@ pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadEr
 
     let mut resp = CLIENT.get(&entry.url).send().await?.error_for_status()?;
     let mut file = tokio::fs::File::create(&part_path).await?;
-    let mut sha1 = Sha1::new();
-    let mut sha512 = Sha512::new();
-    let compute_sha512 = entry.sha512.is_some();
+    let mut written = 0u64;
 
     while let Some(chunk) = resp.chunk().await? {
-        sha1.update(&chunk);
-        if compute_sha512 {
-            sha512.update(&chunk);
-        }
+        written += chunk.len() as u64;
         file.write_all(&chunk).await?;
     }
     file.flush().await?;
     drop(file);
 
-    let got_sha1 = hex::encode(sha1.finalize());
-    if got_sha1 != sha1_expected {
+    if written != entry.size {
         let _ = std::fs::remove_file(&part_path);
-        return Err(DownloadError::Sha1Mismatch {
+        return Err(DownloadError::SizeMismatch {
             filename: entry.filename.clone(),
-            expected: sha1_expected,
-            actual: got_sha1,
+            expected: entry.size,
+            actual: written,
         });
-    }
-    if let Some(expected_512) = entry.sha512.as_ref() {
-        let got = hex::encode(sha512.finalize());
-        if !got.eq_ignore_ascii_case(expected_512) {
-            let _ = std::fs::remove_file(&part_path);
-            return Err(DownloadError::Sha512Mismatch {
-                filename: entry.filename.clone(),
-            });
-        }
     }
 
     std::fs::rename(&part_path, &cache_path)?;
@@ -133,25 +113,13 @@ pub async fn fetch_entry(entry: &Entry) -> Result<std::path::PathBuf, DownloadEr
 }
 
 pub fn verify_file(path: &std::path::Path, entry: &Entry) -> Result<(), DownloadError> {
-    let got_sha1 = cache::file_sha1_hex(path)?;
-    let expected_sha1 = entry.sha1.to_ascii_lowercase();
-    if got_sha1 != expected_sha1 {
-        return Err(DownloadError::Sha1Mismatch {
+    let got = path.metadata()?.len();
+    if got != entry.size {
+        return Err(DownloadError::SizeMismatch {
             filename: entry.filename.clone(),
-            expected: expected_sha1,
-            actual: got_sha1,
+            expected: entry.size,
+            actual: got,
         });
-    }
-    if let Some(expected_512) = entry.sha512.as_ref() {
-        let mut file = std::fs::File::open(path)?;
-        let mut hasher = Sha512::new();
-        std::io::copy(&mut file, &mut hasher)?;
-        let got = hex::encode(hasher.finalize());
-        if !got.eq_ignore_ascii_case(expected_512) {
-            return Err(DownloadError::Sha512Mismatch {
-                filename: entry.filename.clone(),
-            });
-        }
     }
     Ok(())
 }
@@ -192,7 +160,8 @@ where
             let progress_tx = progress_tx.clone();
             async move {
                 let _permit = sem.acquire_owned().await.unwrap();
-                let was_cached = cache::exists_and_matches(&entry.sha1).unwrap_or(false);
+                let was_cached =
+                    cache::exists_with_size(&entry.filename, entry.size).unwrap_or(false);
                 let _ = progress_tx.send(entry.filename.clone());
                 let result = fetch_entry(&entry).await;
                 (entry.filename.clone(), was_cached, result)

@@ -21,6 +21,7 @@ import {
   Rocket,
   Search,
   SlidersHorizontal,
+  Trash2,
   UploadCloudIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -140,6 +141,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     (s) => s.disabledArtifactsByPack[packId] ?? EMPTY_DISABLED_ARTIFACTS,
   );
   const setArtifactDisabled = useAppStore((s) => s.setArtifactDisabled);
+  const setPackDisabledArtifacts = useAppStore((s) => s.setPackDisabledArtifacts);
 
   const pack = useQuery({
     queryKey: ["packs"],
@@ -168,6 +170,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
   const [launchConfirmOpen, setLaunchConfirmOpen] = useState(false);
   const [launchSyncGateOpen, setLaunchSyncGateOpen] = useState(false);
+  const [launchBlockedHeadSha, setLaunchBlockedHeadSha] = useState<string | null>(null);
   const [launchProfileDraft, setLaunchProfileDraft] = useState<LaunchProfile | null>(null);
   const [javaInstallOpen, setJavaInstallOpen] = useState(false);
   const [selectedJavaChoiceId, setSelectedJavaChoiceId] = useState("temurin-21-jre");
@@ -209,6 +212,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncDeleteConfirmOpen, setSyncDeleteConfirmOpen] = useState(false);
   const [syncAlreadySyncedConfirmOpen, setSyncAlreadySyncedConfirmOpen] = useState(false);
+  const [freshSyncConfirmOpen, setFreshSyncConfirmOpen] = useState(false);
+  const [actionRefreshPending, setActionRefreshPending] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [activeChangelogIndex, setActiveChangelogIndex] = useState(0);
   const [publishLogs, setPublishLogs] = useState<string[]>([]);
@@ -578,16 +583,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const fetchPack = useMutation({
     mutationFn: () => tauri.updatePack(packId),
     onSuccess: async (updatedPack) => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["packs"] }),
-        qc.invalidateQueries({ queryKey: ["manifest", packId] }),
-        qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
-        qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
-        qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
-        qc.invalidateQueries({ queryKey: ["option-presets", packId] }),
-        qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
-        qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
-      ]);
+      await refreshPackQueries();
       toast.success("Pack updated", {
         description: updatedPack.head_sha.slice(0, 10),
       });
@@ -596,6 +592,39 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       toast.error("Fetch failed", { description: formatError(e) });
     },
   });
+
+  async function refreshPackQueries() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["packs"] }),
+      qc.invalidateQueries({ queryKey: ["manifest", packId] }),
+      qc.invalidateQueries({ queryKey: ["pack-changelog", packId] }),
+      qc.invalidateQueries({ queryKey: ["mod-statuses", packId] }),
+      qc.invalidateQueries({ queryKey: ["artifact-publish-scan", packId] }),
+      qc.invalidateQueries({ queryKey: ["option-presets", packId] }),
+      qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
+      qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
+    ]);
+  }
+
+  async function refreshPackBeforeAction() {
+    setActionRefreshPending(true);
+    try {
+      const previousHead = pack.data?.head_sha ?? null;
+      const updatedPack = await tauri.refreshPackForAction(packId);
+      await refreshPackQueries();
+      if (previousHead && previousHead !== updatedPack.head_sha) {
+        toast.info("Pack update found", {
+          description: updatedPack.head_sha.slice(0, 10),
+        });
+      }
+      return updatedPack;
+    } catch (error) {
+      toast.error("Update check failed", { description: formatError(error) });
+      return null;
+    } finally {
+      setActionRefreshPending(false);
+    }
+  }
 
   const toggleArtifactDisabled = useMutation({
     mutationFn: ({
@@ -633,31 +662,34 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   const sync = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       syncShaderSettings,
       optionPresetId,
       optionSyncCategories,
+      fresh = false,
     }: {
       syncShaderSettings: boolean;
       optionPresetId: string;
       optionSyncCategories: OptionsSyncCategory[];
-    }) =>
-      tauri
-        .restoreManifestFromSource(packId)
-        .then(() =>
-          tauri.syncInstance(
-            packId,
-            undefined,
-            syncShaderSettings,
-            optionPresetId,
-            optionSyncCategories,
-          ),
-        ),
-    onMutate: () => {
+      fresh?: boolean;
+    }) => {
+      if (fresh) {
+        await tauri.deletePrismInstance(instanceName);
+      }
+      await tauri.restoreManifestFromSource(packId);
+      return tauri.syncInstance(
+        packId,
+        undefined,
+        syncShaderSettings,
+        optionPresetId,
+        optionSyncCategories,
+      );
+    },
+    onMutate: (variables) => {
       setSyncOpen(true);
       setProgress({
         packId,
-        status: "downloading",
+        status: variables.fresh ? "writing-instance" : "downloading",
         filename: null,
         completed: 0,
         total:
@@ -670,13 +702,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       });
       setReport(null);
     },
-    onSuccess: async (r) => {
+    onSuccess: async (r, variables) => {
       setReport(r);
       const syncHeadSha = pack.data?.head_sha;
       if (syncHeadSha) {
         setLastSyncedCommit(packId, syncHeadSha);
       }
-      await applyDisabledArtifacts();
+      if (!variables.fresh) {
+        await applyDisabledArtifacts();
+      } else {
+        setPackDisabledArtifacts(packId, {});
+      }
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["manifest", packId] }),
         statuses.refetch(),
@@ -698,15 +734,47 @@ export function PackDetailRoute({ packId }: { packId: string }) {
 
   async function applyDisabledArtifacts() {
     const categories: ManifestArtifactCategory[] = ["mods", "resourcepacks", "shaderpacks"];
-    const results = await Promise.allSettled(
-      categories.flatMap((category) =>
-        (disabledArtifactsForPack[category] ?? []).map((filename) =>
-          tauri.setInstanceArtifactDisabled(packId, category, filename, true, instanceName),
-        ),
-      ),
-    );
-    if (results.some((result) => result.status === "rejected")) {
-      toast.warning("Some disabled artifacts could not be restored after sync");
+    if (!manifest.data) return;
+    const entriesByCategory = {
+      mods: manifest.data.mods,
+      resourcepacks: manifest.data.resourcepacks,
+      shaderpacks: visibleShaderpacks,
+    } satisfies Record<ManifestArtifactCategory, ManifestEntry[]>;
+    const cleaned = Object.fromEntries(
+      categories.map((category) => {
+        const entries = entriesByCategory[category];
+        const allowed = new Set(
+          entries
+            .filter((entry) => category !== "mods" || entry.optional)
+            .map((entry) => enabledArtifactFilename(entry.filename)),
+        );
+        return [
+          category,
+          (disabledArtifactsForPack[category] ?? [])
+            .map(enabledArtifactFilename)
+            .filter(
+              (filename, index, list) => allowed.has(filename) && list.indexOf(filename) === index,
+            ),
+        ];
+      }),
+    ) as Record<ManifestArtifactCategory, string[]>;
+    setPackDisabledArtifacts(packId, cleaned);
+
+    const failures: string[] = [];
+    for (const category of categories) {
+      for (const filename of cleaned[category]) {
+        try {
+          await tauri.setInstanceArtifactDisabled(packId, category, filename, true, instanceName);
+        } catch (error) {
+          failures.push(`${filename}: ${formatError(error)}`);
+          setArtifactDisabled(packId, category, filename, false);
+        }
+      }
+    }
+    if (failures.length > 0) {
+      toast.warning("Some disabled artifacts stayed enabled", {
+        description: failures.slice(0, 3).join("\n"),
+      });
     }
   }
 
@@ -920,8 +988,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     },
   });
 
-  function handleLaunchClick() {
-    if (needsPackSync) {
+  async function handleLaunchClick() {
+    const updatedPack = await refreshPackBeforeAction();
+    if (!updatedPack) return;
+    if (updatedPack.head_sha !== lastSyncedCommit) {
+      setLaunchBlockedHeadSha(updatedPack.head_sha);
       setLaunchSyncGateOpen(true);
       return;
     }
@@ -933,14 +1004,19 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setLaunchConfirmOpen(true);
   }
 
-  function handleContinueLaunchAnyway() {
-    setLaunchSyncGateOpen(false);
-    openLaunchFlow();
-  }
-
   function handleSyncFromLaunchGate() {
     setLaunchSyncGateOpen(false);
-    handleSyncClick();
+    openSyncReview();
+  }
+
+  function openSyncReview() {
+    setSyncReviewStep("artifacts");
+    setShaderSyncDecision("undecided");
+    setPendingShaderSync(false);
+    setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
+    setOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
+    setPendingOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
+    setSyncReviewOpen(true);
   }
 
   async function handleBrowseJavaPath() {
@@ -992,14 +1068,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     launch.mutate(launchProfileDraft);
   }
 
-  function handleSyncClick() {
-    setSyncReviewStep("artifacts");
-    setShaderSyncDecision("undecided");
-    setPendingShaderSync(false);
-    setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
-    setOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
-    setPendingOptionSyncCategories(DEFAULT_OPTION_SYNC_CATEGORIES);
-    setSyncReviewOpen(true);
+  async function handleSyncClick() {
+    const updatedPack = await refreshPackBeforeAction();
+    if (!updatedPack) return;
+    openSyncReview();
   }
 
   function handleCloseSyncReview() {
@@ -1179,7 +1251,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <Button
               variant="outline"
               onClick={() => go({ kind: "builder", id: packId })}
-              disabled={!manifest.data || sync.isPending || fetchPack.isPending}
+              disabled={
+                !manifest.data || sync.isPending || fetchPack.isPending || actionRefreshPending
+              }
             >
               <Hammer />
               BUILDER
@@ -1189,7 +1263,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             <Button
               variant="outline"
               onClick={() => publishScan.mutate()}
-              disabled={publishScan.isPending || sync.isPending || fetchPack.isPending}
+              disabled={
+                publishScan.isPending ||
+                sync.isPending ||
+                fetchPack.isPending ||
+                actionRefreshPending
+              }
             >
               {publishScan.isPending ? <Loader2 className="animate-spin" /> : <UploadCloudIcon />}
               PUBLISH
@@ -1198,7 +1277,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <Button
             variant="outline"
             onClick={() => setPresetSelectionOpen(true)}
-            disabled={!manifest.data || sync.isPending || fetchPack.isPending}
+            disabled={
+              !manifest.data || sync.isPending || fetchPack.isPending || actionRefreshPending
+            }
           >
             <SlidersHorizontal />
             PRESETS
@@ -1206,24 +1287,64 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           <Button
             variant="outline"
             onClick={() => fetchPack.mutate()}
-            disabled={fetchPack.isPending || sync.isPending || launch.isPending}
+            disabled={
+              fetchPack.isPending || actionRefreshPending || sync.isPending || launch.isPending
+            }
           >
-            {fetchPack.isPending ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+            {fetchPack.isPending || actionRefreshPending ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <FolderGit2 />
+            )}
             FETCH
           </Button>
           <Button
             variant={needsSync ? "default" : "secondary"}
-            onClick={handleSyncClick}
-            disabled={fetchPack.isPending || sync.isPending || !manifest.data || !prism.data}
+            onClick={() => void handleSyncClick()}
+            disabled={
+              fetchPack.isPending ||
+              actionRefreshPending ||
+              sync.isPending ||
+              !manifest.data ||
+              !prism.data
+            }
           >
-            {sync.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            {sync.isPending || actionRefreshPending ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <RefreshCw />
+            )}
             SYNC
           </Button>
           <Button
-            onClick={handleLaunchClick}
-            disabled={fetchPack.isPending || launch.isPending || !prism.data || sync.isPending}
+            variant="outline"
+            onClick={() => setFreshSyncConfirmOpen(true)}
+            disabled={
+              fetchPack.isPending ||
+              actionRefreshPending ||
+              sync.isPending ||
+              !manifest.data ||
+              !prism.data
+            }
           >
-            {launch.isPending ? <Loader2 className="animate-spin" /> : <Play />}
+            <Trash2 />
+            FRESH SYNC
+          </Button>
+          <Button
+            onClick={() => void handleLaunchClick()}
+            disabled={
+              fetchPack.isPending ||
+              actionRefreshPending ||
+              launch.isPending ||
+              !prism.data ||
+              sync.isPending
+            }
+          >
+            {launch.isPending || actionRefreshPending ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <Play />
+            )}
             LAUNCH
           </Button>
         </div>
@@ -1819,11 +1940,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       <Dialog open={launchSyncGateOpen} onOpenChange={setLaunchSyncGateOpen}>
         <DialogContent className="max-w-xl overflow-hidden">
           <DialogHeader>
-            <DialogTitle>SYNC FIRST</DialogTitle>
+            <DialogTitle>NEW UPDATE AVAILABLE</DialogTitle>
+            <DialogDescription>
+              Sync this pack before launching so Prism does not start an outdated instance.
+            </DialogDescription>
           </DialogHeader>
           <DialogBody className="flex flex-col gap-4 p-6">
             <p className="text-sm text-text-low [text-wrap:pretty]">
-              This pack has updates newer than the last synced version on this instance.
+              The latest fetched pack commit is newer than the last synced commit for this instance.
             </p>
             <div className="grid gap-2 border border-line-soft/20 bg-surface-sunken/60 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
@@ -1836,18 +1960,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[10px] uppercase tracking-[0.18em] text-text-low">
-                  PACK HEAD
+                  LATEST PACK
                 </span>
                 <span className="font-mono text-xs text-text-high">
-                  {latestPackCommit?.slice(0, 10) ?? "unknown"}
+                  {(launchBlockedHeadSha ?? latestPackCommit)?.slice(0, 10) ?? "unknown"}
                 </span>
               </div>
             </div>
           </DialogBody>
-          <DialogFooter className="px-6 py-4 sm:justify-between">
-            <Button variant="secondary" onClick={handleContinueLaunchAnyway}>
-              CONTINUE ANYWAY
-            </Button>
+          <DialogFooter className="px-6 py-4">
             <Button
               onClick={handleSyncFromLaunchGate}
               disabled={sync.isPending || fetchPack.isPending}
@@ -2129,6 +2250,48 @@ export function PackDetailRoute({ packId }: { packId: string }) {
               }}
             >
               SYNC AGAIN
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={freshSyncConfirmOpen} onOpenChange={setFreshSyncConfirmOpen}>
+        <DialogContent variant="destructive" className="overflow-hidden max-w-xl">
+          <DialogHeader>
+            <DialogTitle>FRESH SYNC WILL DELETE THIS INSTANCE</DialogTitle>
+            <DialogDescription>
+              This removes the Prism instance folder, clears local disabled artifact choices for
+              this pack, then syncs a clean instance from source.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody className="p-6">
+            <div className="flex flex-col gap-4 text-sm text-text-low">
+              <div className="border border-line-soft/30 bg-surface-sunken p-4 font-mono text-[10px] uppercase tracking-[0.18em] text-signal-alert">
+                Local instance files, unpublished mods, local configs, saves inside the instance,
+                and disabled artifact state for this pack will be removed.
+              </div>
+              <p>
+                Use this when normal sync reports restore errors or the instance looks desynced.
+              </p>
+            </div>
+          </DialogBody>
+          <DialogFooter className="px-6 py-4 sm:justify-between">
+            <Button variant="secondary" onClick={() => setFreshSyncConfirmOpen(false)}>
+              CANCEL
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setFreshSyncConfirmOpen(false);
+                sync.mutate({
+                  syncShaderSettings: false,
+                  optionPresetId: PACK_DEFAULT_PRESET_ID,
+                  optionSyncCategories: DEFAULT_OPTION_SYNC_CATEGORIES,
+                  fresh: true,
+                });
+              }}
+            >
+              DELETE INSTANCE + SYNC
             </Button>
           </DialogFooter>
         </DialogContent>

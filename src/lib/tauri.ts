@@ -441,6 +441,8 @@ export const tauri = {
   addPack: (url: string) => invoke<PackSummary>("add_pack", { url }),
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
+  refreshPackForAction: (packId: string) =>
+    invoke<PackSummary>("refresh_pack_for_action", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
   loadSourceManifest: (packId: string) => invoke<Manifest>("load_source_manifest", { packId }),
   restoreManifestFromSource: (packId: string) =>
@@ -520,6 +522,8 @@ export const tauri = {
     }),
   getInstanceMinecraftDir: (instanceName: string) =>
     invoke<string | null>("get_instance_minecraft_dir", { instanceName }),
+  deletePrismInstance: (instanceName: string) =>
+    invoke<void>("delete_prism_instance", { instanceName }),
   packChangelog: (packId: string, limit?: number, sinceCommit?: string | null) =>
     invoke<PackChangelogEntry[]>("pack_changelog", { packId, limit, sinceCommit }),
   suggestPublishVersion: (packId: string) => invoke<string>("suggest_publish_version", { packId }),

@@ -16,7 +16,6 @@ pub async fn mod_statuses(
     pack_id: String,
     instance_name: Option<String>,
 ) -> Result<Vec<ModStatus>, CommandError> {
-    use sha1::{Digest as _, Sha1};
     use std::collections::{HashMap, HashSet};
 
     let pack_dir = paths::packs_dir()?.join(&pack_id);
@@ -105,15 +104,9 @@ pub async fn mod_statuses(
                     let path = dir.join(filename);
                     let disabled_path = dir.join(format!("{filename}.disabled"));
                     if path.exists() {
-                        match std::fs::read(&path) {
-                            Ok(bytes) => {
-                                let got = hex::encode(Sha1::digest(&bytes));
-                                if got.eq_ignore_ascii_case(&entry.sha1) {
-                                    "synced"
-                                } else {
-                                    "outdated"
-                                }
-                            }
+                        match path.metadata() {
+                            Ok(meta) if meta.len() == entry.size => "synced",
+                            Ok(_) => "outdated",
                             Err(_) => "missing",
                         }
                     } else if disabled_path.exists()

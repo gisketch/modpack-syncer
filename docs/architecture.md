@@ -21,7 +21,7 @@
 | Layer | Holds | Why |
 |-------|-------|-----|
 | **GitHub** (public repo) | `manifest.json`, `configs/`, `kubejs/`, `profiles/*.json`, `CHANGELOG.md` | Text/small files. Diffable. Free versioning. |
-| **Modrinth / CurseForge CDN** | Public mod jars, public resourcepacks, public shaderpacks | Zero self-hosting cost. Hash-verified. Upstream. |
+| **Modrinth / CurseForge CDN** | Public mod jars, public resourcepacks, public shaderpacks | Zero self-hosting cost. Upstream artifact source. |
 | **Local SQLite** (client) | Download cache index, profile state, last-synced commit SHA, user settings | Fast local queries, no server round-trip for UI. |
 
 ### 2.2 Repo layout (GitHub)
@@ -98,7 +98,7 @@ User → App: add pack URL (github.com/gisketch/modsync-pack)
 App  → GitHub: libgit2 clone to app data dir
 App  → manifest.json: parse
 App  → Modrinth/CF: parallel download mods/resourcepacks/shaderpacks (reqwest + tokio)
-App  → SHA verify every artifact
+App  → Filename + size check every artifact
 App  → Prism instances/: write .minecraft/ (mods, resourcepacks, shaderpacks, configs, kubejs, …)
 App  → User: "Ready, launch?"
 ```
@@ -197,7 +197,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 ## 7. Security
 
 - GitHub PAT stored via OS keychain (`tauri-plugin-stronghold` or `keyring` crate).
-- Every download SHA1 + SHA512 verified against manifest before writing to disk.
+- Normal sync validates artifacts by filename and size for speed.
 - Manifest `url` fields validated against allowlist (modrinth.com, curseforge CDN host).
 - No `eval`/dynamic code execution from manifest.
 
@@ -207,7 +207,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 
 - Parallel downloads (tokio + reqwest, bounded by `Semaphore(8)`).
 - Resumable downloads (HTTP Range, `.part` files).
-- Content-addressable on-disk cache: `~/.local/share/modsync/cache/<sha1>.jar` — swap into instances via copy (or reflink on btrfs/apfs).
+- Metadata-addressed on-disk cache keyed by filename and size — swap into instances via copy or hardlink.
 - Updates only fetch *changed* files (diff manifest old vs new).
 
 ---
@@ -215,7 +215,7 @@ Toggles stored in `profiles/*.json`; the *pack* can declare "recommended" defaul
 ## 9. Roadmap Phasing
 
 - **M0** — scaffold + GitHub clone + manifest parse (read-only).
-- **M1** — Mod download + SHA verify + Prism instance write + launch.
+- **M1** — Mod download + metadata check + Prism instance write + launch.
 - **M2** — Full sync (configs, kubejs, resourcepacks via Modrinth).
 - **M3** — Author mode: scan/diff/publish flow.
 - **M4** — Diff viewer, changelog UI, Adoptium auto-download.

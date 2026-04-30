@@ -16,7 +16,7 @@ Tauri 2 desktop app with React 19, TypeScript, Vite, Tailwind v4, Zustand, TanSt
 
 - Primary user: friend-group Minecraft players who need one app to install, sync, and launch a pack.
 - Secondary users: pack admins who curate local Prism instances and publish changes back to the pack source of truth.
-- Non-goals: replacing Prism Launcher auth/launch UX, storing Microsoft credentials, committing mod jars to git, or bypassing artifact hash checks.
+- Non-goals: replacing Prism Launcher auth/launch UX, storing Microsoft credentials, or committing mod jars to git.
 
 ## Problem
 
@@ -31,7 +31,7 @@ Users can add a GitHub pack, sync verified artifacts into a Prism instance, revi
 - User can sync a pack without installing git or manually moving files.
 - User can see what changed before applying a sync.
 - Admin can publish changes through a preview-first flow.
-- System must verify downloaded artifacts by manifest hash before writing them.
+- System must use filename and file size for fast sync artifact checks.
 - System must store secrets in the OS keychain, not plaintext files or logs.
 - Project is not done until harness docs, OpenSpec behavior, and validation commands stay current with code changes.
 
@@ -40,7 +40,7 @@ Users can add a GitHub pack, sync verified artifacts into a Prism instance, revi
 - Package manager: Bun.
 - Runtime: Tauri 2 shell, Rust backend, React frontend.
 - Data: GitHub pack repo for text/source of truth; Modrinth/CurseForge/upstream URLs for artifacts; local SQLite for client state/cache metadata.
-- Security: mandatory SHA verification, manifest URL allowlist, no Microsoft credential handling, GitHub PAT in OS keychain.
+- Security: manifest URL allowlist, no Microsoft credential handling, GitHub PAT in OS keychain.
 - Performance: bounded parallel downloads, cache reuse, update deltas instead of full rewrites.
 - Token budget:
 

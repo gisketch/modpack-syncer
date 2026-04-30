@@ -249,7 +249,10 @@ fn set_instance_artifact_disabled_blocking(
     let entry = entries
         .iter()
         .find(|entry| enabled_artifact_filename(&entry.filename) == canonical_filename)
-        .ok_or_else(|| CommandError::Manifest(format!("artifact not found: {filename}")))?;
+        .cloned();
+    let Some(entry) = entry else {
+        return Ok(());
+    };
 
     if disabled && category == ManifestArtifactCategory::Mods && !entry.optional {
         return Err(CommandError::Other(
@@ -271,9 +274,15 @@ fn set_instance_artifact_disabled_blocking(
 
     if disabled {
         if enabled_path.exists() {
+            if disabled_path.exists() {
+                std::fs::remove_file(&disabled_path)?;
+            }
             std::fs::rename(enabled_path, disabled_path)?;
         }
     } else if disabled_path.exists() {
+        if enabled_path.exists() {
+            std::fs::remove_file(&enabled_path)?;
+        }
         std::fs::rename(disabled_path, enabled_path)?;
     }
 
@@ -289,6 +298,21 @@ pub async fn get_instance_minecraft_dir(
     instance_name: String,
 ) -> Result<Option<String>, CommandError> {
     Ok(prism::instance_minecraft_dir(&instance_name).map(|path| path.display().to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_prism_instance(instance_name: String) -> Result<(), CommandError> {
+    tokio::task::spawn_blocking(move || {
+        let Some(instance_dir) = prism::instance_dir(&instance_name) else {
+            return Ok(());
+        };
+        if instance_dir.exists() {
+            std::fs::remove_dir_all(&instance_dir)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
 }
 
 fn normalize_optional_path(value: String) -> Option<String> {

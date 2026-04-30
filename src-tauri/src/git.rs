@@ -86,14 +86,32 @@ pub fn update_with_progress<P>(repo_dir: &Path, mut on_progress: P) -> Result<St
 where
     P: FnMut(GitTransferProgress),
 {
-    match fetch_and_ff(repo_dir, &mut on_progress) {
+    match fetch_and_ff(repo_dir, &mut on_progress, true) {
         Ok(head) => Ok(head),
         Err(GitError::Git(err)) if is_missing_object_error(&err) => recover_broken_clone(repo_dir),
         Err(err) => Err(err),
     }
 }
 
-fn fetch_and_ff<P>(dest: &Path, on_progress: &mut P) -> Result<String, GitError>
+pub fn update_if_changed_with_progress<P>(
+    repo_dir: &Path,
+    mut on_progress: P,
+) -> Result<String, GitError>
+where
+    P: FnMut(GitTransferProgress),
+{
+    match fetch_and_ff(repo_dir, &mut on_progress, false) {
+        Ok(head) => Ok(head),
+        Err(GitError::Git(err)) if is_missing_object_error(&err) => recover_broken_clone(repo_dir),
+        Err(err) => Err(err),
+    }
+}
+
+fn fetch_and_ff<P>(
+    dest: &Path,
+    on_progress: &mut P,
+    clean_when_unchanged: bool,
+) -> Result<String, GitError>
 where
     P: FnMut(GitTransferProgress),
 {
@@ -109,7 +127,9 @@ where
     let analysis = repo.merge_analysis(&[&fetch_commit])?;
     if analysis.0.is_up_to_date() {
         let head = repo.head()?.peel_to_commit()?;
-        checkout_head_clean(&repo)?;
+        if clean_when_unchanged {
+            checkout_head_clean(&repo)?;
+        }
         return Ok(head.id().to_string());
     }
     let refname = {

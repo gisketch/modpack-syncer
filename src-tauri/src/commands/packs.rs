@@ -111,6 +111,40 @@ pub async fn update_pack(
 }
 
 #[tauri::command]
+pub async fn refresh_pack_for_action(
+    app: tauri::AppHandle,
+    pack_id: String,
+) -> Result<PackSummary, CommandError> {
+    let dest = paths::packs_dir()?.join(&pack_id);
+    let dest_clone = dest.clone();
+    let pack_id_clone = pack_id.clone();
+    let head = tokio::task::spawn_blocking(move || {
+        git::update_if_changed_with_progress(&dest_clone, |progress| {
+            let _ = app.emit(
+                "pack-transfer-progress",
+                PackTransferProgressEvent {
+                    pack_id: pack_id_clone.clone(),
+                    stage: progress.stage.to_string(),
+                    received_objects: progress.received_objects,
+                    total_objects: progress.total_objects,
+                    indexed_objects: progress.indexed_objects,
+                    received_bytes: progress.received_bytes,
+                },
+            );
+        })
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))??;
+
+    Ok(PackSummary {
+        id: pack_id,
+        url: String::new(),
+        path: dest.display().to_string(),
+        head_sha: head,
+    })
+}
+
+#[tauri::command]
 pub async fn load_manifest(pack_id: String) -> Result<manifest::Manifest, CommandError> {
     let path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
     let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&path))

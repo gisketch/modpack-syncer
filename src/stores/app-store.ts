@@ -37,6 +37,7 @@ type AppState = {
     filename: string,
     disabled: boolean,
   ) => void;
+  setPackDisabledArtifacts: (packId: string, disabledArtifacts: Record<string, string[]>) => void;
   isPackAdminMode: (packId: string) => boolean;
   addPack: (pack: Pack) => void;
 };
@@ -108,6 +109,13 @@ export const useAppStore = create<AppState>()(
             },
           };
         }),
+      setPackDisabledArtifacts: (packId, disabledArtifacts) =>
+        set((state) => ({
+          disabledArtifactsByPack: {
+            ...state.disabledArtifactsByPack,
+            [packId]: disabledArtifacts,
+          },
+        })),
       isPackAdminMode: (packId) => get().adminModeByPack[packId] ?? false,
       addPack: (pack) => set((s) => ({ packs: [...s.packs, pack] })),
     }),

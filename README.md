@@ -22,7 +22,7 @@ Active private/friend-group tool. See [docs/planned_features.md](docs/planned_fe
 
 - Clones pack repos from GitHub and treats them as the source of truth.
 - Syncs mods, resource packs, shader packs, configs, KubeJS, profiles, and options into Prism instances.
-- Verifies downloaded artifacts by SHA before writing them.
+- Uses filename and file size checks for fast syncs.
 - Lets pack admins publish local instance changes back into the repo preview-first.
 - Supports option presets, shader settings review, per-file publish ignore rules, and launch gating when packs are behind.
 

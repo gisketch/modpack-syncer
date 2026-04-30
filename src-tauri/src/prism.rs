@@ -421,6 +421,11 @@ pub fn instance_minecraft_dir(instance_name: &str) -> Option<PathBuf> {
     Some(dot_minecraft(&data.join("instances").join(instance_name)))
 }
 
+pub fn instance_dir(instance_name: &str) -> Option<PathBuf> {
+    let data = data_dir()?;
+    Some(data.join("instances").join(instance_name))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct InstanceWriteReport {
     pub instance_dir: String,
@@ -434,12 +439,11 @@ pub struct InstanceWriteReport {
 pub struct ManagedModState {
     pub id: String,
     pub filename: String,
-    pub sha1: String,
     pub size: u64,
 }
 
 /// Write (or update) a Prism instance for the given pack.
-/// - `cached_mod_paths`: pre-downloaded content-addressable jar paths (already SHA-verified).
+/// - `resolved_mod_paths`: local artifact paths already resolved by filename and size.
 /// - `pack_repo_dir`: local git clone of the pack (source of configs/kubejs/overrides).
 pub fn write_instance(
     instance_name: &str,
@@ -481,7 +485,6 @@ pub fn write_instance(
         .map(|entry| ManagedModState {
             id: entry.id.clone(),
             filename: entry.filename.clone(),
-            sha1: entry.sha1.clone(),
             size: entry.size as u64,
         })
         .collect::<Vec<_>>();
@@ -590,7 +593,7 @@ fn copy_or_link(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
     }
     if dst.exists() {
-        std::fs::remove_file(dst)?;
+        force_remove_file(dst)?;
     }
     // Prefer hardlink (same filesystem). Fall back to copy.
     if std::fs::hard_link(src, dst).is_ok() {
@@ -598,6 +601,52 @@ fn copy_or_link(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     std::fs::copy(src, dst)?;
     Ok(())
+}
+
+fn force_remove_file(path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    for attempt in 0..3 {
+        match std::fs::remove_file(path) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if attempt == 0 {
+                    make_writable(path);
+                }
+                if attempt == 2 {
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!("failed to remove {}: {error}", path.display()),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn make_writable(path: &Path) {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = metadata.permissions();
+            let mode = permissions.mode();
+            permissions.set_mode(mode | 0o200);
+            let _ = std::fs::set_permissions(path, permissions);
+        }
+        #[cfg(windows)]
+        {
+            let mut permissions = metadata.permissions();
+            if permissions.readonly() {
+                permissions.set_readonly(false);
+                let _ = std::fs::set_permissions(path, permissions);
+            }
+        }
+    }
 }
 
 fn write_instance_cfg(
@@ -707,7 +756,7 @@ fn write_managed_files(
             }
             let p = dest_dir.join(line);
             if p.exists() {
-                let _ = std::fs::remove_file(p);
+                force_remove_file(&p)?;
             }
         }
     }
@@ -722,7 +771,7 @@ fn write_managed_files(
             if !path.is_file() || name.starts_with('.') || desired.contains(name) {
                 continue;
             }
-            let _ = std::fs::remove_file(path);
+            force_remove_file(&path)?;
         }
     }
 
@@ -748,11 +797,22 @@ fn copy_dir_merge(src: &Path, dst: &Path) -> std::io::Result<usize> {
         if path.is_dir() {
             count += copy_dir_merge(&path, &target)?;
         } else {
-            std::fs::copy(&path, &target)?;
+            force_copy(&path, &target)?;
             count += 1;
         }
     }
     Ok(count)
+}
+
+fn force_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if dst.exists() {
+        force_remove_file(dst)?;
+    }
+    std::fs::copy(src, dst)?;
+    Ok(())
 }
 
 pub fn launch(instance_name: &str) -> Result<(), PrismError> {

@@ -364,7 +364,7 @@ fn resolve_entries(
                     })?;
                     pack_dir.join(repo_path)
                 }
-                _ => cache::path_for(&entry.sha1)?,
+                _ => cache::path_for_entry(&entry.filename, entry.size)?,
             };
             if !path.exists() {
                 return Err(CommandError::Manifest(format!(
@@ -375,15 +375,11 @@ fn resolve_entries(
             }
             let resolved_path = match download::verify_file(&path, entry) {
                 Ok(()) => path,
-                Err(error) if should_allow_repo_shaderpack_sha_drift(entry, &error) => {
-                    if let Some(fallback_path) = shaderpack_fallback_dir
+                Err(error) if should_allow_repo_shaderpack_size_drift(entry, &error) => {
+                    shaderpack_fallback_dir
                         .map(|dir| dir.join(&entry.filename))
                         .filter(|fallback_path| fallback_path.is_file())
-                    {
-                        fallback_path
-                    } else {
-                        path
-                    }
+                        .unwrap_or(path)
                 }
                 Err(error) => return Err(error.into()),
             };
@@ -392,11 +388,11 @@ fn resolve_entries(
         .collect()
 }
 
-fn should_allow_repo_shaderpack_sha_drift(
+fn should_allow_repo_shaderpack_size_drift(
     entry: &manifest::Entry,
     error: &download::DownloadError,
 ) -> bool {
     entry.source == manifest::Source::Repo
         && entry.filename.ends_with(".zip")
-        && matches!(error, download::DownloadError::Sha1Mismatch { .. })
+        && matches!(error, download::DownloadError::SizeMismatch { .. })
 }
