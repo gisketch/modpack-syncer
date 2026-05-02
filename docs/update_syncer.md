@@ -2,7 +2,7 @@
 
 Use this guide every time a new `modsync` app release should go out.
 
-This project currently publishes Windows releases through GitHub Actions and also generates updater artifacts used by the in-app Windows self-updater.
+This project publishes Windows and macOS releases through GitHub Actions and generates updater artifacts used by the in-app self-updater.
 
 ## One-time setup
 
@@ -37,6 +37,12 @@ Optional:
 
 1. Create repository secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key was created with a password.
 2. Leave that secret unset if the key has no password.
+
+### 3. macOS build host
+
+macOS app bundles must be built on macOS. You do not need a physical Mac for normal release builds because the release workflow uses GitHub-hosted `macos-latest` runners.
+
+This workflow builds unsigned macOS `.app` / `.dmg` assets for both Apple Silicon and Intel. If you want Gatekeeper-friendly signed and notarized macOS releases later, you will need an Apple Developer account plus certificate/notarization secrets. That is separate from the Tauri updater signing key above.
 
 ## Files involved in every release
 
@@ -125,30 +131,34 @@ That script will:
 After the tag push:
 
 1. Open GitHub Actions.
-2. Open workflow `release-windows`.
+2. Open workflow `release-desktop`.
 3. Wait for the tagged run to finish successfully.
 
 The workflow will:
 
 - verify tag/version match again
 - build the Windows app
+- build the macOS Apple Silicon app
+- build the macOS Intel app
 - upload release assets
 - upload updater signatures
 - upload `latest.json`
 
 ### 9. Verify the GitHub Release page
 
-Open the GitHub release for the new tag and confirm it contains Windows release assets plus updater files.
+Open the GitHub release for the new tag and confirm it contains Windows and macOS release assets plus updater files.
 
 At minimum, verify:
 
 - Windows installer asset exists
+- macOS Apple Silicon DMG/app asset exists
+- macOS Intel DMG/app asset exists
 - signature files exist
 - `latest.json` exists
 
 ### 10. Smoke-test updater behavior
 
-After one release is live, test updater behavior from an older installed Windows build.
+After one release is live, test updater behavior from an older installed Windows or macOS build.
 
 Confirm:
 

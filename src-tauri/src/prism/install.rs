@@ -184,6 +184,7 @@ where
         binary_path: Some(install.binary_path.clone()),
         data_dir: Some(install.data_dir.clone()),
         offline_username: existing_settings.offline_username,
+        offline_uuid: existing_settings.offline_uuid,
     })?;
 
     on_progress(prism_progress_event(

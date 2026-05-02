@@ -41,6 +41,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
   const [stepInitialized, setStepInitialized] = useState(false);
   const [installDirectoryDraft, setInstallDirectoryDraft] = useState("");
   const [offlineUsername, setOfflineUsername] = useState("");
+  const [offlineUuid, setOfflineUuid] = useState("");
   const [javaInstallProgress, setJavaInstallProgress] = useState<JavaInstallProgressEvent | null>(
     null,
   );
@@ -75,6 +76,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
   const launcherReady =
     !!prismSettings.data?.binaryPath && !!prismSettings.data?.dataDir && !!prism.data;
   const usernameReady = !!prismSettings.data?.offlineUsername?.trim();
+  const offlineUuidValid = isUuidDraftValid(offlineUuid);
   const currentStepIndex = ONBOARDING_STEPS.findIndex((item) => item.id === step);
   const setupQueriesLoading =
     installDirectory.isLoading ||
@@ -95,7 +97,8 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
 
   useEffect(() => {
     setOfflineUsername(prismSettings.data?.offlineUsername ?? "");
-  }, [prismSettings.data?.offlineUsername]);
+    setOfflineUuid(prismSettings.data?.offlineUuid ?? "");
+  }, [prismSettings.data?.offlineUsername, prismSettings.data?.offlineUuid]);
 
   useEffect(() => {
     if (stepInitialized || setupQueriesLoading) return;
@@ -194,6 +197,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
         prismSettings.data?.binaryPath ?? null,
         prismSettings.data?.dataDir ?? null,
         username.trim() || null,
+        offlineUuid.trim() || null,
       ),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["prism-settings"] });
@@ -206,6 +210,7 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
     mutationFn: () => tauri.clearOnboardingSettings(21),
     onSuccess: async (settings) => {
       setOfflineUsername(settings.offlineUsername ?? "");
+      setOfflineUuid(settings.offlineUuid ?? "");
       setJavaInstallProgress(null);
       setJavaInstallLogs([]);
       setPrismInstallProgress(null);
@@ -265,7 +270,8 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
     (step === "directory" && (!installDirectoryDraft.trim() || setInstallDirectory.isPending)) ||
     (step === "java" && (!javaReady || installJava.isPending)) ||
     (step === "prism" && (!launcherReady || installManagedPrism.isPending)) ||
-    (step === "username" && (!offlineUsername.trim() || saveUsername.isPending));
+    (step === "username" &&
+      (!offlineUsername.trim() || !offlineUuidValid || saveUsername.isPending));
 
   return (
     <div className="relative flex min-h-full w-full items-center justify-center overflow-hidden p-4 sm:p-8">
@@ -448,6 +454,27 @@ export function OnboardingRoute({ openedFromSettings = false }: { openedFromSett
                           className="normal-case tracking-normal"
                         />
                       </div>
+                      <div className="grid gap-2">
+                        <span className="cp-tactical-label text-[10px] text-text-low">
+                          OFFLINE UUID
+                        </span>
+                        <Input
+                          value={offlineUuid}
+                          onChange={(event) => setOfflineUuid(event.target.value)}
+                          placeholder="Optional UUID from existing account"
+                          aria-invalid={!offlineUuidValid}
+                          className="font-mono text-xs normal-case tracking-normal"
+                        />
+                        {!offlineUuidValid ? (
+                          <p className="text-xs text-signal-alert">
+                            UUID must be valid, with or without dashes.
+                          </p>
+                        ) : null}
+                      </div>
+                      <StatusLine
+                        label="IDENTITY"
+                        value={offlineUuid.trim() ? "CUSTOM UUID" : "UUID FROM NAME"}
+                      />
                       <StatusLine label="NEXT" value="PACKS" />
                     </div>
                   </StepFrame>
@@ -602,6 +629,15 @@ function ProgressPanel({
         )}
       </div>
     </div>
+  );
+}
+
+function isUuidDraftValid(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return (
+    /^[0-9a-f]{32}$/i.test(trimmed) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
   );
 }
 

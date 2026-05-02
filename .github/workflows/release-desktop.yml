@@ -1,4 +1,4 @@
-name: release-windows
+name: release-desktop
 
 on:
   push:
@@ -13,10 +13,26 @@ on:
 
 jobs:
   release:
-    name: Build Windows release
-    runs-on: windows-latest
+    name: Build ${{ matrix.label }} release
+    runs-on: ${{ matrix.platform }}
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows
+            platform: windows-latest
+            args: ""
+            rustTargets: ""
+          - label: macOS Apple Silicon
+            platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - label: macOS Intel
+            platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            rustTargets: "aarch64-apple-darwin,x86_64-apple-darwin"
 
     steps:
       - name: Check out repository
@@ -48,7 +64,14 @@ jobs:
           bun-version: latest
 
       - name: Install Rust toolchain
+        if: matrix.rustTargets == ''
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain with macOS targets
+        if: matrix.rustTargets != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
@@ -78,10 +101,11 @@ jobs:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: gisketch//s_modpack_syncer ${{ env.RELEASE_TAG }}
           releaseBody: |
-            Automated Windows build for ${{ env.RELEASE_TAG }}.
+            Automated desktop builds for ${{ env.RELEASE_TAG }}.
 
-            Download installer assets from this release.
+            Download Windows or macOS installer assets from this release.
           generateReleaseNotes: true
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
+          args: ${{ matrix.args }}

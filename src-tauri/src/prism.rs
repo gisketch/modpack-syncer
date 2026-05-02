@@ -47,6 +47,7 @@ pub struct PrismSettings {
     pub binary_path: Option<String>,
     pub data_dir: Option<String>,
     pub offline_username: Option<String>,
+    pub offline_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -837,7 +838,7 @@ pub fn launch(instance_name: &str) -> Result<(), PrismError> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        ensure_offline_account(offline_username)?;
+        ensure_offline_account(offline_username, settings.offline_uuid.as_deref())?;
         command.arg("--offline").arg(offline_username);
     }
 
@@ -849,13 +850,13 @@ pub fn launch(instance_name: &str) -> Result<(), PrismError> {
     Ok(())
 }
 
-fn ensure_offline_account(username: &str) -> Result<(), PrismError> {
+fn ensure_offline_account(username: &str, profile_uuid: Option<&str>) -> Result<(), PrismError> {
     let Some(data_dir) = data_dir() else {
         return Ok(());
     };
     std::fs::create_dir_all(&data_dir)?;
     let accounts_path = data_dir.join("accounts.json");
-    let desired_profile_id = offline_profile_id(username);
+    let desired_profile_id = offline_profile_id(username, profile_uuid)?;
     let mut root = if accounts_path.exists() {
         let bytes = std::fs::read(&accounts_path)?;
         serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_else(|_| json!({}))
@@ -902,13 +903,25 @@ fn ensure_offline_account(username: &str) -> Result<(), PrismError> {
     Ok(())
 }
 
-fn offline_profile_id(username: &str) -> String {
-    Uuid::new_v3(
+fn offline_profile_id(username: &str, profile_uuid: Option<&str>) -> Result<String, PrismError> {
+    if let Some(profile_uuid) = profile_uuid
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let parsed = Uuid::parse_str(profile_uuid).map_err(|error| {
+            PrismError::Other(anyhow::anyhow!(
+                "invalid offline UUID `{profile_uuid}`: {error}"
+            ))
+        })?;
+        return Ok(parsed.simple().to_string());
+    }
+
+    Ok(Uuid::new_v3(
         &Uuid::NAMESPACE_OID,
         format!("OfflinePlayer:{username}").as_bytes(),
     )
     .simple()
-    .to_string()
+    .to_string())
 }
 
 fn offline_account_matches(
@@ -926,13 +939,24 @@ fn offline_account_matches(
                 .get("profile")
                 .and_then(|profile| profile.get("id"))
                 .and_then(serde_json::Value::as_str)
-                == Some(desired_profile_id)
+                .is_some_and(|profile_id| {
+                    offline_profile_id_matches(profile_id, desired_profile_id)
+                })
             || account
                 .get("ygg")
                 .and_then(|token| token.get("extra"))
                 .and_then(|extra| extra.get("userName"))
                 .and_then(serde_json::Value::as_str)
                 == Some(username))
+}
+
+fn offline_profile_id_matches(profile_id: &str, desired_profile_id: &str) -> bool {
+    if profile_id == desired_profile_id {
+        return true;
+    }
+    Uuid::parse_str(profile_id)
+        .map(|uuid| uuid.simple().to_string() == desired_profile_id)
+        .unwrap_or(false)
 }
 
 fn build_offline_account(username: &str, profile_id: &str) -> serde_json::Value {
@@ -958,4 +982,36 @@ fn build_offline_account(username: &str, profile_id: &str) -> serde_json::Value 
             "capes": []
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{offline_profile_id, offline_profile_id_matches};
+
+    #[test]
+    fn custom_offline_uuid_is_written_without_dashes() {
+        let profile_id =
+            offline_profile_id("PlayerOne", Some("123e4567-e89b-12d3-a456-426614174000"))
+                .expect("custom UUID should parse");
+
+        assert_eq!(profile_id, "123e4567e89b12d3a456426614174000");
+    }
+
+    #[test]
+    fn blank_offline_uuid_falls_back_to_username_hash() {
+        let profile_id = offline_profile_id("PlayerOne", Some("")).expect("fallback should work");
+
+        assert_eq!(profile_id.len(), 32);
+    }
+
+    #[test]
+    fn existing_profile_id_matches_with_or_without_dashes() {
+        let desired = "123e4567e89b12d3a456426614174000";
+
+        assert!(offline_profile_id_matches(
+            "123e4567-e89b-12d3-a456-426614174000",
+            desired
+        ));
+        assert!(offline_profile_id_matches(desired, desired));
+    }
 }

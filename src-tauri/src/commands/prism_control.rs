@@ -49,11 +49,16 @@ pub async fn set_prism_settings(
     binary_path: Option<String>,
     data_dir: Option<String>,
     offline_username: Option<String>,
+    offline_uuid: Option<String>,
 ) -> Result<prism::PrismSettings, CommandError> {
     let settings = prism::PrismSettings {
         binary_path: binary_path.and_then(normalize_optional_path),
         data_dir: data_dir.and_then(normalize_optional_path),
         offline_username: offline_username.and_then(normalize_optional_text),
+        offline_uuid: offline_uuid
+            .map(normalize_optional_uuid)
+            .transpose()?
+            .flatten(),
     };
     tokio::task::spawn_blocking(move || prism::save_settings(settings))
         .await
@@ -331,4 +336,14 @@ fn normalize_optional_text(value: String) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn normalize_optional_uuid(value: String) -> Result<Option<String>, CommandError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    uuid::Uuid::parse_str(trimmed)
+        .map(|uuid| Some(uuid.hyphenated().to_string()))
+        .map_err(|error| CommandError::Other(format!("invalid offline UUID: {error}")))
 }

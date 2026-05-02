@@ -7,6 +7,7 @@ import {
   Boxes,
   Check,
   Download,
+  Fingerprint,
   FolderOpen,
   Info,
   Loader2,
@@ -45,6 +46,7 @@ export function SettingsRoute() {
   const [prismBinaryPath, setPrismBinaryPath] = useState("");
   const [prismDataDir, setPrismDataDir] = useState("");
   const [offlineUsername, setOfflineUsername] = useState("");
+  const [offlineUuid, setOfflineUuid] = useState("");
   const [launcherPathOpen, setLauncherPathOpen] = useState(false);
   const [prismInstallOpen, setPrismInstallOpen] = useState(false);
   const [prismInstallProgress, setPrismInstallProgress] =
@@ -107,11 +109,18 @@ export function SettingsRoute() {
     }: {
       binaryPath?: string | null;
       dataDir?: string | null;
-    }) => tauri.setPrismSettings(binaryPath, dataDir, offlineUsername.trim() || null),
+    }) =>
+      tauri.setPrismSettings(
+        binaryPath,
+        dataDir,
+        offlineUsername.trim() || null,
+        offlineUuid.trim() || null,
+      ),
     onSuccess: async (settings) => {
       setPrismBinaryPath(settings.binaryPath ?? "");
       setPrismDataDir(settings.dataDir ?? "");
       setOfflineUsername(settings.offlineUsername ?? "");
+      setOfflineUuid(settings.offlineUuid ?? "");
       setLauncherPathOpen(false);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["prism"] }),
@@ -164,6 +173,7 @@ export function SettingsRoute() {
 
   const showPrismInstallProgress = installManagedPrism.isPending;
   const launcherOverrideActive = !!prismSettings.data?.binaryPath || !!prismSettings.data?.dataDir;
+  const offlineUuidValid = isUuidDraftValid(offlineUuid);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
@@ -186,10 +196,12 @@ export function SettingsRoute() {
     setPrismBinaryPath(prismSettings.data?.binaryPath ?? "");
     setPrismDataDir(prismSettings.data?.dataDir ?? "");
     setOfflineUsername(prismSettings.data?.offlineUsername ?? "");
+    setOfflineUuid(prismSettings.data?.offlineUuid ?? "");
   }, [
     prismSettings.data?.binaryPath,
     prismSettings.data?.dataDir,
     prismSettings.data?.offlineUsername,
+    prismSettings.data?.offlineUuid,
   ]);
 
   async function handleDownloadPrism() {
@@ -415,10 +427,16 @@ export function SettingsRoute() {
                   {offlineUsername || "NOT SET"}
                 </span>
               </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="cp-tactical-label text-[--text-low]">OFFLINE UUID</span>
+                <span className="max-w-[70%] truncate font-mono text-[--text-high]">
+                  {offlineUuid || "AUTO FROM NAME"}
+                </span>
+              </div>
               <p className="text-[--text-low]">
                 Managed install saves portable launcher inside modsync data dir, verifies GitHub
-                SHA-256 digest, then auto-fills launcher settings. Offline name launches fork with{" "}
-                <code>--offline</code>.
+                SHA-256 digest, then auto-fills launcher settings. Offline name and UUID keep the
+                same server player across devices.
               </p>
             </div>
 
@@ -551,9 +569,23 @@ export function SettingsRoute() {
                 placeholder="Offline username used for cracked launcher"
                 className="normal-case tracking-normal"
               />
+              <div className="grid gap-2">
+                <Input
+                  value={offlineUuid}
+                  onChange={(e) => setOfflineUuid(e.target.value)}
+                  placeholder="Offline UUID (optional, from your existing account)"
+                  aria-invalid={!offlineUuidValid}
+                  className="font-mono text-xs normal-case tracking-normal"
+                />
+                {!offlineUuidValid ? (
+                  <p className="text-xs text-signal-alert">
+                    UUID must be valid, with or without dashes.
+                  </p>
+                ) : null}
+              </div>
               <p className="text-xs text-[--text-low]">
                 Binary override always wins first. Data dir optional, but portable managed installs
-                should keep binary + data together. Offline username applies on launch when set.
+                should keep binary + data together. Leave UUID blank to derive one from username.
               </p>
             </div>
           </DialogBody>
@@ -565,13 +597,16 @@ export function SettingsRoute() {
             >
               CANCEL
             </Button>
-            <Button onClick={handleSavePrismSettings} disabled={savePrismSettings.isPending}>
+            <Button
+              onClick={handleSavePrismSettings}
+              disabled={savePrismSettings.isPending || !offlineUuidValid}
+            >
               {savePrismSettings.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Boxes className="h-4 w-4" />
+                <Fingerprint className="h-4 w-4" />
               )}
-              SAVE PATHS
+              SAVE IDENTITY
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -623,10 +658,11 @@ export function SettingsRoute() {
               </div>
             ) : (
               <div className="grid gap-4">
-                <button
+                <Button
                   type="button"
                   onClick={handleInstallManagedPrism}
-                  className="grid gap-2 border border-brand-core bg-brand-core/10 px-4 py-4 text-left transition-colors hover:bg-brand-core/15"
+                  variant="outline"
+                  className="h-auto grid justify-stretch gap-2 border-brand-core bg-brand-core/10 px-4 py-4 text-left normal-case tracking-normal hover:bg-brand-core/15"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="font-heading text-sm text-text-high">
@@ -639,15 +675,15 @@ export function SettingsRoute() {
                     digest, unpack into modsync data dir, then save binary + data paths
                     automatically.
                   </p>
-                </button>
+                </Button>
                 <div className="border border-line-soft/20 bg-surface-sunken/60 p-4 text-xs text-text-low">
                   <p>
                     CLI check done: fork supports <code>--launch</code>, <code>--dir</code>, and{" "}
                     <code>--offline &lt;name&gt;</code>.
                   </p>
                   <p className="mt-2">
-                    Offline username wiring not built here yet. This step only handles best UX for
-                    installer + launcher path setup.
+                    Offline username and UUID are saved in launcher settings and applied when
+                    modsync launches the pack.
                   </p>
                 </div>
               </div>
@@ -696,4 +732,13 @@ function formatByteCount(value: number): string {
   return unitIndex === 0
     ? `${Math.round(size)} ${units[unitIndex]}`
     : `${size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function isUuidDraftValid(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return (
+    /^[0-9a-f]{32}$/i.test(trimmed) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
+  );
 }
