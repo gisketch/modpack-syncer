@@ -64,7 +64,7 @@ pub async fn scan_instance_publish(
     let instance_dir_for_scan = instance_dir.clone();
 
     tokio::task::spawn_blocking(move || -> Result<PublishScanReport, CommandError> {
-        let scan_total = 8usize;
+        let scan_total = 9usize;
         let emit_scan = |stage: &str, completed: usize| {
             let _ = app.emit(
                 "publish-scan-progress",
@@ -113,19 +113,26 @@ pub async fn scan_instance_publish(
             &pack_dir,
             "presets",
         )?);
-        emit_scan("kubejs", 6);
+        emit_scan("launch-presets", 6);
+        prism::load_launch_preset_config(&pack_dir)?;
+        items.extend(scan_repo_status_dir(
+            PublishCategory::LaunchPresets,
+            &pack_dir,
+            "launch_presets",
+        )?);
+        emit_scan("kubejs", 7);
         items.extend(scan_tree_dir(
             PublishCategory::Kubejs,
             &instance_dir_for_scan.join("kubejs"),
             &pack_dir.join("kubejs"),
         )?);
-        emit_scan("options", 7);
+        emit_scan("options", 8);
         items.extend(scan_root_files(
             &instance_dir_for_scan,
             &pack_dir,
             &["options.txt"],
         )?);
-        emit_scan("done", 8);
+        emit_scan("done", 9);
 
         let mut seen = HashSet::new();
         items.retain(|item| {

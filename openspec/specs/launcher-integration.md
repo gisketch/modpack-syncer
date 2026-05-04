@@ -17,6 +17,10 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 11. Launching from pack detail MUST show preset selection before launcher options unless the user has chosen Don't Show Again for that pack. The preset selection MUST present Pack Default, Don't Override Settings, and pack presets as selectable expanded cards. The selected card MUST show description, disabled mods when present, and shader selected when present in preset Iris settings. If preset Iris settings set `enableShaders=false`, the card MUST show shaders disabled instead of the selected shader filename.
 12. Launch MUST apply the selected preset before invoking Prism. Pack Default MUST apply pack baseline options and shader settings. Don't Override Settings MUST skip preset option keys, preset file overrides, and preset-disabled mods.
 13. Pack detail MUST expose a Presets button for all users so preset selection remains available when the launch preset step is hidden.
+14. Pack repos MUST define launch defaults and quick launch profiles under `launch_presets/*.json`; `launch_presets/default.json` is the source for the default local launch profile when the user has no saved override and MUST define `memoryRange`.
+15. Launch setup MUST load memory profile cards, memory slider bounds, memory slider step, and default JVM arguments from pack-owned launch preset files instead of frontend constants.
+16. New local pack creation MUST generate `launch_presets/default.json` and companion quick memory profiles using the current baseline launch values so pack owners can edit them in git.
+17. If an existing pack has no launch preset files, the app MUST generate the default launch preset files in the pack working tree so the pack owner can publish them.
 
 ## UI Requirements
 

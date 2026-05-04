@@ -9,6 +9,7 @@ use super::{CommandError, ManifestArtifactCategory};
 use crate::{manifest, paths, prism};
 
 pub type LaunchProfile = prism::LaunchProfile;
+pub type LaunchPresetConfig = prism::LaunchPresetConfig;
 pub type InstalledJavaRuntime = prism::InstalledJavaRuntime;
 pub type JavaInstallProgress = prism::JavaInstallProgress;
 pub type ManagedPrismInstall = prism::ManagedPrismInstall;
@@ -81,7 +82,17 @@ pub async fn get_prism_account_status() -> Result<PrismAccountStatus, CommandErr
 
 #[tauri::command]
 pub async fn get_launch_profile(pack_id: String) -> Result<LaunchProfile, CommandError> {
-    tokio::task::spawn_blocking(move || prism::load_launch_profile(&pack_id))
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    tokio::task::spawn_blocking(move || prism::load_launch_profile(&pack_id, &pack_dir))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_launch_preset_config(pack_id: String) -> Result<LaunchPresetConfig, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    tokio::task::spawn_blocking(move || prism::load_launch_preset_config(&pack_dir))
         .await
         .map_err(|e| CommandError::Other(e.to_string()))?
         .map_err(CommandError::from)
@@ -172,9 +183,9 @@ pub async fn launch_pack(
     instance_name: Option<String>,
     option_preset_id: Option<String>,
 ) -> Result<(), CommandError> {
-    let launch_profile = prism::load_launch_profile(&pack_id)?;
-    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let pack_dir = paths::packs_dir()?.join(&pack_id);
+    let launch_profile = prism::load_launch_profile(&pack_id, &pack_dir)?;
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let option_preset_selection =
         resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     tokio::task::spawn_blocking(move || -> Result<(), CommandError> {

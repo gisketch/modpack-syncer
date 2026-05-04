@@ -20,7 +20,7 @@ Tauri 2 desktop app with React 19, TypeScript, Vite, Tailwind v4, Zustand, TanSt
 
 ## Problem
 
-Custom Minecraft packs drift when players pass files around manually. The app keeps mods, configs, KubeJS, resource packs, shader packs, profiles, and selected options aligned from a GitHub pack repo into Prism instances.
+Custom Minecraft packs drift when players pass files around manually. The app keeps mods, configs, KubeJS, resource packs, shader packs, profiles, and selected options aligned from a Git pack repo into Prism instances. Packs can start as GitHub clones or local-only git repos that are pushed later.
 
 ## First Useful Version
 
@@ -39,7 +39,7 @@ Users can add a GitHub pack, sync verified artifacts into a Prism instance, revi
 
 - Package manager: Bun.
 - Runtime: Tauri 2 shell, Rust backend, React frontend.
-- Data: GitHub pack repo for text/source of truth; Modrinth/CurseForge/upstream URLs for artifacts; local SQLite for client state/cache metadata.
+- Data: Git pack repo for text/source of truth; remote origin is optional for local authoring packs. Modrinth/CurseForge/upstream URLs for artifacts; local SQLite for client state/cache metadata.
 - Security: manifest URL allowlist, no Microsoft credential handling, GitHub PAT in OS keychain.
 - Performance: bounded parallel downloads, cache reuse, update deltas instead of full rewrites.
 - Token budget:

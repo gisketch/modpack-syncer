@@ -40,6 +40,7 @@ export type PackSummary = {
   url: string;
   path: string;
   head_sha: string;
+  is_local: boolean;
 };
 
 export type PackTransferProgressEvent = {
@@ -64,6 +65,7 @@ export type PublishCategory =
   | "shaderpacks"
   | "shader-settings"
   | "option-presets"
+  | "launch-presets"
   | "config"
   | "kubejs"
   | "root";
@@ -378,6 +380,24 @@ export type LaunchProfile = {
   showConsole?: boolean;
 };
 
+export type LaunchPreset = {
+  id: string;
+  label: string;
+  description: string;
+  minMemoryMb: number;
+  maxMemoryMb: number;
+  extraJvmArgs: string;
+  autoJava: boolean;
+};
+
+export type LaunchPresetConfig = {
+  presets: LaunchPreset[];
+  defaultPresetId: string;
+  memoryMinMb: number;
+  memoryMaxMb: number;
+  memoryStepMb: number;
+};
+
 export type InstanceWriteReport = {
   instance_dir: string;
   mods_written: number;
@@ -440,6 +460,8 @@ export const tauri = {
   setInstallDirectory: (defaultDir?: string | null) =>
     invoke<InstallDirectorySettings>("set_install_directory", { defaultDir }),
   addPack: (url: string) => invoke<PackSummary>("add_pack", { url }),
+  createLocalPack: (name: string, mcVersion: string, loader: Loader, loaderVersion: string) =>
+    invoke<PackSummary>("create_local_pack", { name, mcVersion, loader, loaderVersion }),
   listPacks: () => invoke<PackSummary[]>("list_packs"),
   updatePack: (packId: string) => invoke<PackSummary>("update_pack", { packId }),
   refreshPackForAction: (packId: string) =>
@@ -489,6 +511,8 @@ export const tauri = {
   detectPrism: () => invoke<PrismLocation | null>("detect_prism"),
   getPrismAccountStatus: () => invoke<PrismAccountStatus>("get_prism_account_status"),
   getLaunchProfile: (packId: string) => invoke<LaunchProfile>("get_launch_profile", { packId }),
+  getLaunchPresetConfig: (packId: string) =>
+    invoke<LaunchPresetConfig>("get_launch_preset_config", { packId }),
   hasManagedJava: (major: number) => invoke<boolean>("has_managed_java", { major }),
   clearOnboardingSettings: (major: number) =>
     invoke<PrismSettings>("clear_onboarding_settings", { major }),

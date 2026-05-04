@@ -42,6 +42,8 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 36. Pack detail MUST provide a Fresh Sync action that deletes the Prism instance folder, clears local disabled artifact state for that pack, and syncs a clean instance from source after destructive confirmation.
 37. Pressing Sync or Launch MUST first refresh the pack from origin and wait for refreshed pack data before opening sync review or launch flow. If the refreshed pack head differs from the last synced commit, Launch MUST show a blocking update-available dialog that leads to sync and MUST NOT open preset selection or launch setup.
 38. Action-triggered refresh MAY skip checkout/clean work when the fetched remote head is already the local head. Manual Fetch MUST still perform the full pack alignment cleanup.
+39. Pack creation MAY initialize a local-only pack repository with a starter `manifest.json`, an initial commit, and no `origin` remote.
+40. Pack fetch and action-triggered refresh MUST treat local-only pack repositories with no `origin` remote as already current instead of failing.
 
 ## See
 

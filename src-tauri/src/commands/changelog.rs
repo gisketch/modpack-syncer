@@ -260,6 +260,9 @@ fn changelog_tree_category(path: &str) -> Option<PublishCategory> {
     if path.starts_with("presets/") {
         return Some(PublishCategory::OptionPresets);
     }
+    if path.starts_with("launch_presets/") {
+        return Some(PublishCategory::LaunchPresets);
+    }
     if path.starts_with("kubejs/") {
         return Some(PublishCategory::Kubejs);
     }
@@ -321,9 +324,10 @@ fn category_rank(category: &PublishCategory) -> u8 {
         PublishCategory::Shaderpacks => 2,
         PublishCategory::ShaderSettings => 3,
         PublishCategory::OptionPresets => 4,
-        PublishCategory::Config => 5,
-        PublishCategory::Kubejs => 6,
-        PublishCategory::Root => 7,
+        PublishCategory::LaunchPresets => 5,
+        PublishCategory::Config => 6,
+        PublishCategory::Kubejs => 7,
+        PublishCategory::Root => 8,
     }
 }
 
@@ -343,8 +347,9 @@ fn category_from_rank(rank: u8) -> PublishCategory {
         2 => PublishCategory::Shaderpacks,
         3 => PublishCategory::ShaderSettings,
         4 => PublishCategory::OptionPresets,
-        5 => PublishCategory::Config,
-        6 => PublishCategory::Kubejs,
+        5 => PublishCategory::LaunchPresets,
+        6 => PublishCategory::Config,
+        7 => PublishCategory::Kubejs,
         _ => PublishCategory::Root,
     }
 }

@@ -49,6 +49,23 @@ pub enum GitError {
     CorruptDirty(String),
 }
 
+pub fn init_local_repo(repo_dir: &Path, message: &str) -> Result<String, GitError> {
+    std::fs::create_dir_all(repo_dir)?;
+    let repo = Repository::init(repo_dir)?;
+    repo.set_head("refs/heads/main")?;
+
+    let mut index = repo.index()?;
+    index.add_all(["*"], IndexAddOption::DEFAULT, None)?;
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let signature = repo
+        .signature()
+        .or_else(|_| Signature::now("modsync", "modsync@local"))?;
+    let commit = repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[])?;
+    Ok(commit.to_string())
+}
+
 /// Clone a public pack repo to `dest`. If `dest` already contains a git repo,
 /// fetches and aligns the current branch to the fetched remote head.
 pub fn clone_or_update_with_progress<P>(
@@ -86,6 +103,11 @@ pub fn update_with_progress<P>(repo_dir: &Path, mut on_progress: P) -> Result<St
 where
     P: FnMut(GitTransferProgress),
 {
+    if !has_origin(repo_dir)? {
+        let head = head_sha(repo_dir)?;
+        on_progress(done_transfer_progress());
+        return Ok(head);
+    }
     match fetch_and_ff(repo_dir, &mut on_progress, true) {
         Ok(head) => Ok(head),
         Err(GitError::Git(err)) if is_missing_object_error(&err) => recover_broken_clone(repo_dir),
@@ -100,10 +122,25 @@ pub fn update_if_changed_with_progress<P>(
 where
     P: FnMut(GitTransferProgress),
 {
+    if !has_origin(repo_dir)? {
+        let head = head_sha(repo_dir)?;
+        on_progress(done_transfer_progress());
+        return Ok(head);
+    }
     match fetch_and_ff(repo_dir, &mut on_progress, false) {
         Ok(head) => Ok(head),
         Err(GitError::Git(err)) if is_missing_object_error(&err) => recover_broken_clone(repo_dir),
         Err(err) => Err(err),
+    }
+}
+
+fn done_transfer_progress() -> GitTransferProgress {
+    GitTransferProgress {
+        stage: "done",
+        received_objects: 0,
+        total_objects: 0,
+        indexed_objects: 0,
+        received_bytes: 0,
     }
 }
 
@@ -197,6 +234,18 @@ pub fn head_sha(repo_dir: &Path) -> Result<String, GitError> {
     let repo = Repository::open(repo_dir)?;
     let head = repo.head()?.peel_to_commit()?;
     Ok(head.id().to_string())
+}
+
+pub fn origin_url(repo_dir: &Path) -> Result<Option<String>, GitError> {
+    let repo = Repository::open(repo_dir)?;
+    Ok(repo
+        .find_remote("origin")
+        .ok()
+        .and_then(|remote| remote.url().map(str::to_owned)))
+}
+
+pub fn has_origin(repo_dir: &Path) -> Result<bool, GitError> {
+    Ok(origin_url(repo_dir)?.is_some())
 }
 
 pub fn commit_and_push_with_filter<F>(
@@ -573,4 +622,30 @@ fn ssh_push_url(origin_url: &str) -> Option<String> {
         return None;
     }
     Some(format!("ssh://git@{host}/{path}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_repo_without_origin_updates_as_current() {
+        let repo_dir = std::env::temp_dir().join(format!(
+            "modsync-local-repo-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&repo_dir).expect("create temp repo dir");
+        std::fs::write(repo_dir.join("manifest.json"), "{}").expect("write manifest");
+
+        let head = init_local_repo(&repo_dir, "Initial local pack").expect("init local repo");
+        assert_eq!(origin_url(&repo_dir).expect("read origin"), None);
+        let updated =
+            update_if_changed_with_progress(&repo_dir, |_| {}).expect("update local repo");
+        assert_eq!(updated, head);
+
+        let _ = std::fs::remove_dir_all(repo_dir);
+    }
 }

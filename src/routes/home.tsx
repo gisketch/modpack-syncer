@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Boxes, ChevronRight, FolderGit2, Loader2, Package, Plus } from "lucide-react";
+import { Boxes, ChevronRight, FolderGit2, FolderPlus, Loader2, Package, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PackIcon } from "@/components/pack-icon";
@@ -9,9 +9,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatError } from "@/lib/format-error";
-import { type PackSummary, type PackTransferProgressEvent, tauri } from "@/lib/tauri";
+import { type Loader, type PackSummary, type PackTransferProgressEvent, tauri } from "@/lib/tauri";
 import { useNav } from "@/stores/nav-store";
+
+const LOADER_DEFAULTS: Record<Loader, string> = {
+  neoforge: "21.1.77",
+  fabric: "0.16.10",
+  forge: "52.0.0",
+  quilt: "0.28.0",
+};
 
 export function HomeRoute() {
   const qc = useQueryClient();
@@ -26,7 +40,12 @@ export function HomeRoute() {
   });
 
   const [url, setUrl] = useState("");
+  const [localPackName, setLocalPackName] = useState("Local Pack");
+  const [localMcVersion, setLocalMcVersion] = useState("1.21.1");
+  const [localLoader, setLocalLoader] = useState<Loader>("neoforge");
+  const [localLoaderVersion, setLocalLoaderVersion] = useState(LOADER_DEFAULTS.neoforge);
   const [error, setError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [cloneProgress, setCloneProgress] = useState<PackTransferProgressEvent | null>(null);
   const [cloneRate, setCloneRate] = useState<number | null>(null);
   const cloneRateRef = useRef<{ bytes: number; at: number } | null>(null);
@@ -63,6 +82,7 @@ export function HomeRoute() {
     mutationFn: (u: string) => tauri.addPack(u),
     onMutate: () => {
       setError(null);
+      setLocalError(null);
       setCloneProgress(null);
       setCloneRate(null);
       cloneRateRef.current = null;
@@ -77,6 +97,29 @@ export function HomeRoute() {
       const msg = formatError(e);
       setError(msg);
       toast.error("Clone failed", { description: msg });
+    },
+  });
+
+  const createLocalPack = useMutation({
+    mutationFn: () =>
+      tauri.createLocalPack(
+        localPackName.trim() || "Local Pack",
+        localMcVersion.trim(),
+        localLoader,
+        localLoaderVersion.trim(),
+      ),
+    onMutate: () => {
+      setError(null);
+      setLocalError(null);
+    },
+    onSuccess: async (pack) => {
+      toast.success("Local pack created", { description: pack.id });
+      await qc.invalidateQueries({ queryKey: ["packs"] });
+    },
+    onError: (e: unknown) => {
+      const msg = formatError(e);
+      setLocalError(msg);
+      toast.error("Local pack failed", { description: msg });
     },
   });
 
@@ -108,24 +151,80 @@ export function HomeRoute() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (url.trim()) addPack.mutate(url.trim());
-            }}
-          >
-            <Input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://github.com/gisketch/s_modpack_syncer-pack.git"
-              disabled={addPack.isPending}
-            />
-            <Button type="submit" disabled={addPack.isPending || !url.trim()}>
-              {addPack.isPending ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
-              CLONE
-            </Button>
-          </form>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)]">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (url.trim()) addPack.mutate(url.trim());
+              }}
+            >
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://github.com/gisketch/s_modpack_syncer-pack.git"
+                disabled={addPack.isPending}
+              />
+              <Button type="submit" disabled={addPack.isPending || !url.trim()}>
+                {addPack.isPending ? <Loader2 className="animate-spin" /> : <FolderGit2 />}
+                CLONE
+              </Button>
+            </form>
+            <form
+              className="grid gap-2 md:grid-cols-[minmax(160px,1fr)_120px_132px_120px_auto]"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createLocalPack.mutate();
+              }}
+            >
+              <Input
+                value={localPackName}
+                onChange={(e) => setLocalPackName(e.target.value)}
+                placeholder="Local Pack"
+                disabled={createLocalPack.isPending}
+              />
+              <Input
+                value={localMcVersion}
+                onChange={(e) => setLocalMcVersion(e.target.value)}
+                placeholder="1.21.1"
+                disabled={createLocalPack.isPending}
+              />
+              <Select
+                value={localLoader}
+                onValueChange={(value) => {
+                  const nextLoader = value as Loader;
+                  setLocalLoader(nextLoader);
+                  setLocalLoaderVersion(LOADER_DEFAULTS[nextLoader]);
+                }}
+                disabled={createLocalPack.isPending}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="neoforge">NEOFORGE</SelectItem>
+                  <SelectItem value="fabric">FABRIC</SelectItem>
+                  <SelectItem value="forge">FORGE</SelectItem>
+                  <SelectItem value="quilt">QUILT</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                value={localLoaderVersion}
+                onChange={(e) => setLocalLoaderVersion(e.target.value)}
+                placeholder={LOADER_DEFAULTS[localLoader]}
+                disabled={createLocalPack.isPending}
+              />
+              <Button
+                type="submit"
+                disabled={
+                  createLocalPack.isPending || !localMcVersion.trim() || !localLoaderVersion.trim()
+                }
+              >
+                {createLocalPack.isPending ? <Loader2 className="animate-spin" /> : <FolderPlus />}
+                LOCAL
+              </Button>
+            </form>
+          </div>
           {addPack.isPending || cloneProgress ? (
             <CloneProgress progress={cloneProgress} rate={cloneRate} pending={addPack.isPending} />
           ) : null}
@@ -133,6 +232,12 @@ export function HomeRoute() {
             <Alert variant="destructive" className="mt-3">
               <AlertTitle>Clone failed</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {localError && (
+            <Alert variant="destructive" className="mt-3">
+              <AlertTitle>Local pack failed</AlertTitle>
+              <AlertDescription>{localError}</AlertDescription>
             </Alert>
           )}
         </CardContent>
@@ -144,7 +249,7 @@ export function HomeRoute() {
         </h2>
         {packs.isLoading && <p className="cp-tactical-label text-[--text-low] text-xs">LOADING</p>}
         {packs.data && packs.data.length === 0 && (
-          <p className="text-sm text-[--text-low]">No packs yet. Clone one above.</p>
+          <p className="text-sm text-[--text-low]">No packs yet. Clone or create one above.</p>
         )}
         <div className="flex flex-col gap-3">
           {packs.data?.map((p) => (
@@ -258,10 +363,11 @@ function PackCard({ pack }: { pack: PackSummary }) {
               {manifest.data?.pack.name ?? pack.id}
             </p>
             <p className="truncate font-mono text-[--text-low] text-xs">
-              {pack.head_sha.slice(0, 10)} · {pack.path}
+              {pack.is_local ? "local" : pack.head_sha.slice(0, 10)} · {pack.path}
             </p>
             {manifest.data && (
               <div className="mt-2 flex flex-wrap gap-2">
+                {pack.is_local && <Badge variant="secondary">LOCAL</Badge>}
                 <Badge variant="outline">v{manifest.data.pack.version}</Badge>
                 <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
                 <Badge variant="outline">{manifest.data.pack.loader.toUpperCase()}</Badge>

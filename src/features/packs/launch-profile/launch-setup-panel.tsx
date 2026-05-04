@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import type { LaunchProfile, Loader } from "@/lib/tauri";
+import type { LaunchPreset, LaunchProfile, Loader } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 export type JavaInstallChoice = {
@@ -28,6 +28,10 @@ export type JavaInstallChoice = {
 type LaunchSetupPanelProps = {
   packName: string;
   profile: LaunchProfile;
+  presets: LaunchPreset[];
+  memoryMinMb: number;
+  memoryMaxMb: number;
+  memoryStepMb: number;
   packSynced: boolean;
   launchRiskCount: number;
   onChange: (profile: LaunchProfile) => void;
@@ -39,6 +43,10 @@ type LaunchSetupPanelProps = {
 export function LaunchSetupPanel({
   packName,
   profile,
+  presets,
+  memoryMinMb,
+  memoryMaxMb,
+  memoryStepMb,
   packSynced,
   launchRiskCount,
   onChange,
@@ -48,11 +56,6 @@ export function LaunchSetupPanel({
 }: LaunchSetupPanelProps) {
   const sliderValue = [profile.maxMemoryMb];
   const packValue = packSynced ? "SYNCED" : `${launchRiskCount} RISKS`;
-  const presets = [
-    { label: "LOW", detail: "4 GB / safe baseline", minMemoryMb: 2048, maxMemoryMb: 4096 },
-    { label: "MED", detail: "6 GB / default play", minMemoryMb: 3072, maxMemoryMb: 6144 },
-    { label: "HIGH", detail: "8 GB / heavy packs", minMemoryMb: 4096, maxMemoryMb: 8192 },
-  ];
 
   return (
     <div className="flex flex-col gap-4">
@@ -106,44 +109,55 @@ export function LaunchSetupPanel({
             <div>
               <Label>PRESETS</Label>
               <p className="mt-1 text-xs text-text-low">
-                Quick memory profiles for common pack sizes.
+                Pack-owned profiles from <span className="font-mono">launch_presets/</span>.
               </p>
             </div>
-            <div className="grid gap-2">
-              {presets.map((preset) => {
-                const active =
-                  profile.maxMemoryMb === preset.maxMemoryMb &&
-                  profile.minMemoryMb === preset.minMemoryMb;
+            {presets.length > 0 ? (
+              <div className="grid gap-2">
+                {presets.map((preset) => {
+                  const active =
+                    profile.maxMemoryMb === preset.maxMemoryMb &&
+                    profile.minMemoryMb === preset.minMemoryMb &&
+                    profile.extraJvmArgs === preset.extraJvmArgs &&
+                    profile.autoJava === preset.autoJava;
 
-                return (
-                  <button
-                    key={preset.label}
-                    type="button"
-                    onClick={() =>
-                      onChange({
-                        ...profile,
-                        minMemoryMb: preset.minMemoryMb,
-                        maxMemoryMb: preset.maxMemoryMb,
-                      })
-                    }
-                    className={cn(
-                      "flex items-center justify-between border px-3 py-2 text-left transition-colors",
-                      active
-                        ? "border-brand-core bg-brand-core/10 text-brand-core"
-                        : "border-line-soft/20 bg-surface/70 text-text-high hover:border-brand-core/40 hover:bg-brand-core/5",
-                    )}
-                  >
-                    <div>
-                      <p className="text-xs font-semibold tracking-[0.18em]">{preset.label}</p>
-                      <p className="text-[11px] text-text-low">{preset.detail}</p>
-                    </div>
-                    <span className="font-mono text-xs">
-                      {Math.round(preset.maxMemoryMb / 1024)}G
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        onChange({
+                          ...profile,
+                          minMemoryMb: preset.minMemoryMb,
+                          maxMemoryMb: preset.maxMemoryMb,
+                          extraJvmArgs: preset.extraJvmArgs,
+                          autoJava: preset.autoJava,
+                          javaPath: preset.autoJava ? null : profile.javaPath,
+                        })
+                      }
+                      className={cn(
+                        "flex items-center justify-between border px-3 py-2 text-left transition-colors",
+                        active
+                          ? "border-brand-core bg-brand-core/10 text-brand-core"
+                          : "border-line-soft/20 bg-surface/70 text-text-high hover:border-brand-core/40 hover:bg-brand-core/5",
+                      )}
+                    >
+                      <div>
+                        <p className="text-xs font-semibold tracking-[0.18em]">{preset.label}</p>
+                        <p className="text-[11px] text-text-low">{preset.description}</p>
+                      </div>
+                      <span className="font-mono text-xs tabular-nums">
+                        {Math.round(preset.maxMemoryMb / 1024)}G
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="border border-line-soft/20 bg-surface/70 px-3 py-3 text-xs text-text-low">
+                No launch presets found.
+              </div>
+            )}
           </div>
 
           <div className="grid gap-5">
@@ -154,9 +168,9 @@ export function LaunchSetupPanel({
               </div>
               <Slider
                 value={sliderValue}
-                min={2048}
-                max={16384}
-                step={256}
+                min={memoryMinMb}
+                max={memoryMaxMb}
+                step={memoryStepMb}
                 onValueChange={(value) => {
                   const nextValue = Array.isArray(value) ? value[0] : value;
                   const maxMemoryMb = nextValue ?? profile.maxMemoryMb;

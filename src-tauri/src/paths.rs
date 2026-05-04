@@ -166,3 +166,31 @@ pub fn pack_id_from_url(url: &str) -> String {
         })
         .collect()
 }
+
+/// Derive a filesystem-safe pack id from a human pack name.
+pub fn pack_id_from_name(name: &str) -> String {
+    let raw = name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c
+            } else if c == '-' || c == '_' || c.is_ascii_whitespace() {
+                '-'
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let slug = raw
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        "local-pack".to_string()
+    } else {
+        slug
+    }
+}

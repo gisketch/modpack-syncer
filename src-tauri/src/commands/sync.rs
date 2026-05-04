@@ -136,7 +136,7 @@ pub async fn sync_instance(
         &sync_shaderpacks,
         shaderpack_fallback_dir.as_deref(),
     )?;
-    let launch_profile = prism::load_launch_profile(&pack_id)?;
+    let launch_profile = prism::load_launch_profile(&pack_id, &pack_dir)?;
 
     let _ = app.emit(
         "sync-progress",

@@ -37,6 +37,7 @@ pub enum PublishCategory {
     Shaderpacks,
     ShaderSettings,
     OptionPresets,
+    LaunchPresets,
     Config,
     Kubejs,
     Root,

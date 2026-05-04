@@ -62,14 +62,53 @@ pub struct LaunchProfile {
 
 pub const DEFAULT_EXTRA_JVM_ARGS: &str = "-XX:+UseZGC -XX:+ZGenerational -XX:+UseStringDeduplication -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:+ParallelRefProcEnabled -XX:+PerfDisableSharedMem -Dfile.encoding=UTF-8";
 
-impl Default for LaunchProfile {
-    fn default() -> Self {
-        Self {
-            min_memory_mb: 512,
-            max_memory_mb: 8192,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchPreset {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    pub min_memory_mb: u32,
+    pub max_memory_mb: u32,
+    #[serde(default)]
+    pub extra_jvm_args: String,
+    #[serde(default = "default_true")]
+    pub auto_java: bool,
+    #[serde(default)]
+    pub memory_range: Option<LaunchMemoryRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchMemoryRange {
+    pub min_mb: u32,
+    pub max_mb: u32,
+    pub step_mb: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchPresetConfig {
+    pub presets: Vec<LaunchPreset>,
+    pub default_preset_id: String,
+    pub memory_min_mb: u32,
+    pub memory_max_mb: u32,
+    pub memory_step_mb: u32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl LaunchPreset {
+    fn to_launch_profile(&self) -> LaunchProfile {
+        LaunchProfile {
+            min_memory_mb: self.min_memory_mb,
+            max_memory_mb: self.max_memory_mb,
             java_path: None,
-            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
-            auto_java: true,
+            extra_jvm_args: self.extra_jvm_args.clone(),
+            auto_java: self.auto_java,
         }
     }
 }
@@ -141,17 +180,18 @@ pub fn save_settings(settings: PrismSettings) -> Result<PrismSettings, PrismErro
     Ok(settings)
 }
 
-pub fn load_launch_profile(pack_id: &str) -> Result<LaunchProfile, PrismError> {
+pub fn load_launch_profile(pack_id: &str, pack_dir: &Path) -> Result<LaunchProfile, PrismError> {
     let path = paths::launch_profile_path(pack_id)?;
     if !path.exists() {
-        return Ok(LaunchProfile::default());
+        return Ok(load_launch_preset_config(pack_dir)?
+            .presets
+            .into_iter()
+            .find(|preset| preset.id == "default")
+            .ok_or_else(|| anyhow::anyhow!("launch_presets/default.json is required"))?
+            .to_launch_profile());
     }
     let bytes = std::fs::read(path)?;
-    let mut profile =
-        serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
-    if profile.extra_jvm_args.trim().is_empty() {
-        profile.extra_jvm_args = DEFAULT_EXTRA_JVM_ARGS.to_string();
-    }
+    let profile = serde_json::from_slice::<LaunchProfile>(&bytes).map_err(anyhow::Error::from)?;
     Ok(profile)
 }
 
@@ -163,6 +203,163 @@ pub fn save_launch_profile(
     let bytes = serde_json::to_vec_pretty(profile).map_err(anyhow::Error::from)?;
     std::fs::write(path, bytes)?;
     Ok(profile.clone())
+}
+
+pub fn load_launch_preset_config(pack_dir: &Path) -> Result<LaunchPresetConfig, PrismError> {
+    ensure_default_launch_presets(pack_dir)?;
+    let mut presets = load_launch_presets(pack_dir)?;
+    presets.sort_by(|left, right| {
+        if left.id == "default" {
+            std::cmp::Ordering::Less
+        } else if right.id == "default" {
+            std::cmp::Ordering::Greater
+        } else {
+            left.label.cmp(&right.label)
+        }
+    });
+    let default_preset = presets
+        .iter()
+        .find(|preset| preset.id == "default")
+        .ok_or_else(|| anyhow::anyhow!("launch_presets/default.json is required"))?;
+    let memory_range = default_preset
+        .memory_range
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("launch_presets/default.json must define memoryRange"))?;
+    Ok(LaunchPresetConfig {
+        presets,
+        default_preset_id: "default".to_string(),
+        memory_min_mb: memory_range.min_mb,
+        memory_max_mb: memory_range.max_mb,
+        memory_step_mb: memory_range.step_mb.max(1),
+    })
+}
+
+fn load_launch_presets(pack_dir: &Path) -> Result<Vec<LaunchPreset>, PrismError> {
+    let presets_dir = pack_dir.join("launch_presets");
+    if !presets_dir.exists() {
+        return Err(anyhow::anyhow!("launch_presets/default.json is required").into());
+    }
+    let mut presets = Vec::new();
+    for entry in std::fs::read_dir(&presets_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = std::fs::read(&path)?;
+        let preset = serde_json::from_slice::<LaunchPreset>(&bytes).map_err(|error| {
+            anyhow::anyhow!("failed to parse launch preset {}: {error}", path.display())
+        })?;
+        validate_launch_preset(&preset, &path)?;
+        presets.push(preset);
+    }
+    Ok(presets)
+}
+
+fn validate_launch_preset(preset: &LaunchPreset, path: &Path) -> Result<(), PrismError> {
+    if preset.id.trim().is_empty()
+        || !preset
+            .id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(anyhow::anyhow!("invalid launch preset id in {}", path.display()).into());
+    }
+    if preset.label.trim().is_empty() {
+        return Err(
+            anyhow::anyhow!("launch preset label is required in {}", path.display()).into(),
+        );
+    }
+    if preset.min_memory_mb == 0 || preset.max_memory_mb == 0 {
+        return Err(anyhow::anyhow!(
+            "launch preset memory must be greater than zero in {}",
+            path.display()
+        )
+        .into());
+    }
+    if preset.id == "default" {
+        let Some(range) = preset.memory_range.as_ref() else {
+            return Err(
+                anyhow::anyhow!("launch_presets/default.json must define memoryRange").into(),
+            );
+        };
+        if range.min_mb == 0 || range.max_mb < range.min_mb || range.step_mb == 0 {
+            return Err(anyhow::anyhow!(
+                "launch preset memoryRange is invalid in {}",
+                path.display()
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+pub fn write_default_launch_presets(pack_dir: &Path) -> Result<(), PrismError> {
+    ensure_default_launch_presets(pack_dir)
+}
+
+fn ensure_default_launch_presets(pack_dir: &Path) -> Result<(), PrismError> {
+    let presets_dir = pack_dir.join("launch_presets");
+    std::fs::create_dir_all(&presets_dir)?;
+    let presets = default_launch_presets();
+    for preset in presets {
+        let path = presets_dir.join(format!("{}.json", preset.id));
+        if path.exists() {
+            continue;
+        }
+        let bytes = serde_json::to_vec_pretty(&preset).map_err(anyhow::Error::from)?;
+        std::fs::write(path, bytes)?;
+    }
+    Ok(())
+}
+
+fn default_launch_presets() -> Vec<LaunchPreset> {
+    vec![
+        LaunchPreset {
+            id: "default".to_string(),
+            label: "DEFAULT".to_string(),
+            description: "8 GB / current default".to_string(),
+            min_memory_mb: 512,
+            max_memory_mb: 8192,
+            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
+            auto_java: true,
+            memory_range: Some(LaunchMemoryRange {
+                min_mb: 2048,
+                max_mb: 16384,
+                step_mb: 256,
+            }),
+        },
+        LaunchPreset {
+            id: "low".to_string(),
+            label: "LOW".to_string(),
+            description: "4 GB / safe baseline".to_string(),
+            min_memory_mb: 2048,
+            max_memory_mb: 4096,
+            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
+            auto_java: true,
+            memory_range: None,
+        },
+        LaunchPreset {
+            id: "medium".to_string(),
+            label: "MED".to_string(),
+            description: "6 GB / default play".to_string(),
+            min_memory_mb: 3072,
+            max_memory_mb: 6144,
+            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
+            auto_java: true,
+            memory_range: None,
+        },
+        LaunchPreset {
+            id: "high".to_string(),
+            label: "HIGH".to_string(),
+            description: "8 GB / heavy packs".to_string(),
+            min_memory_mb: 4096,
+            max_memory_mb: 8192,
+            extra_jvm_args: DEFAULT_EXTRA_JVM_ARGS.to_string(),
+            auto_java: true,
+            memory_range: None,
+        },
+    ]
 }
 
 pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
@@ -734,6 +931,38 @@ fn apply_launch_profile_to_cfg(settings: &mut BTreeMap<String, String>, profile:
         settings.insert("AutomaticJava".to_string(), "false".to_string());
         settings.insert("OverrideJavaLocation".to_string(), "false".to_string());
         settings.remove("JavaPath");
+    }
+}
+
+#[cfg(test)]
+mod launch_preset_tests {
+    use super::*;
+
+    #[test]
+    fn generated_launch_presets_provide_default_profile_and_range() {
+        let pack_dir = std::env::temp_dir().join(format!(
+            "modsync-launch-presets-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&pack_dir).expect("create temp pack dir");
+
+        let config = load_launch_preset_config(&pack_dir).expect("load launch preset config");
+        let default = config
+            .presets
+            .iter()
+            .find(|preset| preset.id == "default")
+            .expect("default preset exists");
+
+        assert_eq!(config.default_preset_id, "default");
+        assert!(pack_dir.join("launch_presets/default.json").exists());
+        assert_eq!(config.memory_max_mb, 16384);
+        assert_eq!(default.max_memory_mb, 8192);
+        assert_eq!(default.extra_jvm_args, DEFAULT_EXTRA_JVM_ARGS);
+
+        let _ = std::fs::remove_dir_all(pack_dir);
     }
 }
 

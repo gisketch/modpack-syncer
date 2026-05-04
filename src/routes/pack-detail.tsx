@@ -358,6 +358,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     queryFn: () => tauri.getLaunchProfile(packId),
     retry: false,
   });
+  const launchPresetConfig = useQuery({
+    queryKey: ["launch-preset-config", packId],
+    queryFn: () => tauri.getLaunchPresetConfig(packId),
+    enabled: !!manifest.data,
+    retry: false,
+  });
   const setOptionsSyncIgnored = useMutation({
     mutationFn: ({ key, ignored }: { key: string; ignored: boolean }) =>
       tauri.setOptionsSyncIgnored(packId, key, ignored),
@@ -522,6 +528,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       stagedArtifactCount > 0 ||
       acceptedModCount !== manifest.data.mods.length);
   const latestPackCommit = pack.data?.head_sha ?? null;
+  const isLocalPack = pack.data?.is_local ?? false;
   const hasSyncedLatestCommit = !!latestPackCommit && lastSyncedCommit === latestPackCommit;
   const needsPackSync = !!latestPackCommit && !hasSyncedLatestCommit;
   const needsSync = needsPackSync || hasLocalArtifactDrift;
@@ -603,6 +610,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       qc.invalidateQueries({ queryKey: ["option-presets", packId] }),
       qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
       qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
+      qc.invalidateQueries({ queryKey: ["launch-profile", packId] }),
+      qc.invalidateQueries({ queryKey: ["launch-preset-config", packId] }),
     ]);
   }
 
@@ -1224,6 +1233,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             </h1>
             {manifest.data && (
               <div className="flex flex-wrap gap-2">
+                {isLocalPack && <Badge variant="secondary">LOCAL</Badge>}
                 <Badge>v{manifest.data.pack.version}</Badge>
                 <Badge variant="outline">MC {manifest.data.pack.mcVersion}</Badge>
                 <Badge variant="outline">
@@ -1288,7 +1298,11 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             variant="outline"
             onClick={() => fetchPack.mutate()}
             disabled={
-              fetchPack.isPending || actionRefreshPending || sync.isPending || launch.isPending
+              isLocalPack ||
+              fetchPack.isPending ||
+              actionRefreshPending ||
+              sync.isPending ||
+              launch.isPending
             }
           >
             {fetchPack.isPending || actionRefreshPending ? (
@@ -1296,7 +1310,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             ) : (
               <FolderGit2 />
             )}
-            FETCH
+            {isLocalPack ? "LOCAL" : "FETCH"}
           </Button>
           <Button
             variant={needsSync ? "default" : "secondary"}
@@ -2004,10 +2018,21 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 selectedPresetId={selectedOptionPresetId}
                 onChange={(presetId) => setSelectedOptionPreset(packId, presetId)}
               />
-            ) : launchProfileDraft ? (
+            ) : launchProfile.isError || launchPresetConfig.isError ? (
+              <Alert variant="destructive">
+                <AlertTitle>Launch presets unavailable</AlertTitle>
+                <AlertDescription>
+                  {formatError(launchProfile.error ?? launchPresetConfig.error)}
+                </AlertDescription>
+              </Alert>
+            ) : launchProfileDraft && launchPresetConfig.data ? (
               <LaunchSetupPanel
                 packName={manifest.data?.pack.name ?? packId}
                 profile={launchProfileDraft}
+                presets={launchPresetConfig.data.presets}
+                memoryMinMb={launchPresetConfig.data.memoryMinMb}
+                memoryMaxMb={launchPresetConfig.data.memoryMaxMb}
+                memoryStepMb={launchPresetConfig.data.memoryStepMb}
                 packSynced={!needsSync}
                 launchRiskCount={totalLaunchRiskCount}
                 onChange={setLaunchProfileDraft}

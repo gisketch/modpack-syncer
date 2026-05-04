@@ -355,6 +355,7 @@ type PublishTabDefinition = {
     | "resourcepacks"
     | "shader-settings"
     | "presets"
+    | "launch-presets"
     | "configs"
     | "options"
     | "others";
@@ -399,6 +400,12 @@ function buildPublishTabs(items: PublishScanReport["items"]): PublishTabDefiniti
       label: "PRESETS",
       description: "Pack-owned option preset JSON files.",
       match: (item) => item.category === "option-presets",
+    },
+    {
+      id: "launch-presets",
+      label: "LAUNCH PRESETS",
+      description: "Pack-owned launcher memory, JVM arg, and Java defaults.",
+      match: (item) => item.category === "launch-presets",
     },
     {
       id: "configs",
@@ -471,6 +478,9 @@ function labelCategory(category: PublishCategory, relativePath?: string) {
   }
   if (category === "option-presets") {
     return "PRESETS";
+  }
+  if (category === "launch-presets") {
+    return "LAUNCH PRESETS";
   }
   if (category === "root") {
     return "ROOT";
