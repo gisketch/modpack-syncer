@@ -244,6 +244,10 @@ pub async fn restore_manifest_from_source(
 ) -> Result<manifest::Manifest, CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     tokio::task::spawn_blocking(move || {
+        if !git::has_origin(&pack_dir)? {
+            return manifest::load_from_path(&pack_dir.join("manifest.json"))
+                .map_err(CommandError::from);
+        }
         let source = read_source_manifest(&pack_dir)?;
         write_manifest(&pack_dir.join("manifest.json"), &source)?;
         Ok(source)

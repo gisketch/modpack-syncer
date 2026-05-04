@@ -529,8 +529,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       acceptedModCount !== manifest.data.mods.length);
   const latestPackCommit = pack.data?.head_sha ?? null;
   const isLocalPack = pack.data?.is_local ?? false;
-  const hasSyncedLatestCommit = !!latestPackCommit && lastSyncedCommit === latestPackCommit;
-  const needsPackSync = !!latestPackCommit && !hasSyncedLatestCommit;
+  const hasSyncedLatestCommit =
+    isLocalPack || (!!latestPackCommit && lastSyncedCommit === latestPackCommit);
+  const needsPackSync = !isLocalPack && !!latestPackCommit && !hasSyncedLatestCommit;
   const needsSync = needsPackSync || hasLocalArtifactDrift;
   const alreadySynced = !!manifest.data && hasSyncedLatestCommit && !hasLocalArtifactDrift;
   const syncSummary = buildSyncSummary(artifactPublishScan.data);
@@ -616,6 +617,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   async function refreshPackBeforeAction() {
+    if (isLocalPack) {
+      return pack.data ?? null;
+    }
     setActionRefreshPending(true);
     try {
       const previousHead = pack.data?.head_sha ?? null;
@@ -685,7 +689,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       if (fresh) {
         await tauri.deletePrismInstance(instanceName);
       }
-      await tauri.restoreManifestFromSource(packId);
+      if (!isLocalPack) {
+        await tauri.restoreManifestFromSource(packId);
+      }
       return tauri.syncInstance(
         packId,
         undefined,
@@ -998,6 +1004,10 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   });
 
   async function handleLaunchClick() {
+    if (isLocalPack) {
+      openLaunchFlow();
+      return;
+    }
     const updatedPack = await refreshPackBeforeAction();
     if (!updatedPack) return;
     if (updatedPack.head_sha !== lastSyncedCommit) {
@@ -1078,6 +1088,12 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   }
 
   async function handleSyncClick() {
+    if (isLocalPack) {
+      toast.info("Local packs do not sync", {
+        description: "Launch uses the local Prism instance as-is.",
+      });
+      return;
+    }
     const updatedPack = await refreshPackBeforeAction();
     if (!updatedPack) return;
     openSyncReview();
@@ -1316,6 +1332,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             variant={needsSync ? "default" : "secondary"}
             onClick={() => void handleSyncClick()}
             disabled={
+              isLocalPack ||
               fetchPack.isPending ||
               actionRefreshPending ||
               sync.isPending ||
@@ -1328,12 +1345,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             ) : (
               <RefreshCw />
             )}
-            SYNC
+            {isLocalPack ? "LOCAL" : "SYNC"}
           </Button>
           <Button
             variant="outline"
             onClick={() => setFreshSyncConfirmOpen(true)}
             disabled={
+              isLocalPack ||
               fetchPack.isPending ||
               actionRefreshPending ||
               sync.isPending ||
