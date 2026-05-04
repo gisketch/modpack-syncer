@@ -467,6 +467,9 @@ export const tauri = {
   refreshPackForAction: (packId: string) =>
     invoke<PackSummary>("refresh_pack_for_action", { packId }),
   loadManifest: (packId: string) => invoke<Manifest>("load_manifest", { packId }),
+  listNeoForgeVersions: (packId: string) => invoke<string[]>("list_neoforge_versions", { packId }),
+  updatePackLoaderVersion: (packId: string, loaderVersion: string) =>
+    invoke<Manifest>("update_pack_loader_version", { packId, loaderVersion }),
   loadSourceManifest: (packId: string) => invoke<Manifest>("load_source_manifest", { packId }),
   restoreManifestFromSource: (packId: string) =>
     invoke<Manifest>("restore_manifest_from_source", { packId }),
@@ -657,6 +660,8 @@ export const tauri = {
       version,
       ignorePatterns,
     }),
+  applyLocalStagedArtifacts: (packId: string, instanceName?: string) =>
+    invoke<PublishApplyReport>("apply_local_staged_artifacts", { packId, instanceName }),
   commitAndPushPublish: (
     packId: string,
     message: string,

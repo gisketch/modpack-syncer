@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Rocket,
   Search,
+  Settings,
   SlidersHorizontal,
   Trash2,
   UploadCloudIcon,
@@ -49,7 +50,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -72,6 +72,7 @@ import {
   AddModrinthEntryDialog,
   describeArtifactCategory,
 } from "@/features/packs/modrinth-admin/add-modrinth-entry-dialog";
+import { PackSettingsDialog } from "@/features/packs/pack-settings/pack-settings-dialog";
 import { OptionPresetSelection } from "@/features/packs/presets/option-preset-selection";
 import { PublishPreviewPage } from "@/features/packs/publish-preview/publish-preview-page";
 import {
@@ -179,6 +180,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   );
   const [javaInstallLogs, setJavaInstallLogs] = useState<string[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [packSettingsOpen, setPackSettingsOpen] = useState(false);
   const [presetSelectionOpen, setPresetSelectionOpen] = useState(false);
   const [addEntryDialogOpen, setAddEntryDialogOpen] = useState(false);
   const [addEntryCategory, setAddEntryCategory] = useState<ManifestArtifactCategory>("mods");
@@ -522,6 +524,19 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
       ).length;
   const totalLaunchRiskCount = launchRiskCount + resourcepackRiskCount + shaderpackRiskCount;
+  const instanceUpdateChangeCount = (artifactPublishScan.data?.items ?? []).filter(
+    (item) =>
+      item.action !== "unchanged" &&
+      [
+        "mods",
+        "resourcepacks",
+        "shaderpacks",
+        "config",
+        "kubejs",
+        "root",
+        "shader-settings",
+      ].includes(item.category),
+  ).length;
   const stagedArtifactCount =
     unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
   const javaChoices = getJavaInstallChoices(
@@ -544,8 +559,13 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const hasSyncedLatestCommit =
     isLocalPack || (!!latestPackCommit && lastSyncedCommit === latestPackCommit);
   const needsPackSync = !isLocalPack && !!latestPackCommit && !hasSyncedLatestCommit;
+  const needsInstanceUpdate = isLocalPack && instanceUpdateChangeCount > 0;
   const needsSync = needsPackSync || hasLocalArtifactDrift;
-  const alreadySynced = !!manifest.data && hasSyncedLatestCommit && !hasLocalArtifactDrift;
+  const alreadySynced =
+    !!manifest.data &&
+    hasSyncedLatestCommit &&
+    !hasLocalArtifactDrift &&
+    (!isLocalPack || (!!artifactPublishScan.data && instanceUpdateChangeCount === 0));
   const syncSummary = buildSyncSummary(artifactPublishScan.data);
   const syncReviewTabs = buildSyncReviewTabs(artifactPublishScan.data);
   const syncReviewDefaultTab = syncReviewTabs.find((tab) => tab.count > 0)?.id ?? "mods";
@@ -749,13 +769,20 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         qc.invalidateQueries({ queryKey: ["options-sync-preview", packId] }),
         qc.invalidateQueries({ queryKey: ["shader-settings-preview", packId] }),
       ]);
-      toast.success("Sync complete", {
+      toast.success(isLocalPack ? "Instance updated" : "Sync complete", {
         description: `${r.instance.mods_written} mods · ${r.instance.resourcepacks_written} packs · ${r.instance.overrides_copied} overrides`,
       });
     },
     onError: (e) => {
       setSyncOpen(false);
       toast.error("Sync failed", { description: formatError(e) });
+    },
+  });
+
+  const promoteLocalStagedArtifacts = useMutation({
+    mutationFn: () => tauri.applyLocalStagedArtifacts(packId, instanceName),
+    onError: (error) => {
+      toast.error("Local staged apply failed", { description: formatError(error) });
     },
   });
 
@@ -1101,9 +1128,22 @@ export function PackDetailRoute({ packId }: { packId: string }) {
 
   async function handleSyncClick() {
     if (isLocalPack) {
-      toast.info("Local packs do not sync", {
-        description: "Launch uses the local Prism instance as-is.",
-      });
+      try {
+        const promoted = await promoteLocalStagedArtifacts.mutateAsync();
+        if (promoted.manifestEntriesWritten > 0) {
+          await Promise.all([
+            manifest.refetch(),
+            statuses.refetch(),
+            artifactPublishScan.refetch(),
+          ]);
+          toast.success("Local staged artifacts applied", {
+            description: `${promoted.manifestEntriesWritten} manifest entries`,
+          });
+        }
+      } catch {
+        return;
+      }
+      openSyncReview();
       return;
     }
     const updatedPack = await refreshPackBeforeAction();
@@ -1137,7 +1177,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     setPendingShaderSync(applyShaderSettings);
     setPendingOptionPresetId(PACK_DEFAULT_PRESET_ID);
     setPendingOptionSyncCategories(optionSyncCategories);
-    if (unpublishedMods.length > 0) {
+    if (!isLocalPack && unpublishedMods.length > 0) {
       setSyncDeleteConfirmOpen(true);
       return;
     }
@@ -1198,6 +1238,15 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       await revealItemInDir(instanceDir.data);
     } catch (error) {
       toast.error("Open folder failed", { description: formatError(error) });
+    }
+  }
+
+  async function handleOpenPackRepo() {
+    if (!pack.data?.path) return;
+    try {
+      await revealItemInDir(pack.data.path);
+    } catch (error) {
+      toast.error("Open repo failed", { description: formatError(error) });
     }
   }
 
@@ -1300,6 +1349,28 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           {adminMode && (
             <Button
               variant="outline"
+              onClick={() => void handleOpenPackRepo()}
+              disabled={!pack.data?.path}
+            >
+              <FolderGit2 />
+              OPEN PACK REPO
+            </Button>
+          )}
+          {adminMode && (
+            <Button
+              variant="outline"
+              onClick={() => setPackSettingsOpen(true)}
+              disabled={
+                !manifest.data || sync.isPending || fetchPack.isPending || actionRefreshPending
+              }
+            >
+              <Settings />
+              PACK SETTINGS
+            </Button>
+          )}
+          {adminMode && !isLocalPack && (
+            <Button
+              variant="outline"
               onClick={() => publishScan.mutate()}
               disabled={
                 publishScan.isPending ||
@@ -1341,23 +1412,23 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             {isLocalPack ? "LOCAL" : "FETCH"}
           </Button>
           <Button
-            variant={needsSync ? "default" : "secondary"}
+            variant={needsSync || needsInstanceUpdate ? "default" : "secondary"}
             onClick={() => void handleSyncClick()}
             disabled={
-              isLocalPack ||
               fetchPack.isPending ||
               actionRefreshPending ||
+              promoteLocalStagedArtifacts.isPending ||
               sync.isPending ||
               !manifest.data ||
               !prism.data
             }
           >
-            {sync.isPending || actionRefreshPending ? (
+            {sync.isPending || actionRefreshPending || promoteLocalStagedArtifacts.isPending ? (
               <Loader2 className="animate-spin" />
             ) : (
               <RefreshCw />
             )}
-            {isLocalPack ? "LOCAL" : "SYNC"}
+            {isLocalPack ? "UPDATE INSTANCE" : "SYNC"}
           </Button>
           <Button
             variant="outline"
@@ -1501,8 +1572,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <ScrollArea>
-              <Table>
+            <div className="w-full">
+              <Table scrollable={false}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
@@ -1594,7 +1665,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   ))}
                 </TableBody>
               </Table>
-            </ScrollArea>
+            </div>
             <ArtifactPager
               page={artifactPage.mods}
               totalPages={modPageCount}
@@ -1636,8 +1707,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <ScrollArea>
-              <Table>
+            <div className="w-full">
+              <Table scrollable={false}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
@@ -1730,7 +1801,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   })}
                 </TableBody>
               </Table>
-            </ScrollArea>
+            </div>
             <ArtifactPager
               page={artifactPage.resourcepacks}
               totalPages={resourcepackPageCount}
@@ -1784,8 +1855,8 @@ export function PackDetailRoute({ packId }: { packId: string }) {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            <ScrollArea>
-              <Table>
+            <div className="w-full">
+              <Table scrollable={false}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10" />
@@ -1876,7 +1947,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                   })}
                 </TableBody>
               </Table>
-            </ScrollArea>
+            </div>
             <ArtifactPager
               page={artifactPage.shaderpacks}
               totalPages={shaderpackPageCount}
@@ -1899,6 +1970,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         progress={progress}
         progressView={progressView}
         report={report}
+        actionLabel={isLocalPack ? "UPDATE INSTANCE" : "SYNC"}
       />
 
       <SyncReviewDialog
@@ -1926,6 +1998,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         onNext={handleSyncReviewNext}
         onBack={handleSyncReviewBack}
         onConfirm={handleConfirmSyncFromReview}
+        actionLabel={isLocalPack ? "UPDATE INSTANCE" : "SYNC"}
       />
 
       <AddModrinthEntryDialog
@@ -1933,6 +2006,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         onClose={() => setAddEntryDialogOpen(false)}
         packId={packId}
         category={addEntryCategory}
+      />
+
+      <PackSettingsDialog
+        open={packSettingsOpen}
+        onClose={() => setPackSettingsOpen(false)}
+        packId={packId}
+        manifest={manifest.data ?? null}
+        onSaved={refreshPackQueries}
       />
 
       <Dialog open={presetSelectionOpen} onOpenChange={setPresetSelectionOpen}>

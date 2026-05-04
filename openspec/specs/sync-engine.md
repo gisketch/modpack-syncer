@@ -46,6 +46,8 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 40. Pack fetch and action-triggered refresh MUST treat local-only pack repositories with no `origin` remote as already current instead of failing.
 41. Local-only packs MUST NOT be forced through fetch, sync, or launch-update gates. Restore-from-source MUST preserve the working manifest for local-only packs instead of resetting it from `HEAD`.
 42. Local-only pack artifact status MUST render pack artifacts as local state and MUST NOT produce missing/outdated launch risk counts.
+43. Local-only pack detail MUST expose an `UPDATE INSTANCE` action instead of publish. This action MUST write the Prism instance from the local pack repository through the normal sync pipeline, including remote artifact downloads, repo-backed artifacts, resourcepacks, shaderpacks, configs, kubejs, options, and Prism metadata.
+44. Local-only `UPDATE INSTANCE` MUST promote Builder-staged Modrinth artifacts into the local pack manifest before showing sync review or writing the instance. This promotion MUST NOT run for repo-backed packs and MUST NOT delete manifest entries merely because instance files are missing.
 
 ## See
 

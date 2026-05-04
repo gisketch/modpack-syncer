@@ -56,6 +56,7 @@ type SyncReviewDialogProps = {
   onNext: () => void;
   onBack: () => void;
   onConfirm: () => void;
+  actionLabel?: string;
 };
 
 export function SyncReviewDialog({
@@ -83,6 +84,7 @@ export function SyncReviewDialog({
   onNext,
   onBack,
   onConfirm,
+  actionLabel = "SYNC",
 }: SyncReviewDialogProps) {
   const reduceMotion = useReducedMotion();
   const stepContentKey = step === "artifacts" && artifactLoading ? "artifacts-loading" : step;
@@ -91,8 +93,8 @@ export function SyncReviewDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
         <DialogHeader>
-          <DialogTitle>{syncStepTitle(step)}</DialogTitle>
-          <DialogDescription>{syncStepDescription(step)}</DialogDescription>
+          <DialogTitle>{syncStepTitle(step, actionLabel)}</DialogTitle>
+          <DialogDescription>{syncStepDescription(step, actionLabel)}</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5 xl:p-6">
           <AnimatePresence mode="wait" initial={false}>
@@ -162,7 +164,7 @@ export function SyncReviewDialog({
               </Button>
               <Button onClick={onConfirm} disabled={syncPending}>
                 {syncPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                CONTINUE TO SYNC
+                CONTINUE TO {actionLabel}
               </Button>
             </>
           )}
@@ -172,16 +174,16 @@ export function SyncReviewDialog({
   );
 }
 
-function syncStepTitle(step: SyncReviewStep) {
-  if (step === "artifacts") return "SYNC PREVIEW";
+function syncStepTitle(step: SyncReviewStep, actionLabel: string) {
+  if (step === "artifacts") return `${actionLabel} PREVIEW`;
   return "KEYBINDS / OPTIONS";
 }
 
-function syncStepDescription(step: SyncReviewStep) {
+function syncStepDescription(step: SyncReviewStep, actionLabel: string) {
   if (step === "artifacts") {
     return "Review mods, resourcepacks, and shaderpacks before writing Prism instance.";
   }
-  return "Review option categories before final sync.";
+  return `Review option categories before final ${actionLabel.toLowerCase()}.`;
 }
 
 function SyncArtifactReview({

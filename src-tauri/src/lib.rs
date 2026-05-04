@@ -37,6 +37,8 @@ pub fn run() {
             commands::packs::update_pack,
             commands::packs::refresh_pack_for_action,
             commands::packs::load_manifest,
+            commands::packs::list_neoforge_versions,
+            commands::packs::update_pack_loader_version,
             commands::publish_auth::get_publish_auth_settings,
             commands::publish_auth::set_publish_auth_method,
             commands::publish_auth::save_publish_pat,
@@ -84,6 +86,7 @@ pub fn run() {
             commands::option_presets::load_option_preset_for_edit,
             commands::option_presets::save_option_preset,
             commands::publish::apply_instance_publish,
+            commands::publish::apply_local_staged_artifacts,
             commands::publish::commit_and_push_publish,
         ])
         .run(tauri::generate_context!())

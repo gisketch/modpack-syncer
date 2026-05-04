@@ -458,12 +458,9 @@ pub fn data_dir() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    for candidate in platform_data_candidates() {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    platform_data_candidates()
+        .into_iter()
+        .find(|candidate| candidate.exists())
 }
 
 fn platform_data_candidates() -> Vec<PathBuf> {
@@ -594,16 +591,24 @@ pub fn location() -> Option<PrismLocation> {
     })
 }
 
-/// Path to the `.minecraft/` folder for a given instance.
+/// Path to the Minecraft content folder for a given Prism instance.
 fn dot_minecraft(instance_dir: &Path) -> PathBuf {
+    let portable_dir = instance_dir.join("minecraft");
+    let dotted_dir = instance_dir.join(".minecraft");
+    if portable_dir.exists() {
+        return portable_dir;
+    }
+    if dotted_dir.exists() {
+        return dotted_dir;
+    }
     // Prism uses ".minecraft" on Linux/Windows and "minecraft" on macOS.
     #[cfg(target_os = "macos")]
     {
-        instance_dir.join("minecraft")
+        portable_dir
     }
     #[cfg(not(target_os = "macos"))]
     {
-        instance_dir.join(".minecraft")
+        dotted_dir
     }
 }
 
@@ -683,7 +688,7 @@ pub fn write_instance(
         .map(|entry| ManagedModState {
             id: entry.id.clone(),
             filename: entry.filename.clone(),
-            size: entry.size as u64,
+            size: entry.size,
         })
         .collect::<Vec<_>>();
     std::fs::write(
@@ -986,6 +991,23 @@ mod launch_preset_tests {
         assert_eq!(default.extra_jvm_args, DEFAULT_EXTRA_JVM_ARGS);
 
         let _ = std::fs::remove_dir_all(pack_dir);
+    }
+
+    #[test]
+    fn dot_minecraft_reuses_existing_portable_minecraft_dir() {
+        let instance_dir = std::env::temp_dir().join(format!(
+            "modsync-instance-layout-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(instance_dir.join("minecraft")).expect("create minecraft dir");
+        std::fs::create_dir_all(instance_dir.join(".minecraft")).expect("create dotted dir");
+
+        assert_eq!(dot_minecraft(&instance_dir), instance_dir.join("minecraft"));
+
+        let _ = std::fs::remove_dir_all(instance_dir);
     }
 }
 

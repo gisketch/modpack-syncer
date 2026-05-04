@@ -18,6 +18,7 @@ The manifest is the single source of truth for what a pack contains at a given c
 8. **URL safety** — remote `url` hosts MUST be allowlisted. Current built-in hosts are `cdn.modrinth.com`, `edge.forgecdn.net`, and `mediafilez.forgecdn.net`.
 9. **Resourcepack and shaderpack parity** — resourcepacks and shaderpacks MUST support the same remote Modrinth/CurseForge/URL and repo-source flow as mods. Resourcepack and shaderpack Modrinth version selection MUST NOT require a Minecraft loader match.
 10. **Disabled suffix** — `.disabled` is an instance-local enabled state marker and MUST NOT become part of manifest `filename`, `id`, or `repoPath` identity. Manifest entries MUST use the enabled artifact filename.
+11. **Pack settings** — Admin pack settings MAY update `pack.loaderVersion` in `manifest.json`. The save operation MUST preserve the rest of the manifest and MUST leave Prism to redownload the selected loader after instance metadata is rewritten on update or launch.
 
 ## See
 

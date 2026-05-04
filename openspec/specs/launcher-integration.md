@@ -22,6 +22,8 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 16. New local pack creation MUST generate `launch_presets/default.json` and companion quick memory profiles using the current baseline launch values so pack owners can edit them in git.
 17. If an existing pack has no launch preset files, the app MUST generate the default launch preset files in the pack working tree so the pack owner can publish them.
 18. Launch MUST self-heal missing Prism instance metadata by writing `instance.cfg`, `mmc-pack.json`, and standard Minecraft content directories before spawning Prism.
+19. Instance writes MUST reuse an existing Prism content directory when the instance already has either `minecraft/` or `.minecraft/`, preferring `minecraft/` if both exist. New instances MAY still use the platform default content directory.
+20. NeoForge loader version selection MUST fetch available versions from the NeoForged Maven API and filter them to the pack Minecraft version before saving `pack.loaderVersion`.
 
 ## UI Requirements
 
@@ -31,6 +33,8 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 4. Artifact list rows MUST align status on the right and expose an `ENABLED` checkbox; checked means the instance artifact is active, unchecked means it is renamed with `.disabled`.
 5. Disabled artifact rows MUST be visually muted and struck through. Non-optional mods MUST show a disabled checked `ENABLED` control.
 6. Pack detail artifact table data headers MUST sort their table when clicked and MUST show fixed-size direction icons without changing header layout.
+7. Pack detail artifact tables MUST NOT capture vertical wheel scrolling; wheel input over mods, resourcepacks, or shaderpacks tables MUST scroll the page.
+8. Admin mode on pack detail MUST expose Pack Settings and Open Pack Repo actions.
 
 ## See
 

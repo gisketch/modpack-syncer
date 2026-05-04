@@ -1,7 +1,10 @@
 use super::CommandError;
 use crate::{download, git, manifest, paths, prism};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+
+const NEOFORGE_VERSIONS_URL: &str =
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge";
 
 #[derive(Debug, Serialize)]
 pub struct PackSummary {
@@ -198,6 +201,58 @@ pub async fn load_manifest(pack_id: String) -> Result<manifest::Manifest, Comman
 }
 
 #[tauri::command]
+pub async fn list_neoforge_versions(pack_id: String) -> Result<Vec<String>, CommandError> {
+    let path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+    let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&path))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))??;
+    if manifest.pack.loader != manifest::Loader::NeoForge {
+        return Err(CommandError::Other(
+            "NeoForge versions are only available for NeoForge packs".to_string(),
+        ));
+    }
+    let prefix = neoforge_version_prefix(&manifest.pack.mc_version)?;
+    let response = reqwest::get(NEOFORGE_VERSIONS_URL)
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .error_for_status()
+        .map_err(|error| CommandError::Other(error.to_string()))?
+        .json::<NeoForgeVersionsResponse>()
+        .await
+        .map_err(|error| CommandError::Other(error.to_string()))?;
+    let mut versions = response
+        .versions
+        .into_iter()
+        .filter(|version| version.starts_with(&prefix))
+        .collect::<Vec<_>>();
+    versions.reverse();
+    Ok(versions)
+}
+
+#[tauri::command]
+pub async fn update_pack_loader_version(
+    pack_id: String,
+    loader_version: String,
+) -> Result<manifest::Manifest, CommandError> {
+    let loader_version = required_value(loader_version, "Loader version")?;
+    let manifest_path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
+    tokio::task::spawn_blocking(move || -> Result<manifest::Manifest, CommandError> {
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        if manifest.pack.loader != manifest::Loader::NeoForge {
+            return Err(CommandError::Other(
+                "only NeoForge loader version editing is supported".to_string(),
+            ));
+        }
+        manifest.pack.loader_version = loader_version;
+        let bytes = serde_json::to_vec_pretty(&manifest).map_err(anyhow::Error::from)?;
+        std::fs::write(&manifest_path, bytes)?;
+        Ok(manifest)
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+#[tauri::command]
 pub async fn fetch_mods(pack_id: String) -> Result<download::FetchReport, CommandError> {
     let path = paths::packs_dir()?.join(&pack_id).join("manifest.json");
     let manifest = tokio::task::spawn_blocking(move || manifest::load_from_path(&path))
@@ -212,6 +267,25 @@ pub async fn fetch_mods(pack_id: String) -> Result<download::FetchReport, Comman
     )
     .await;
     Ok(report)
+}
+
+#[derive(Debug, Deserialize)]
+struct NeoForgeVersionsResponse {
+    versions: Vec<String>,
+}
+
+fn neoforge_version_prefix(mc_version: &str) -> Result<String, CommandError> {
+    let parts = mc_version.split('.').collect::<Vec<_>>();
+    if parts.first() != Some(&"1") || parts.len() < 2 || parts[1].is_empty() {
+        return Err(CommandError::Other(format!(
+            "unsupported Minecraft version for NeoForge: {mc_version}"
+        )));
+    }
+    if parts.len() >= 3 && !parts[2].is_empty() && parts[2] != "0" {
+        Ok(format!("{}.{}.", parts[1], parts[2]))
+    } else {
+        Ok(format!("{}.", parts[1]))
+    }
 }
 
 fn required_value(value: String, label: &str) -> Result<String, CommandError> {
@@ -255,5 +329,16 @@ fn starter_manifest(
         mods: Vec::new(),
         resourcepacks: Vec::new(),
         shaderpacks: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn neoforge_prefix_uses_minecraft_minor_and_patch() {
+        assert_eq!(neoforge_version_prefix("1.21.1").unwrap(), "21.1.");
+        assert_eq!(neoforge_version_prefix("1.21").unwrap(), "21.");
     }
 }

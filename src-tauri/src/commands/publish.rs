@@ -458,6 +458,101 @@ pub async fn apply_instance_publish(
     .map_err(|e| CommandError::Other(e.to_string()))?
 }
 
+#[tauri::command]
+pub async fn apply_local_staged_artifacts(
+    pack_id: String,
+    instance_name: Option<String>,
+) -> Result<PublishApplyReport, CommandError> {
+    let pack_dir = paths::packs_dir()?.join(&pack_id);
+    if git::has_origin(&pack_dir)? {
+        return Err(CommandError::Other(
+            "local staged artifacts can only be applied to local packs".to_string(),
+        ));
+    }
+    let manifest_path = pack_dir.join("manifest.json");
+    let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
+    let instance_dir = prism::instance_minecraft_dir(&instance_name)
+        .ok_or_else(|| CommandError::Prism("Prism instance not found".to_string()))?;
+
+    tokio::task::spawn_blocking(move || -> Result<PublishApplyReport, CommandError> {
+        let mut manifest = manifest::load_from_path(&manifest_path)?;
+        let promoted_mods =
+            promote_unpublished_modrinth_artifacts(&instance_dir.join("mods"), &mut manifest.mods)?;
+        let promoted_resourcepacks = promote_unpublished_modrinth_artifacts(
+            &instance_dir.join("resourcepacks"),
+            &mut manifest.resourcepacks,
+        )?;
+        let promoted_shaderpacks = promote_unpublished_modrinth_artifacts(
+            &instance_dir.join("shaderpacks"),
+            &mut manifest.shaderpacks,
+        )?;
+        let promoted = promoted_mods + promoted_resourcepacks + promoted_shaderpacks;
+        if promoted > 0 {
+            write_manifest(&manifest_path, &manifest)?;
+        }
+        Ok(PublishApplyReport {
+            manifest_entries_written: promoted,
+            repo_files_written: 0,
+            repo_files_removed: 0,
+        })
+    })
+    .await
+    .map_err(|e| CommandError::Other(e.to_string()))?
+}
+
+fn promote_unpublished_modrinth_artifacts(
+    artifact_dir: &std::path::Path,
+    entries: &mut Vec<manifest::Entry>,
+) -> Result<usize, CommandError> {
+    let state = modrinth::read_unpublished_modrinth_state(artifact_dir)?;
+    if state.is_empty() {
+        return Ok(0);
+    }
+    let mut promoted = 0usize;
+    for staged in state {
+        let artifact_path = artifact_dir.join(&staged.filename);
+        if !artifact_path.exists() {
+            return Err(CommandError::Other(format!(
+                "staged artifact missing: {}",
+                artifact_path.display()
+            )));
+        }
+        let actual_sha1 = cache::file_sha1_hex(&artifact_path)?;
+        if !actual_sha1.eq_ignore_ascii_case(&staged.sha1) {
+            return Err(CommandError::Other(format!(
+                "staged artifact SHA mismatch: {}",
+                staged.filename
+            )));
+        }
+        entries.retain(|entry| {
+            entry.filename != staged.filename
+                && entry.project_id.as_deref() != Some(staged.project_id.as_str())
+                && entry.id != staged.slug
+        });
+        entries.push(manifest::Entry {
+            id: staged.slug,
+            source: manifest::Source::Modrinth,
+            project_id: Some(staged.project_id),
+            version_id: Some(staged.version_id),
+            repo_path: None,
+            filename: staged.filename,
+            sha1: staged.sha1,
+            sha512: staged.sha512,
+            size: staged.size,
+            url: staged.url,
+            optional: false,
+            side: staged.side,
+        });
+        promoted += 1;
+    }
+    entries.sort_by(|left, right| left.filename.cmp(&right.filename));
+    let state_path = artifact_dir.join(".modsync-unpublished-modrinth.json");
+    if state_path.exists() {
+        std::fs::remove_file(state_path)?;
+    }
+    Ok(promoted)
+}
+
 fn scan_artifact_dir(
     category: PublishCategory,
     instance_dir: &std::path::Path,
@@ -838,14 +933,9 @@ fn apply_artifact_dir(
                 if entry.source != manifest::Source::Repo
                     || entry.repo_path.as_deref() == Some(desired_repo_path.as_str())
         );
-        let needs_repo_copy = if unpublished.is_some()
+        let needs_repo_copy = !(unpublished.is_some()
             || preserve_existing_same_name
-            || (existing_matches_source && existing_repo_path_is_canonical)
-        {
-            false
-        } else {
-            true
-        };
+            || (existing_matches_source && existing_repo_path_is_canonical));
         let mut entry = if let Some(unpublished) = unpublished {
             manifest::Entry {
                 id: unpublished.slug.clone(),

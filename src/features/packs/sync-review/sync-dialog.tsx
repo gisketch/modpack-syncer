@@ -27,6 +27,7 @@ type SyncDialogProps = {
   progress: SyncProgressEvent | null;
   progressView: { icon: string | null; title: string | null; filename: string | null } | null;
   report: SyncInstanceReport | null;
+  actionLabel?: string;
 };
 
 export function SyncDialog({
@@ -36,6 +37,7 @@ export function SyncDialog({
   progress,
   progressView,
   report,
+  actionLabel = "SYNC",
 }: SyncDialogProps) {
   const total = Math.max(progress?.total ?? 0, 1);
   const completed = Math.min(progress?.completed ?? 0, total);
@@ -45,7 +47,9 @@ export function SyncDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="flex h-[min(92vh,48rem)] max-h-[92vh] flex-col overflow-hidden max-w-[96vw] sm:max-w-[72rem] xl:max-w-[80rem]">
         <DialogHeader>
-          <DialogTitle>{pending ? "SYNCING" : report ? "SYNC OK" : "SYNC"}</DialogTitle>
+          <DialogTitle>
+            {pending ? `${actionLabel} RUNNING` : report ? `${actionLabel} OK` : actionLabel}
+          </DialogTitle>
           <DialogDescription>
             {pending
               ? syncProgressDescription(progress)
