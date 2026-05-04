@@ -151,7 +151,7 @@ export function HomeRoute() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)]">
+          <div className="flex flex-col gap-4">
             <form
               className="flex gap-2"
               onSubmit={(e) => {
