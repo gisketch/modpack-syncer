@@ -89,12 +89,43 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
+      - name: Prepare macOS signing environment
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$APPLE_SIGNING_IDENTITY_SECRET" ]]; then
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY_SECRET" >> "$GITHUB_ENV"
+          elif [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "No Apple Developer ID certificate configured; using ad-hoc macOS signing."
+          fi
+
+          if [[ -n "$APPLE_API_KEY_ID" && -n "$APPLE_API_PRIVATE_KEY" ]]; then
+            key_dir="$RUNNER_TEMP/private_keys"
+            key_path="$key_dir/AuthKey_${APPLE_API_KEY_ID}.p8"
+            mkdir -p "$key_dir"
+            printf '%s' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+            chmod 600 "$key_path"
+            echo "APPLE_API_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          else
+            echo "Apple notarization API key not configured; notarization will be skipped."
+          fi
+
       - name: Build app + publish release assets
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         with:
           projectPath: .
           tauriScript: bun tauri

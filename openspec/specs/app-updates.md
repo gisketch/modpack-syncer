@@ -12,6 +12,7 @@ In-app application update checks and installs.
 6. When an install starts, the UI MUST stream download progress and transition to an installing state once the payload has finished downloading.
 7. Successful install handoff MUST invalidate cached update state so a subsequent check reflects the new version.
 8. If the updater endpoint is reachable but lacks an artifact for the current non-Windows platform, the UI SHOULD present this as an unsupported installer platform rather than a dangerous app failure.
+9. macOS release artifacts SHOULD be ad-hoc signed when Apple Developer signing credentials are unavailable, and SHOULD be Developer ID signed and notarized when Apple credentials are configured, so downloaded Apple Silicon builds are not rejected as damaged by Gatekeeper.
 
 ## See
 
