@@ -248,37 +248,6 @@ pub fn has_origin(repo_dir: &Path) -> Result<bool, GitError> {
     Ok(origin_url(repo_dir)?.is_some())
 }
 
-pub fn commit_and_push_with_filter<F>(
-    repo_dir: &Path,
-    message: &str,
-    auth: PushAuth,
-    should_include_path: F,
-) -> Result<String, GitError>
-where
-    F: Fn(&Path) -> bool,
-{
-    commit_and_push_with_filter_progress(
-        repo_dir,
-        message,
-        auth,
-        should_include_path,
-        false,
-        |_| {},
-    )
-}
-
-pub fn amend_and_push_with_filter<F>(
-    repo_dir: &Path,
-    message: &str,
-    auth: PushAuth,
-    should_include_path: F,
-) -> Result<String, GitError>
-where
-    F: Fn(&Path) -> bool,
-{
-    commit_and_push_with_filter_progress(repo_dir, message, auth, should_include_path, true, |_| {})
-}
-
 pub fn commit_and_push_with_filter_progress<F, P>(
     repo_dir: &Path,
     message: &str,

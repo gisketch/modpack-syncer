@@ -145,7 +145,7 @@ pub async fn mod_statuses(
             out.push(ModStatus {
                 id: Some(entry.id.clone()),
                 filename: filename.to_string(),
-                size: Some(entry.size as u64),
+                size: Some(entry.size),
                 status,
             });
         }
@@ -154,7 +154,7 @@ pub async fn mod_statuses(
             out.push(ModStatus {
                 id: Some(entry.id),
                 filename: entry.filename,
-                size: Some(entry.size as u64),
+                size: Some(entry.size),
                 status: "deleted",
             });
         }

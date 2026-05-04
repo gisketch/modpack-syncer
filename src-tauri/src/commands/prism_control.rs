@@ -263,7 +263,7 @@ fn set_instance_artifact_disabled_blocking(
         ManifestArtifactCategory::Resourcepacks => &manifest.resourcepacks,
         ManifestArtifactCategory::Shaderpacks => &manifest.shaderpacks,
     };
-    let canonical_filename = enabled_artifact_filename(&filename).to_string();
+    let canonical_filename = enabled_artifact_filename(filename).to_string();
     let entry = entries
         .iter()
         .find(|entry| enabled_artifact_filename(&entry.filename) == canonical_filename)

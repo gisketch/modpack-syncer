@@ -158,7 +158,7 @@ pub struct SaveOptionPresetDraft {
 pub enum OptionPresetSelection {
     PackDefault,
     None,
-    Preset(OptionPreset),
+    Preset(Box<OptionPreset>),
 }
 
 #[tauri::command]
@@ -234,9 +234,9 @@ pub fn resolve_option_preset_selection(
             if !path.exists() {
                 return Ok(OptionPresetSelection::PackDefault);
             }
-            Ok(OptionPresetSelection::Preset(load_option_preset_path(
-                &path,
-            )?))
+            Ok(OptionPresetSelection::Preset(Box::new(
+                load_option_preset_path(&path)?,
+            )))
         }
     }
 }
@@ -583,7 +583,7 @@ fn load_option_preset(pack_dir: &Path, preset_id: &str) -> Result<OptionPreset, 
 }
 
 fn load_option_preset_path(path: &Path) -> Result<OptionPreset, CommandError> {
-    let bytes = std::fs::read(&path).map_err(|error| {
+    let bytes = std::fs::read(path).map_err(|error| {
         CommandError::Other(format!(
             "failed to read option preset {}: {error}",
             path.display()

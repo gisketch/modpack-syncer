@@ -282,7 +282,7 @@ fn select_managed_prism_asset(release: &GitHubRelease) -> Result<&GitHubReleaseA
         })
 }
 
-fn release_asset_sha256<'a>(asset: &'a GitHubReleaseAsset) -> Result<&'a str, PrismError> {
+fn release_asset_sha256(asset: &GitHubReleaseAsset) -> Result<&str, PrismError> {
     asset
         .digest
         .as_deref()
@@ -377,7 +377,7 @@ fn install_prism_release(
             )));
         }
 
-        return Ok(ManagedPrismInstall {
+        Ok(ManagedPrismInstall {
             binary_path: binary_path.display().to_string(),
             data_dir: install_dir.display().to_string(),
             install_dir: install_dir.display().to_string(),
@@ -385,7 +385,7 @@ fn install_prism_release(
             asset_name: asset_name.to_string(),
             release_url: release_url.to_string(),
             offline_supported: true,
-        });
+        })
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -405,13 +405,13 @@ fn managed_prism_target_label() -> String {
 fn managed_prism_asset_name(tag: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        return match std::env::consts::ARCH {
+        match std::env::consts::ARCH {
             "x86_64" => Some(format!("PrismLauncher-Linux-Qt6-Portable-{tag}.tar.gz")),
             "aarch64" => Some(format!(
                 "PrismLauncher-Linux-aarch64-Qt6-Portable-{tag}.tar.gz"
             )),
             _ => None,
-        };
+        }
     }
 
     #[cfg(not(target_os = "linux"))]

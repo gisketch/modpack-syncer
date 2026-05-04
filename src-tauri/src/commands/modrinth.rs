@@ -365,7 +365,7 @@ async fn install_modrinth_version(
         .map(parse_manifest_side)
         .transpose()?
         .unwrap_or(preview.suggested_side);
-    let previous_manifest_filename = manifest_entries_for_category(&manifest, category)
+    let previous_manifest_filename = manifest_entries_for_category(manifest, category)
         .iter()
         .find(|entry| {
             entry.project_id.as_deref() == Some(preview.project_id.as_str())
