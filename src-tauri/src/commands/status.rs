@@ -20,6 +20,7 @@ pub async fn mod_statuses(
 
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let manifest_path = pack_dir.join("manifest.json");
+    let is_local_pack = !git::has_origin(&pack_dir).unwrap_or(false);
     let manifest = tokio::task::spawn_blocking({
         let path = manifest_path.clone();
         move || manifest::load_from_path(&path)
@@ -98,39 +99,46 @@ pub async fn mod_statuses(
 
         for entry in &manifest.mods {
             let filename = enabled_artifact_filename(&entry.filename);
-            let status = match &mods_dir_opt {
-                None => "missing",
-                Some(dir) => {
-                    let path = dir.join(filename);
-                    let disabled_path = dir.join(format!("{filename}.disabled"));
-                    if path.exists() {
-                        match path.metadata() {
-                            Ok(meta) if meta.len() == entry.size => "synced",
-                            Ok(_) => "outdated",
-                            Err(_) => "missing",
-                        }
-                    } else if disabled_path.exists()
-                        && (entry.optional || is_disabled_artifact_filename(&entry.filename))
-                    {
-                        "disabled"
-                    } else if let Some(previous) = previous_by_id.get(entry.id.as_str()) {
-                        if dir
-                            .join(enabled_artifact_filename(&previous.filename))
-                            .exists()
+            let status = if is_local_pack {
+                "local"
+            } else {
+                match &mods_dir_opt {
+                    None => "missing",
+                    Some(dir) => {
+                        let path = dir.join(filename);
+                        let disabled_path = dir.join(format!("{filename}.disabled"));
+                        if path.exists() {
+                            match path.metadata() {
+                                Ok(meta) if meta.len() == entry.size => "synced",
+                                Ok(_) => "outdated",
+                                Err(_) => "missing",
+                            }
+                        } else if disabled_path.exists()
+                            && (entry.optional || is_disabled_artifact_filename(&entry.filename))
                         {
-                            "outdated"
+                            "disabled"
+                        } else if let Some(previous) = previous_by_id.get(entry.id.as_str()) {
+                            if dir
+                                .join(enabled_artifact_filename(&previous.filename))
+                                .exists()
+                            {
+                                "outdated"
+                            } else {
+                                "missing"
+                            }
+                        } else if let Some(previous) =
+                            previous_manifest_by_id.get(entry.id.as_str())
+                        {
+                            let previous_filename = enabled_artifact_filename(&previous.filename);
+                            if previous_filename != filename && dir.join(previous_filename).exists()
+                            {
+                                "outdated"
+                            } else {
+                                "missing"
+                            }
                         } else {
                             "missing"
                         }
-                    } else if let Some(previous) = previous_manifest_by_id.get(entry.id.as_str()) {
-                        let previous_filename = enabled_artifact_filename(&previous.filename);
-                        if previous_filename != filename && dir.join(previous_filename).exists() {
-                            "outdated"
-                        } else {
-                            "missing"
-                        }
-                    } else {
-                        "missing"
                     }
                 }
             };
@@ -173,7 +181,11 @@ pub async fn mod_statuses(
                     id: None,
                     filename,
                     size: path.metadata().ok().map(|meta| meta.len()),
-                    status: "unpublished",
+                    status: if is_local_pack {
+                        "local"
+                    } else {
+                        "unpublished"
+                    },
                 });
             }
         }

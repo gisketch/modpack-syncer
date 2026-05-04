@@ -21,6 +21,7 @@ How modsync resolves, provisions, configures, and launches Prism-compatible inst
 15. Launch setup MUST load memory profile cards, memory slider bounds, memory slider step, and default JVM arguments from pack-owned launch preset files instead of frontend constants.
 16. New local pack creation MUST generate `launch_presets/default.json` and companion quick memory profiles using the current baseline launch values so pack owners can edit them in git.
 17. If an existing pack has no launch preset files, the app MUST generate the default launch preset files in the pack working tree so the pack owner can publish them.
+18. Launch MUST self-heal missing Prism instance metadata by writing `instance.cfg`, `mmc-pack.json`, and standard Minecraft content directories before spawning Prism.
 
 ## UI Requirements
 

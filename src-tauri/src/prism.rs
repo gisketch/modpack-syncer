@@ -755,6 +755,29 @@ pub fn apply_launch_profile(
     write_instance_cfg(&inst_dir, instance_name, Some(launch_profile))
 }
 
+pub fn ensure_instance_metadata(
+    instance_name: &str,
+    manifest: &Manifest,
+    launch_profile: &LaunchProfile,
+) -> Result<(), PrismError> {
+    let data = data_dir().ok_or(PrismError::NotDetected)?;
+    let inst_dir = data.join("instances").join(instance_name);
+    let dot_mc = dot_minecraft(&inst_dir);
+    std::fs::create_dir_all(dot_mc.join("mods"))?;
+    std::fs::create_dir_all(dot_mc.join("resourcepacks"))?;
+    std::fs::create_dir_all(dot_mc.join("shaderpacks"))?;
+    write_instance_cfg(&inst_dir, instance_name, Some(launch_profile))?;
+    let mmc = serde_json::json!({
+        "components": build_components(manifest),
+        "formatVersion": 1
+    });
+    std::fs::write(
+        inst_dir.join("mmc-pack.json"),
+        serde_json::to_vec_pretty(&mmc).map_err(anyhow::Error::from)?,
+    )?;
+    Ok(())
+}
+
 fn build_components(m: &Manifest) -> Vec<serde_json::Value> {
     let mut out = vec![serde_json::json!({
         "uid": "net.minecraft",

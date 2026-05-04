@@ -379,6 +379,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       ? [...manifest.data.mods, ...manifest.data.resourcepacks, ...manifest.data.shaderpacks]
       : [],
   );
+  const isLocalPack = pack.data?.is_local ?? false;
   const statusMap = new Map<string, ModStatusValue>(
     (statuses.data ?? [])
       .filter((s) => s.status !== "deleted" && s.status !== "unpublished")
@@ -443,7 +444,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       statusMap.get(enabledArtifactFilename(entry.filename)) === "disabled" ||
       isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (statusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
+        : isLocalPack
+          ? "local"
+          : (statusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
     (entry) =>
       !(
         disabledArtifactSets.mods.has(enabledArtifactFilename(entry.filename)) ||
@@ -459,7 +462,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) ||
       isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
+        : isLocalPack
+          ? "local"
+          : (resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
     (entry) =>
       !disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) &&
       !isDisabledArtifactFilename(entry.filename),
@@ -472,7 +477,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) ||
       isDisabledArtifactFilename(entry.filename)
         ? "disabled"
-        : (shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
+        : isLocalPack
+          ? "local"
+          : (shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) ?? "missing"),
     (entry) =>
       !disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) &&
       !isDisabledArtifactFilename(entry.filename),
@@ -490,25 +497,30 @@ export function PackDetailRoute({ packId }: { packId: string }) {
         statusMap.get(enabledArtifactFilename(entry.filename)) === "disabled" ||
         isDisabledArtifactFilename(entry.filename)),
   ).length;
-  const launchRiskCount = (statuses.data ?? []).filter(
-    (s) =>
-      (s.status === "missing" || s.status === "outdated") &&
-      !disabledArtifactSets.mods.has(enabledArtifactFilename(s.filename)),
-  ).length;
-  const resourcepackRiskCount = manifest.data
-    ? manifest.data.resourcepacks.filter(
+  const launchRiskCount = isLocalPack
+    ? 0
+    : (statuses.data ?? []).filter(
+        (s) =>
+          (s.status === "missing" || s.status === "outdated") &&
+          !disabledArtifactSets.mods.has(enabledArtifactFilename(s.filename)),
+      ).length;
+  const resourcepackRiskCount =
+    isLocalPack || !manifest.data
+      ? 0
+      : manifest.data.resourcepacks.filter(
+          (entry) =>
+            !disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) &&
+            !isDisabledArtifactFilename(entry.filename) &&
+            resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
+        ).length;
+  const shaderpackRiskCount = isLocalPack
+    ? 0
+    : visibleShaderpacks.filter(
         (entry) =>
-          !disabledArtifactSets.resourcepacks.has(enabledArtifactFilename(entry.filename)) &&
+          !disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) &&
           !isDisabledArtifactFilename(entry.filename) &&
-          resourcepackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
-      ).length
-    : 0;
-  const shaderpackRiskCount = visibleShaderpacks.filter(
-    (entry) =>
-      !disabledArtifactSets.shaderpacks.has(enabledArtifactFilename(entry.filename)) &&
-      !isDisabledArtifactFilename(entry.filename) &&
-      shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
-  ).length;
+          shaderpackStatusMap.get(enabledArtifactFilename(entry.filename)) !== "synced",
+      ).length;
   const totalLaunchRiskCount = launchRiskCount + resourcepackRiskCount + shaderpackRiskCount;
   const stagedArtifactCount =
     unpublishedMods.length + unpublishedResourcepacks.length + unpublishedShaderpacks.length;
@@ -519,6 +531,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
   const syncedModCount = (statuses.data ?? []).filter((s) => s.status === "synced").length;
   const acceptedModCount = syncedModCount + disabledOptionalModCount;
   const hasLocalArtifactDrift =
+    !isLocalPack &&
     !!manifest.data &&
     !!statuses.data &&
     (launchRiskCount > 0 ||
@@ -528,7 +541,6 @@ export function PackDetailRoute({ packId }: { packId: string }) {
       stagedArtifactCount > 0 ||
       acceptedModCount !== manifest.data.mods.length);
   const latestPackCommit = pack.data?.head_sha ?? null;
-  const isLocalPack = pack.data?.is_local ?? false;
   const hasSyncedLatestCommit =
     isLocalPack || (!!latestPackCommit && lastSyncedCommit === latestPackCommit);
   const needsPackSync = !isLocalPack && !!latestPackCommit && !hasSyncedLatestCommit;
@@ -1560,7 +1572,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(m.projectId)?.title ?? null)
                             : null
                         }
-                        status={statusMap.get(filename) ?? null}
+                        status={isLocalPack ? "local" : (statusMap.get(filename) ?? null)}
                         loading={statuses.isLoading || statuses.isFetching}
                         disabled={disabled}
                         canDisable={m.optional || isDisabledArtifactFilename(m.filename)}
@@ -1697,7 +1709,9 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(entry.projectId)?.title ?? null)
                             : null
                         }
-                        status={resourcepackStatusMap.get(filename) ?? null}
+                        status={
+                          isLocalPack ? "local" : (resourcepackStatusMap.get(filename) ?? null)
+                        }
                         loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                         disabled={disabled}
                         canDisable
@@ -1843,7 +1857,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                             ? (modrinthMap.get(entry.projectId)?.title ?? null)
                             : null
                         }
-                        status={shaderpackStatusMap.get(filename) ?? null}
+                        status={isLocalPack ? "local" : (shaderpackStatusMap.get(filename) ?? null)}
                         loading={artifactPublishScan.isLoading || artifactPublishScan.isFetching}
                         disabled={disabled}
                         canDisable
@@ -2490,6 +2504,7 @@ function artifactSortName(
 function artifactStatusRank(status: ModStatusValue) {
   const order: Record<ModStatusValue, number> = {
     synced: 0,
+    local: 0,
     outdated: 1,
     missing: 2,
     disabled: 3,

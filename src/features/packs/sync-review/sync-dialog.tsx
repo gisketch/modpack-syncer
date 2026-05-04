@@ -173,6 +173,11 @@ const STATUS_META: Record<ModStatusValue, { label: string; dot: string; text: st
     dot: "bg-signal-live shadow-[0_0_6px_var(--color-signal-live)]",
     text: "text-signal-live",
   },
+  local: {
+    label: "LOCAL",
+    dot: "bg-brand-core shadow-[0_0_6px_var(--color-brand-core)]",
+    text: "text-brand-core",
+  },
   outdated: {
     label: "OUTDATED",
     dot: "bg-signal-warn shadow-[0_0_6px_var(--color-signal-warn)]",

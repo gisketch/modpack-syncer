@@ -185,10 +185,12 @@ pub async fn launch_pack(
 ) -> Result<(), CommandError> {
     let pack_dir = paths::packs_dir()?.join(&pack_id);
     let launch_profile = prism::load_launch_profile(&pack_id, &pack_dir)?;
+    let manifest = manifest::load_from_path(&pack_dir.join("manifest.json"))?;
     let instance_name = instance_name.unwrap_or_else(|| format!("modsync-{pack_id}"));
     let option_preset_selection =
         resolve_option_preset_selection(&pack_dir, option_preset_id.as_deref())?;
     tokio::task::spawn_blocking(move || -> Result<(), CommandError> {
+        prism::ensure_instance_metadata(&instance_name, &manifest, &launch_profile)?;
         apply_launch_option_preset(&pack_dir, &instance_name, &option_preset_selection)?;
         prism::apply_launch_profile(&instance_name, &launch_profile)?;
         prism::launch(&instance_name)?;

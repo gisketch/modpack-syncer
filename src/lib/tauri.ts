@@ -673,6 +673,7 @@ export const tauri = {
 
 export type ModStatusValue =
   | "synced"
+  | "local"
   | "outdated"
   | "missing"
   | "deleted"

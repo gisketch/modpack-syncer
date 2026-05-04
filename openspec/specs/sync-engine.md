@@ -45,6 +45,7 @@ Core pipeline that reconciles a local Prism instance's `.minecraft/` folder with
 39. Pack creation MAY initialize a local-only pack repository with a starter `manifest.json`, an initial commit, and no `origin` remote.
 40. Pack fetch and action-triggered refresh MUST treat local-only pack repositories with no `origin` remote as already current instead of failing.
 41. Local-only packs MUST NOT be forced through fetch, sync, or launch-update gates. Restore-from-source MUST preserve the working manifest for local-only packs instead of resetting it from `HEAD`.
+42. Local-only pack artifact status MUST render pack artifacts as local state and MUST NOT produce missing/outdated launch risk counts.
 
 ## See
 
