@@ -413,7 +413,12 @@ fn install_prism_release(
         install_macos_prism_release(release_tag, release_url, asset_name, bytes, &install_dir)
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    {
+        install_windows_prism_release(release_tag, release_url, asset_name, bytes, &install_dir)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         let _ = release_url;
         let _ = asset_name;
@@ -439,8 +444,76 @@ fn managed_prism_asset_names_for(tag: &str, os: &str, arch: &str) -> Vec<String>
             format!("PrismLauncher-macOS-{tag}.dmg"),
             format!("PrismLauncher-macOS-{tag}.zip"),
         ],
+        ("windows", "x86_64") => vec![
+            format!("PrismLauncher-Windows-MSVC-Portable-{tag}.zip"),
+            format!("PrismLauncher-Windows-MinGW-w64-Portable-{tag}.zip"),
+            format!("PrismLauncher-Windows-MSVC-{tag}.zip"),
+            format!("PrismLauncher-Windows-MinGW-w64-{tag}.zip"),
+        ],
+        ("windows", "aarch64") => vec![
+            format!("PrismLauncher-Windows-MSVC-arm64-Portable-{tag}.zip"),
+            format!("PrismLauncher-Windows-MinGW-arm64-Portable-{tag}.zip"),
+            format!("PrismLauncher-Windows-MSVC-arm64-{tag}.zip"),
+            format!("PrismLauncher-Windows-MinGW-arm64-{tag}.zip"),
+        ],
         _ => Vec::new(),
     }
+}
+
+#[cfg(target_os = "windows")]
+fn install_windows_prism_release(
+    release_tag: &str,
+    release_url: &str,
+    asset_name: &str,
+    bytes: Vec<u8>,
+    install_dir: &Path,
+) -> Result<ManagedPrismInstall, PrismError> {
+    if !asset_name.ends_with(".zip") {
+        return Err(PrismError::Other(anyhow::anyhow!(
+            "unsupported Windows Prism asset format: {asset_name}"
+        )));
+    }
+
+    extract_zip_archive(&bytes, install_dir)?;
+    let binary_path = find_prism_launcher_binary(install_dir).ok_or_else(|| {
+        PrismError::Other(anyhow::anyhow!(
+            "managed launcher missing prismlauncher.exe in {}",
+            install_dir.display()
+        ))
+    })?;
+
+    Ok(ManagedPrismInstall {
+        binary_path: binary_path.display().to_string(),
+        data_dir: install_dir.display().to_string(),
+        install_dir: install_dir.display().to_string(),
+        version: release_tag.to_string(),
+        asset_name: asset_name.to_string(),
+        release_url: release_url.to_string(),
+        offline_supported: true,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn find_prism_launcher_binary(root: &Path) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if path.is_file() && name.eq_ignore_ascii_case("prismlauncher.exe") {
+                return Some(path);
+            }
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -951,6 +1024,42 @@ mod tests {
         assert_eq!(
             managed_prism_asset_names_for("11.0.2-1", "linux", "aarch64"),
             vec!["PrismLauncher-Linux-aarch64-Qt6-Portable-11.0.2-1.tar.gz".to_string()]
+        );
+    }
+
+    #[test]
+    fn windows_x86_64_prefers_portable_msvc_asset() {
+        assert_eq!(
+            managed_prism_asset_names_for("11.0.2-1", "windows", "x86_64"),
+            vec![
+                "PrismLauncher-Windows-MSVC-Portable-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MinGW-w64-Portable-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MSVC-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MinGW-w64-11.0.2-1.zip".to_string(),
+            ]
+        );
+
+        let release = release_with_assets(&[
+            "PrismLauncher-Windows-MinGW-w64-Portable-11.0.2-1.zip",
+            "PrismLauncher-Windows-MSVC-Portable-11.0.2-1.zip",
+        ]);
+        let asset = select_managed_prism_asset_for(&release, "windows", "x86_64").unwrap();
+        assert_eq!(
+            asset.name,
+            "PrismLauncher-Windows-MSVC-Portable-11.0.2-1.zip"
+        );
+    }
+
+    #[test]
+    fn windows_aarch64_prefers_portable_msvc_asset() {
+        assert_eq!(
+            managed_prism_asset_names_for("11.0.2-1", "windows", "aarch64"),
+            vec![
+                "PrismLauncher-Windows-MSVC-arm64-Portable-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MinGW-arm64-Portable-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MSVC-arm64-11.0.2-1.zip".to_string(),
+                "PrismLauncher-Windows-MinGW-arm64-11.0.2-1.zip".to_string(),
+            ]
         );
     }
 }
