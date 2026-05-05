@@ -52,6 +52,7 @@ pub fn run() {
             commands::prism_control::get_launch_profile,
             commands::prism_control::get_launch_preset_config,
             commands::prism_control::has_managed_java,
+            commands::prism_control::get_managed_java_runtime,
             commands::prism_control::clear_onboarding_settings,
             commands::prism_control::set_launch_profile,
             commands::prism_control::install_adoptium_java,

@@ -107,6 +107,16 @@ pub async fn has_managed_java(major: u32) -> Result<bool, CommandError> {
 }
 
 #[tauri::command]
+pub async fn get_managed_java_runtime(
+    major: u32,
+) -> Result<Option<InstalledJavaRuntime>, CommandError> {
+    tokio::task::spawn_blocking(move || prism::managed_java_runtime(major))
+        .await
+        .map_err(|e| CommandError::Other(e.to_string()))?
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn clear_onboarding_settings(major: u32) -> Result<prism::PrismSettings, CommandError> {
     tokio::task::spawn_blocking(move || prism::clear_onboarding_settings(major))
         .await

@@ -366,6 +366,14 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     enabled: !!manifest.data,
     retry: false,
   });
+  const recommendedJavaMajor =
+    getJavaInstallChoices(manifest.data?.pack.mcVersion, manifest.data?.pack.loader).find(
+      (choice) => choice.recommended,
+    )?.major ?? 21;
+  const managedJavaRuntime = useQuery({
+    queryKey: ["managed-java-runtime", recommendedJavaMajor],
+    queryFn: () => tauri.getManagedJavaRuntime(recommendedJavaMajor),
+  });
   const setOptionsSyncIgnored = useMutation({
     mutationFn: ({ key, ignored }: { key: string; ignored: boolean }) =>
       tauri.setOptionsSyncIgnored(packId, key, ignored),
@@ -591,6 +599,18 @@ export function PackDetailRoute({ packId }: { packId: string }) {
     if (!launchProfile.data) return;
     setLaunchProfileDraft(launchProfile.data);
   }, [launchProfile.data]);
+
+  useEffect(() => {
+    const javaPath = managedJavaRuntime.data?.javaPath;
+    if (!javaPath) return;
+    setLaunchProfileDraft((current) => {
+      if (!current || current.autoJava || current.javaPath?.trim()) return current;
+      return {
+        ...current,
+        javaPath,
+      };
+    });
+  }, [managedJavaRuntime.data?.javaPath]);
 
   useEffect(() => {
     if (!javaChoices.length) return;
@@ -1109,6 +1129,17 @@ export function PackDetailRoute({ packId }: { packId: string }) {
           }
         : current,
     );
+  }
+
+  function handleLaunchProfileDraftChange(profile: LaunchProfile) {
+    const javaPath =
+      !profile.autoJava && !profile.javaPath?.trim() && managedJavaRuntime.data?.javaPath
+        ? managedJavaRuntime.data.javaPath
+        : profile.javaPath;
+    setLaunchProfileDraft({
+      ...profile,
+      javaPath,
+    });
   }
 
   function handleOpenJavaInstall() {
@@ -2148,7 +2179,7 @@ export function PackDetailRoute({ packId }: { packId: string }) {
                 memoryStepMb={launchPresetConfig.data.memoryStepMb}
                 packSynced={!needsSync}
                 launchRiskCount={totalLaunchRiskCount}
-                onChange={setLaunchProfileDraft}
+                onChange={handleLaunchProfileDraftChange}
                 onBrowseJavaPath={() => void handleBrowseJavaPath()}
                 onUsePrismAutoJava={handleUsePrismAutoJava}
                 onOpenJavaInstall={handleOpenJavaInstall}

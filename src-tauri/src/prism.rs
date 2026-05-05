@@ -363,6 +363,10 @@ fn default_launch_presets() -> Vec<LaunchPreset> {
 }
 
 pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
+    Ok(managed_java_runtime(major)?.is_some())
+}
+
+pub fn managed_java_runtime(major: u32) -> Result<Option<InstalledJavaRuntime>, PrismError> {
     let prefix = format!("temurin-{major}-");
     for entry in std::fs::read_dir(paths::managed_java_runtimes_dir()?)? {
         let entry = entry?;
@@ -373,11 +377,28 @@ pub fn has_managed_java(major: u32) -> Result<bool, PrismError> {
         if !path.is_dir() || !name.starts_with(&prefix) {
             continue;
         }
-        if install::find_java_binary(&path).is_some() {
-            return Ok(true);
-        }
+        let Some(java_path) = install::find_java_binary(&path) else {
+            continue;
+        };
+        let image_type = name
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.split('-').next())
+            .unwrap_or("jre")
+            .to_string();
+        let release_name = name
+            .strip_prefix(&format!("{prefix}{image_type}-"))
+            .unwrap_or(name)
+            .to_string();
+        return Ok(Some(InstalledJavaRuntime {
+            java_path: java_path.display().to_string(),
+            install_dir: path.display().to_string(),
+            display_name: format!("Temurin {major} {}", image_type.to_ascii_uppercase()),
+            major,
+            image_type,
+            release_name,
+        }));
     }
-    Ok(false)
+    Ok(None)
 }
 
 pub fn clear_onboarding_settings(major: u32) -> Result<PrismSettings, PrismError> {

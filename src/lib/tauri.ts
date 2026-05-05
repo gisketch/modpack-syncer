@@ -517,6 +517,8 @@ export const tauri = {
   getLaunchPresetConfig: (packId: string) =>
     invoke<LaunchPresetConfig>("get_launch_preset_config", { packId }),
   hasManagedJava: (major: number) => invoke<boolean>("has_managed_java", { major }),
+  getManagedJavaRuntime: (major: number) =>
+    invoke<InstalledJavaRuntime | null>("get_managed_java_runtime", { major }),
   clearOnboardingSettings: (major: number) =>
     invoke<PrismSettings>("clear_onboarding_settings", { major }),
   setLaunchProfile: (packId: string, profile: LaunchProfile) =>
